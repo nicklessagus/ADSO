@@ -363,7 +363,7 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 
 | Decisión | Elección | Alternativa descartada | Razón |
 |---|---|---|---|
-| Sync del vault | Syncthing (host) | Obsidian Sync, GitHub | Ya configurado, tiempo real, P2P |
+| Sync del vault | **Pendiente de decisión** — ver opciones abajo | — | — |
 | Interfaz Obsidian | Escritura directa al filesystem | Local REST API | REST API requiere Obsidian corriendo en RPi4 (inviable con Electron) |
 | LLM primario | Gemini API | Claude API | Free tier disponible para prototipo |
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
@@ -373,3 +373,18 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 | Conflictos Syncthing | Notificar, no resolver | Auto-resolución | Riesgo de pérdida de datos; el usuario decide |
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
+
+### Decisión pendiente: sincronización del vault
+
+Hay tres opciones en evaluación. La elección impacta el manejo de conflictos, si se necesita Syncthing, y el rol de Obsidian en los clientes.
+
+| Opción | Escritura | Lectura en clientes | Conflictos | Pros | Contras |
+|---|---|---|---|---|---|
+| **A. Syncthing bidireccional** | ADSO + Obsidian en cualquier dispositivo | Syncthing (tiempo real) | Posibles — necesita detección y notificación | Edición desde cualquier lado, ya configurado | Riesgo de conflictos, complejidad |
+| **B. Syncthing read-only en clientes** | Solo ADSO | Syncthing read-only (tiempo real) | Imposibles — un solo escritor | Cero conflictos, Obsidian solo para visualizar | No se puede editar desde Obsidian directamente |
+| **C. Git como sync** | Solo ADSO (push) | git pull desde clientes | Imposibles — un solo escritor | Backup y sync unificados, sin Syncthing | No es tiempo real, requiere pull manual o cron |
+
+Notas:
+- Las opciones B y C eliminan la necesidad de la detección de conflictos de Syncthing
+- La opción C hace redundante Syncthing por completo — el repo git privado sirve como backup y sync
+- En todas las opciones, ADSO es el escritor principal; la diferencia es si los clientes también pueden escribir
