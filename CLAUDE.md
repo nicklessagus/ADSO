@@ -169,8 +169,23 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 | 5 | Imágenes y capturas |
 | 6 | Consultas RAG en lenguaje natural |
 | 7 | Integraciones externas (arXiv, NASA ADS) |
+| 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
 
 Implementar en orden. No saltar fases.
+
+---
+
+## Ideas futuras (post Fase 8)
+
+Capacidades exploratorias que dependen de tener un vault maduro con suficientes notas y embeddings.
+
+- **Clustering de temas emergentes:** UMAP + HDBSCAN sobre embeddings de ChromaDB, etiquetado por LLM. Viable en RPi4.
+- **Transferencia de métodos entre proyectos:** cruzar `methods` de papers entre proyectos para detectar técnicas aplicables que no se están usando.
+- **Red de citas interna:** campo `cites` en papers, análisis tipo PageRank para identificar papers fundacionales y gaps de lectura.
+- **Análisis temporal:** evolución de temas y métodos en el vault a lo largo del tiempo. Detección de frentes de investigación activos.
+- **Detección de conocimiento obsoleto:** trackear `last_retrieved` por nota — las que nunca aparecen en resultados RAG ni tienen links son candidatas a revisión.
+- **Generación de Canvas:** crear archivos `.canvas` (JSON) automáticamente desde clusters de embeddings, posicionando notas similares cerca.
+- **Bibliografía anotada on-demand:** generar un documento consolidado con papers de un proyecto, agrupados por método o tema, con `relevance`, `contribution` y `conclusions`.
 
 ---
 

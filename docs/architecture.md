@@ -208,6 +208,7 @@ services:
 | 5 | Imágenes y capturas |
 | 6 | Consultas RAG en lenguaje natural |
 | 7 | Integraciones externas (arXiv, NASA ADS, Letterboxd) |
+| 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
 
 ---
 
@@ -266,6 +267,67 @@ Comportamiento configurable:
 - `LINK_SIMILARITY_THRESHOLD` — umbral mínimo de similitud para sugerir un link
 - `VAULT_EXCLUDE_DIRS` — carpetas excluidas del índice
 - Campo `private: true` en frontmatter — excluye una nota del índice completamente
+
+---
+
+## Fase 8 — Análisis del vault
+
+Funcionalidades que el bot genera activamente a partir de los datos ya indexados. Requiere Fase 6 (RAG) como base.
+
+### Reporte semanal automático
+
+ADSO envía por Telegram un resumen periódico:
+- Notas creadas (desglose por tipo)
+- Proyecto más activo
+- Métodos nuevos encontrados (aparecen en papers pero no estaban antes)
+- Papers en cola por prioridad
+- Ideas en `status: raw` más de 60 días
+- Sugerencia de paper a leer basada en similitud con actividad reciente
+
+### Scoring compuesto de papers
+
+Calcula una puntuación para cada paper no leído combinando:
+- **Similitud semántica** con el proyecto activo (embeddings de ChromaDB)
+- **Overlap de métodos** con el vault existente (cuántos `methods` del paper ya aparecen)
+- **Recencia** (papers más nuevos pesan más)
+
+Genera dos rankings: "refuerza lo que ya sabés" vs "introduce algo nuevo".
+
+### Detección de gaps
+
+- **Temas sin acción:** clusters de notas sin tareas ni notas de proyecto asociadas
+- **Métodos no explorados:** técnicas que aparecen en papers pero no tienen notas de proyecto
+- **Ideas estancadas:** `status: raw` más de N días → recordatorio periódico
+- **Tareas huérfanas:** proyectos con tareas pendientes pero sin notas de respaldo
+
+---
+
+## Ideas futuras (post Fase 8)
+
+Capacidades exploratorias que dependen de un vault maduro con suficientes notas y embeddings. No están planificadas — son direcciones posibles.
+
+| Idea | Descripción | Impacto RPi4 |
+|---|---|---|
+| Clustering de temas emergentes | UMAP + HDBSCAN sobre embeddings, etiquetado por LLM | Bajo (UMAP/HDBSCAN son livianos) |
+| Transferencia de métodos entre proyectos | Cruzar `methods` de papers entre proyectos para detectar técnicas aplicables no usadas | Mínimo |
+| Red de citas interna | Campo `cites` en papers, análisis PageRank para encontrar papers fundacionales y gaps de lectura | Bajo |
+| Análisis temporal | Evolución de temas y métodos en el vault. Detección de frentes de investigación activos | Mínimo |
+| Detección de conocimiento obsoleto | Trackear `last_retrieved` por nota — notas que nunca aparecen en RAG ni tienen links candidatas a revisión | Mínimo |
+| Generación automática de Canvas | Crear `.canvas` (JSON) desde clusters, posicionando notas similares cerca | Mínimo |
+| Bibliografía anotada on-demand | Documento consolidado con papers de un proyecto, agrupados por método/tema | Mínimo |
+
+### Plugins de Obsidian recomendados
+
+Configuración del lado del cliente, no requiere desarrollo en el bot:
+
+| Plugin | Qué aporta al vault de ADSO |
+|---|---|
+| **Dataview** | Queries avanzadas sobre el frontmatter (esencial) |
+| **Bases** (core) | Vistas tipo spreadsheet, edición inline de propiedades |
+| **Graph Analysis** | Co-citaciones, detección de comunidades, predicción de links |
+| **Strange New Worlds** | Contador de referencias inline — identifica conceptos hub |
+| **Charts View** | Gráficos temporales de actividad, métodos, temas |
+| **Canvas** | Mapas visuales de literatura y planificación de investigación |
 
 ---
 
