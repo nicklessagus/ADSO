@@ -66,13 +66,14 @@ response_schema = {
 
 ### 4. Truncado de contenido externo
 
-El contenido proveniente de URLs o archivos se trunca antes de enviarse al LLM:
+El contenido externo se trunca antes de enviarse al LLM. Los límites varían según el tipo de contenido:
 
 ```python
-MAX_EXTERNAL_CONTENT_TOKENS = 8000  # configurable
+MAX_WEB_CONTENT_TOKENS = 8000       # links web genéricos
+MAX_PAPER_CONTENT_TOKENS = 128000   # PDFs académicos — necesitan abstract, métodos y conclusiones
 ```
 
-Esto previene ataques que ocultan instrucciones maliciosas al final de documentos largos.
+El truncado más agresivo para contenido web previene ataques que ocultan instrucciones maliciosas al final de documentos largos. Los PDFs académicos usan un límite más alto porque ADSO necesita leer el documento completo para extraer campos estructurados (contribution, methods, conclusions). Gemini soporta ventanas de contexto largas, lo que hace viable este límite.
 
 ### 5. Gestión de secretos
 

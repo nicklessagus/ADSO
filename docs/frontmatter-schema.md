@@ -14,7 +14,7 @@ date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
 type: project-note                     # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # Siempre "telegram"
-status: active                         # active | archived
+status: active                         # active | archived | pending-classification (modo degradado)
 ---
 ```
 

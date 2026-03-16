@@ -149,6 +149,16 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 - Syncthing corre en el host de la RPi4 y sincroniza el vault a los dispositivos del usuario
 - El vault es Markdown plano — legible y editable sin Obsidian si fuera necesario
 
+### Conflictos de Syncthing
+
+Syncthing genera archivos `.sync-conflict-*` cuando un archivo se modifica simultáneamente en dos dispositivos (ej: el usuario edita en Obsidian mientras ADSO actualiza la misma nota).
+
+Política:
+- ADSO **nunca resuelve conflictos automáticamente** — solo notifica al usuario por Telegram
+- Un cron periódico escanea el vault buscando archivos `.sync-conflict-*`
+- Si encuentra alguno, envía un mensaje: "Hay N conflictos de sync pendientes: [lista de archivos]"
+- El usuario resuelve manualmente y borra el archivo de conflicto
+
 ---
 
 ## Referencias

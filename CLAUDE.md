@@ -206,4 +206,14 @@ GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks)
 LINK_SIMILARITY_THRESHOLD  # default: 0.82
 VAULT_PATH                 # default: /vault
 CONTEXT_FILE               # default: /app/data/context.json
+MAX_WEB_CONTENT_TOKENS     # default: 8000
+MAX_PAPER_CONTENT_TOKENS   # default: 128000
 ```
+
+---
+
+## Decisiones clave
+
+- **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
+- **Google Tasks:** sincronización unidireccional (ADSO → Tasks). El vault es la fuente de verdad.
+- **Conflictos Syncthing:** ADSO no resuelve, solo notifica. El usuario resuelve manualmente.
