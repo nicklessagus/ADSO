@@ -153,13 +153,12 @@ Si el proyecto o sección no existe, el bot lo indica explícitamente y pide aut
 
 No se permite edición directa sin confirmación — el mismo principio que la creación.
 
-### Sincronización con Google Tasks
+### Sincronización con Google Tasks — pendiente de decisión
 
-La sincronización es **unidireccional: ADSO → Google Tasks**. ADSO crea y actualiza tareas en Google Tasks pero no lee cambios hechos desde Google Tasks.
-
-Razón: la sincronización bidireccional introduce complejidad desproporcionada (conflictos, polling, webhooks) para un bot personal. El vault de Obsidian es la fuente de verdad para tareas. Google Tasks es una vista de conveniencia.
-
-Si una tarea se completa desde Google Tasks, el usuario le dice al bot que la marque como `done` — el bot actualiza el vault y Google Tasks.
+| Opción | Descripción | Pros | Contras |
+|---|---|---|---|
+| **A. Unidireccional (ADSO → Tasks)** | ADSO crea/actualiza tareas en Google Tasks. Cambios desde Tasks no se leen. | Simple, sin conflictos, vault es fuente de verdad | Si completás una tarea desde Tasks, hay que decirle al bot |
+| **B. Bidireccional** | ADSO sincroniza en ambas direcciones. Cambios en Tasks se reflejan en el vault. | Completar tareas desde cualquier lado | Polling, conflictos, complejidad |
 
 ---
 
@@ -374,7 +373,7 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
 | Vector DB | ChromaDB embebido | Pinecone, Weaviate | Sin servidor externo, corre en RPi4 |
 | Calendar | Google Calendar API | Registrar en Obsidian | Separación de responsabilidades: tiempo → Calendar, conocimiento → vault |
-| Google Tasks | Unidireccional (ADSO → Tasks) | Bidireccional | Complejidad desproporcionada (conflictos, polling, webhooks) para bot personal |
+| Google Tasks | **Pendiente de decisión** — ver opciones arriba | — | — |
 | Conflictos Syncthing | Notificar, no resolver | Auto-resolución | Riesgo de pérdida de datos; el usuario decide |
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
