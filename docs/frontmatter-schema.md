@@ -59,6 +59,12 @@ relevance: "Para qué sirve este paper" # provisto por el usuario o inferido por
 context: "Contexto adicional de uso"   # opcional, ej: "comparar con modelo actual"
 priority: medium                        # low | medium | high — inferido o explícito
 tags: [cosmologia, machine-learning]
+# Extraídos por Gemini del PDF completo:
+contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
+methods: ["transformer", "contrastive-learning"]   # métodos/técnicas usadas
+dataset: ["ImageNet", "COCO"]                      # opcional
+conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
+related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
 

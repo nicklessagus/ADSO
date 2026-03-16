@@ -1,4 +1,4 @@
-# Adso
+# ADSO — Autonomous Data Structuring Orchestrator
 
 Bot orquestador de Telegram que actúa como escriba, observador y clasificador del conocimiento: captura información no estructurada, la clasifica mediante LLMs, la persiste como notas Markdown en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
 
@@ -8,7 +8,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Procesa** el contenido con Gemini API (y opcionalmente Claude)
 - **Transcribe** audios localmente con Whisper
 - **Genera** archivos Markdown con Frontmatter YAML clasificados
-- **Escribe** las notas al vault de Obsidian via Local REST API
+- **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
 - **Consulta** la base de conocimiento via RAG (Fase 2)
 
 ## Stack
@@ -40,5 +40,5 @@ En fase de diseño y documentación. Ver fases de desarrollo en [`docs/architect
 - Docker y docker-compose
 - Token de bot de Telegram
 - API key de Gemini (Google AI Studio — free tier)
-- Obsidian con plugin Local REST API instalado
+- Vault de Obsidian accesible como directorio local (montado via Docker)
 - Syncthing configurado

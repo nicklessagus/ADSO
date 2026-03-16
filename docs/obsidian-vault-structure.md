@@ -1,4 +1,4 @@
-# Estructura del Vault de Obsidian para Adso
+# Estructura del Vault de Obsidian para ADSO
 
 ## Metodología: PARA adaptado
 

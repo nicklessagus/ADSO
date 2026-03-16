@@ -2,7 +2,7 @@
 
 ## Modelo de amenaza
 
-Adso es un bot de uso estrictamente personal. El modelo de amenaza difiere de un servicio público.
+ADSO es un bot de uso estrictamente personal. El modelo de amenaza difiere de un servicio público.
 
 ### Fuera de scope
 - Acceso de usuarios no autorizados externos (mitigado por autenticación)

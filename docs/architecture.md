@@ -1,8 +1,8 @@
-# Arquitectura del Sistema Adso
+# Arquitectura del Sistema ADSO
 
 ## Visión general
 
-Adso es un bot orquestador de Telegram que captura información no estructurada, la procesa con LLMs, la persiste como notas Markdown estructuradas en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
+ADSO (*Autonomous Data Structuring Orchestrator*) es un bot orquestador de Telegram que captura información no estructurada, la procesa con LLMs, la persiste como notas Markdown estructuradas en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
 
 ---
 
@@ -65,7 +65,7 @@ Google Calendar API   (eventos con fecha/hora)
 | Audio | Whisper → texto → LLM | Nota en vault |
 | Imagen / captura | Vision LLM → descripción o extracción | Tarea o nota |
 | Link (web / arXiv) | Extracción de metadatos + LLM | Paper, recurso |
-| PDF link | Metadatos + resumen LLM | Paper académico |
+| PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos | Paper académico |
 
 ---
 
@@ -82,6 +82,15 @@ Google Calendar API   (eventos con fecha/hora)
 - Modelos recomendados: `tiny` o `base` (< 200MB RAM)
 - Input: archivo de audio descargado desde Telegram
 - Output: texto transcripto
+
+**Flujo de audio (paso previo al flujo general de confirmación):**
+```
+1. Usuario manda audio
+2. Bot transcribe con Whisper y muestra el texto al usuario
+3. Usuario confirma o corrige la transcripción
+4. El texto corregido entra al flujo normal (clasificación → preview → confirmación → vault)
+```
+La corrección de la transcripción es un paso bloqueante: el bot no clasifica ni propone destino hasta que el usuario valide el texto.
 
 ### `llm_client.py` — Cliente LLM
 - Proveedor primario: Gemini API (Google AI Studio, free tier)
@@ -105,7 +114,9 @@ Google Calendar API   (eventos con fecha/hora)
 
 ### `calendar_client.py` — Google Calendar (Fase 3)
 - API: Google Calendar API v3
-- Operaciones: crear evento, leer agenda por fecha
+- **Lectura:** todos los calendarios del usuario (para consultas y contexto)
+- **Escritura:** exclusivamente en un calendario dedicado llamado `ADSO` (creado por el bot si no existe)
+- **Borrado:** permitido solo en el calendario `ADSO`, nunca en calendarios externos
 - Criterio de routing: si el input incluye fecha/hora → Calendar; si no → vault
 
 ---

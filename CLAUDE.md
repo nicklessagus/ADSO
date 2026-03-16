@@ -6,7 +6,7 @@ Instrucciones para Claude Code al trabajar en este repositorio.
 
 ## Proyecto
 
-**Adso** es un bot de Telegram personal escrito en Python que actúa como escriba, observador y clasificador del conocimiento: captura información no estructurada, la clasifica mediante LLMs, la persiste como notas Markdown en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
+**ADSO** (*Autonomous Data Structuring Orchestrator*) es un bot de Telegram personal escrito en Python que actúa como escriba, observador y clasificador del conocimiento: captura información no estructurada, la clasifica mediante LLMs, la persiste como notas Markdown en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
 
 Documentación completa en `docs/`.
 
@@ -33,7 +33,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
-| Calendar | Google Calendar API v3 |
+| Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
 | Tasks | Google Tasks API |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 
