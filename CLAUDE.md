@@ -36,6 +36,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
 | Tasks | Google Tasks API |
 | Vault | Markdown + YAML Frontmatter en filesystem |
+| Backup vault | Repo git privado en GitHub — push automático tras cada nota confirmada |
 
 ---
 

@@ -105,6 +105,9 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Escritura directa al filesystem via volumen Docker
 - Crea carpetas de proyecto/sección si no existen (previa confirmación)
 - Maneja conflictos de nombres y actualización de notas existentes
+- Después de cada escritura confirmada, hace `git commit + push` al repo de backup del vault
+- Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"`
+- El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
 ### `knowledge_query.py` — RAG (Fase 4)
 - Índice vectorial: ChromaDB (embebido, sin servidor separado)
