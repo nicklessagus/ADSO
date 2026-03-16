@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Entorno virtual
+.venv/
+venv/
+env/
+ENV/
+
+# Variables de entorno y secretos
+.env
+.env.*
+secrets.yaml
+*.key
+
+# Docker
+*.log
+
+# Obsidian
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/cache
+.trash/
+
+# Índice vectorial (generado en runtime)
+data/chroma/
+data/faiss/
+*.index
+
+# OS
+.DS_Store
+Thumbs.db
