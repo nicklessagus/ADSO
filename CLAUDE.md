@@ -82,11 +82,16 @@ adso/
 
 ### Taxonomía
 ```
-01-Projects/{proyecto}/{seccion}/nota.md
-02-Areas/tareas/nota.md
-03-Resources/ideas/nota.md
-00-Inbox/nota.md
+01-Projects/{proyecto}/{seccion}/nota.md       # tiene inicio y fin
+02-Areas/tareas/nota.md                        # sin fin, continuo
+03-Resources/ideas/nota.md                     # pueden convertirse en proyectos
+00-Inbox/nota.md                               # sin clasificar
+04-Archive/                                    # proyectos inactivos o completados
 ```
+
+### Ciclo de vida
+Idea → Proyecto activo → Archivo → (borrado con doble confirmación)
+Las áreas no tienen ciclo de vida.
 
 ### Frontmatter mínimo requerido
 ```yaml
@@ -159,7 +164,7 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) |
-| 4 | Google Calendar |
+| 4 | Google Calendar + Google Tasks |
 | 5 | Imágenes y capturas |
 | 6 | Consultas RAG en lenguaje natural |
 | 7 | Integraciones externas (arXiv, NASA ADS) |
