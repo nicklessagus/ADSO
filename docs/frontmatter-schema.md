@@ -42,6 +42,7 @@ project: "tesis"                        # nombre del proyecto (carpeta)
 section: "experimentos"                 # sección dentro del proyecto
 media_type: text                        # text | audio | image | link
 summary: "Resumen generado por LLM"    # para notas largas
+related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
 
@@ -76,6 +77,7 @@ status: pending                         # pending | in-progress | done
 priority: medium                        # low | medium | high — inferido o explícito
 project: "tesis"                        # opcional
 google_tasks_list: "Tesis"             # lista de Google Tasks donde se sincroniza
+related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
 > Si la tarea tiene fecha/hora explícita, va además a Google Calendar.

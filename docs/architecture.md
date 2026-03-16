@@ -33,26 +33,24 @@ Texto / Link        Audio / Imagen
 │                   │  Claude API — consultas complejas (opcional)
 └─────────┬─────────┘
           │
-     ┌────┴────────────────┐
-     │                     │
-     ▼                     ▼
-Captura                Consulta
-(escribe nota)         (RAG sobre vault)
-     │                     │
-     ▼                     ▼
-Filesystem            ChromaDB
-Docker volume         índice vectorial
+     ┌────┼────────────────────┐
+     │    │                    │
+     ▼    ▼                    ▼
+Captura  Agenda              Consulta
+     │   (fecha/hora)        (RAG sobre vault)
+     │        │                    │
+     ▼        ▼                    ▼
+Filesystem   Google Calendar   ChromaDB
+Docker vol   + Google Tasks    índice vectorial
+     │
+     ├──→ Git backup (GitHub privado)
      │
 Syncthing (host)
      │
   ┌──┴──┐
   │     │
 Desktop Mobile
-Obsidian instalado
-(lectura visual, opcional)
-     │
-     ▼
-Google Calendar API   (eventos con fecha/hora)
+Obsidian (lectura visual, opcional)
 ```
 
 ---
@@ -109,13 +107,13 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"`
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
-### `knowledge_query.py` — RAG (Fase 4)
+### `knowledge_query.py` — RAG (Fase 6)
 - Índice vectorial: ChromaDB (embebido, sin servidor separado)
 - Embeddings: Gemini Embedding API
 - Indexa el vault completo y mantiene el índice actualizado
 - Responde consultas del usuario con fragmentos relevantes del vault
 
-### `calendar_client.py` — Google Calendar (Fase 3)
+### `calendar_client.py` — Google Calendar (Fase 4)
 - API: Google Calendar API v3
 - **Lectura:** todos los calendarios del usuario (para consultas y contexto)
 - **Escritura:** exclusivamente en un calendario dedicado llamado `ADSO` (creado por el bot si no existe)
@@ -158,24 +156,19 @@ services:
       - GOOGLE_CALENDAR_CREDS    # path al JSON de credenciales OAuth
     volumes:
       - ./vault:/vault           # vault de Obsidian (sincronizado por Syncthing)
-      - ./data:/app/data         # índice ChromaDB, caché
+      - ./data:/app/data         # ChromaDB (embebido), contexto, caché
       - ./credentials:/credentials  # Google OAuth credentials
     restart: always
-
-  chromadb:
-    image: chromadb/chroma
-    volumes:
-      - ./data/chroma:/chroma/chroma
-    restart: always
 ```
+
+> ChromaDB corre embebido como library Python dentro del bot — no necesita contenedor separado. Los datos persisten en `./data/chroma/` via volumen.
 
 ### Restricciones RPi4 (4GB RAM)
 
 | Componente | RAM estimada |
 |---|---|
-| Bot Python | ~100MB |
+| Bot Python + ChromaDB embebido | ~200-400MB según vault |
 | faster-whisper (base) | ~200MB |
-| ChromaDB | ~100-300MB según vault |
 | Sistema operativo + Docker | ~500MB |
 | **Total estimado** | **~1GB — viable** |
 
@@ -209,11 +202,12 @@ services:
 | Fase | Funcionalidad |
 |---|---|
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault |
-| 2 | Soporte de audio (transcripción Whisper) |
-| 3 | Google Calendar (leer y crear eventos con fecha/hora) |
-| 4 | Soporte de imágenes y capturas |
-| 5 | RAG — consultas en lenguaje natural sobre el vault |
-| 6 | Integraciones externas (arXiv, NASA ADS, Letterboxd) |
+| 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
+| 3 | Audio (faster-whisper) |
+| 4 | Google Calendar + Google Tasks |
+| 5 | Imágenes y capturas |
+| 6 | Consultas RAG en lenguaje natural |
+| 7 | Integraciones externas (arXiv, NASA ADS, Letterboxd) |
 
 ---
 
