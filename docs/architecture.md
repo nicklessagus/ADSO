@@ -203,6 +203,70 @@ services:
 
 ---
 
+## Pipeline de embeddings y búsqueda semántica
+
+### Dónde se calcula
+El cómputo de embeddings ocurre en **Gemini Embedding API** (remoto). La RPi4 solo realiza el request HTTP y recibe el vector resultante. CPU local: mínima.
+
+No se usan modelos de embeddings locales para evitar presión innecesaria sobre el hardware.
+
+### Almacenamiento
+Los vectores se guardan en **ChromaDB embebido** en el filesystem de la RPi4:
+
+```
+/app/data/chroma/
+├── index/       ← vectores (768 floats por nota)
+└── metadata/    ← path al .md, título, proyecto, sección, fecha
+```
+
+Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servidor separado.
+
+### Cuándo se indexa
+
+```
+Nota nueva confirmada
+    ├─→ Escribe .md al vault          (inmediato)
+    └─→ Gemini Embedding API          (inmediato, async)
+        └─→ Guarda vector ChromaDB
+
+Cron nocturno
+    └─→ Re-indexa notas modificadas o sin embedding
+```
+
+### Pipeline de consulta
+
+```
+Pregunta del usuario
+    │
+    ▼
+Gemini Embedding API convierte pregunta a vector   (1 request HTTP)
+    │
+    ▼
+ChromaDB busca K vectores más cercanos             (local, milisegundos)
+    │
+    ▼
+Bot lee los .md correspondientes del filesystem
+    │
+    ▼
+LLM genera respuesta con ese contexto
+```
+
+### Links automáticos al escribir
+Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` antes de confirmar. El usuario puede aceptar, modificar o descartar cada link sugerido.
+
+Comportamiento configurable:
+- `LINK_SIMILARITY_THRESHOLD` — umbral mínimo de similitud para sugerir un link
+- `VAULT_EXCLUDE_DIRS` — carpetas excluidas del índice
+- Campo `private: true` en frontmatter — excluye una nota del índice completamente
+
+---
+
+## Validación de código
+
+Todo el código generado para este proyecto es validado con **OpenAI Codex** antes de incorporarse al repositorio.
+
+---
+
 ## Decisiones de diseño
 
 | Decisión | Elección | Alternativa descartada | Razón |
