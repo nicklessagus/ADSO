@@ -34,6 +34,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
 | Calendar | Google Calendar API v3 |
+| Tasks | Google Tasks API |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 
 ---
@@ -43,12 +44,14 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 ```
 adso/
 ├── bot.py                  # Orquestador principal, handlers de Telegram
+├── context.py              # Gestión del contexto activo (proyecto/sección)
 ├── transcriber.py          # Transcripción de audio con faster-whisper
 ├── llm_client.py           # Cliente Gemini/Claude, clasificación y generación
 ├── vault_writer.py         # Escritura de .md al filesystem
 ├── embeddings.py           # Pipeline de embeddings y ChromaDB
-├── knowledge_query.py      # RAG — consultas sobre el vault
+├── knowledge_query.py      # RAG — retrieval de notas por consulta
 ├── calendar_client.py      # Google Calendar API
+├── tasks_client.py         # Google Tasks API
 ├── security.py             # Middleware de autenticación
 └── config.py               # Variables de entorno y constantes
 ```
@@ -103,6 +106,40 @@ Schema completo en `docs/frontmatter-schema.md`.
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot siempre muestra un preview del frontmatter y los links sugeridos antes de persistir.
 
+### Prioridad inferida
+El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, paper, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
+
+---
+
+## Contexto activo
+
+El bot mantiene un contexto activo persistente en disco:
+
+- **Default:** raíz (vault completo)
+- **Cambio:** `/contexto {proyecto}` o `/contexto {proyecto} {seccion}`
+- **Volver a raíz:** `/contexto raiz`
+
+Con contexto activo, todo el input se asume destino en ese proyecto/sección. Las consultas buscan primero ahí, luego en el vault completo si no encuentra. El bot muestra el contexto activo en cada respuesta.
+
+Si el input claramente no pertenece al contexto activo, el bot lo detecta y pregunta antes de asumir destino.
+
+---
+
+## Modos de operación
+
+El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
+
+| Modo | Ejemplos |
+|---|---|
+| **Captura** | Texto, audio, link, imagen con contenido a guardar |
+| **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
+| **Agenda** | Input con fecha/hora explícita |
+| **Gestión** | Crear proyecto, archivar, cambiar contexto |
+
+**El bot es un sistema de retrieval, no de razonamiento.** En modo consulta, recupera y presenta notas relevantes del vault. No agrega conocimiento propio ni opina sobre el contenido.
+
+Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmación explícita.
+
 ---
 
 ## Embeddings
@@ -144,7 +181,8 @@ TELEGRAM_TOKEN
 TELEGRAM_ALLOWED_USER_ID
 GEMINI_API_KEY
 ANTHROPIC_API_KEY          # opcional
-GOOGLE_CALENDAR_CREDS      # path al JSON OAuth
+GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks)
 LINK_SIMILARITY_THRESHOLD  # default: 0.82
 VAULT_PATH                 # default: /vault
+CONTEXT_FILE               # default: /app/data/context.json
 ```

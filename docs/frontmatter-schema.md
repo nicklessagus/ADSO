@@ -55,7 +55,9 @@ authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
 doi: "10.XXXX/..."                      # opcional
-relevance: "Para qué sirve este paper" # escrito por el usuario o inferido por LLM
+relevance: "Para qué sirve este paper" # provisto por el usuario o inferido por LLM
+context: "Contexto adicional de uso"   # opcional, ej: "comparar con modelo actual"
+priority: medium                        # low | medium | high — inferido o explícito
 tags: [cosmologia, machine-learning]
 ---
 ```
@@ -65,17 +67,20 @@ tags: [cosmologia, machine-learning]
 ---
 type: task
 status: pending                         # pending | in-progress | done
-priority: medium                        # low | medium | high
+priority: medium                        # low | medium | high — inferido o explícito
 project: "tesis"                        # opcional
+google_tasks_list: "Tesis"             # lista de Google Tasks donde se sincroniza
 ---
 ```
-> Si la tarea tiene fecha/hora explícita, va a Google Calendar en lugar del vault.
+> Si la tarea tiene fecha/hora explícita, va además a Google Calendar.
+> Si no tiene fecha, va solo a Google Tasks en la lista correspondiente al proyecto.
 
 ### `idea`
 ```yaml
 ---
 type: idea
 status: raw                             # raw | developing | mature
+priority: low                           # low | medium | high — inferido o explícito
 related: ["[[nota-relacionada]]"]       # opcional
 ---
 ```
@@ -100,18 +105,27 @@ sections: [introduccion, experimentos, trabajos-futuros, papers]
 - El bot parsea el JSON y escribe el archivo `.md` con el YAML correspondiente
 - Los `tags` se generan en kebab-case, en el idioma del contenido
 - El bot actualiza `date_modified` al editar notas existentes
-- El campo `relevance` en papers puede ser provisto por el usuario al momento de enviar ("este paper me sirve para X") o inferido del contenido
+- `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
+- **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. La prioridad explícita del usuario siempre gana sobre la inferida. Si no hay señal clara, sugiere `medium` y pregunta. Solo aplica a tipos accionables: `task`, `paper`, `idea`.
 
 ---
 
 ## Consultas Dataview de ejemplo
 
-**Tareas pendientes:**
+**Tareas pendientes por prioridad:**
 ```dataview
-TABLE date_created, priority, project
+TABLE date_created, priority, project, google_tasks_list
 FROM "02-Areas/tareas"
 WHERE status = "pending"
 SORT priority DESC
+```
+
+**Papers pendientes de leer:**
+```dataview
+TABLE authors, year, priority, relevance
+FROM "01-Projects"
+WHERE type = "paper" AND status = "active"
+SORT priority DESC, year DESC
 ```
 
 **Papers de la tesis:**
