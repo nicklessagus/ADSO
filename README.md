@@ -1,5 +1,7 @@
 # Adso
 
+Bot escriba, observador y clasificador del conocimiento, ordenando información dispersa en un registro coherente.
+
 Bot orquestador de Telegram que captura información no estructurada, la clasifica mediante LLMs y la persiste como notas Markdown estructuradas en un vault de Obsidian.
 
 ## ¿Qué hace?
