@@ -98,7 +98,7 @@ related: ["[[nota-relacionada]]"]       # opcional
 ---
 type: project-index
 title: "Tesis doctoral"
-created: "2025-01-01"
+date_created: "2025-01-01"
 status: active                          # active | on-hold | completed
 goal: "Descripción del objetivo"
 sections: [introduccion, experimentos, trabajos-futuros, papers]

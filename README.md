@@ -9,7 +9,8 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Transcribe** audios localmente con Whisper
 - **Genera** archivos Markdown con Frontmatter YAML clasificados
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
-- **Consulta** la base de conocimiento via RAG (Fase 2)
+- **Agenda** con Google Calendar y Google Tasks
+- **Consulta** la base de conocimiento via RAG
 
 ## Stack
 
@@ -22,13 +23,16 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Vector DB | ChromaDB (local) |
 | Infraestructura | Docker + docker-compose en Raspberry Pi 4 |
-| Sync | Syncthing |
+| Calendar | Google Calendar API v3 + Google Tasks API |
+| Backup | Git (repo privado en GitHub) |
+| Sync | Pendiente de decisión (Syncthing / Git) |
 
 ## Documentación
 
 - [`docs/architecture.md`](docs/architecture.md) — Diagrama de flujo, componentes y fases de desarrollo
 - [`docs/obsidian-vault-structure.md`](docs/obsidian-vault-structure.md) — Estructura PARA del vault y plugins
 - [`docs/frontmatter-schema.md`](docs/frontmatter-schema.md) — Schema YAML por tipo de nota y queries Dataview
+- [`docs/security.md`](docs/security.md) — Modelo de amenaza, mitigaciones y checklist de deploy
 
 ## Estado
 
@@ -41,4 +45,3 @@ En fase de diseño y documentación. Ver fases de desarrollo en [`docs/architect
 - Token de bot de Telegram
 - API key de Gemini (Google AI Studio — free tier)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
-- Syncthing configurado

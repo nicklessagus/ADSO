@@ -45,7 +45,7 @@ Docker vol   + Google Tasks    índice vectorial
      │
      ├──→ Git backup (GitHub privado)
      │
-Syncthing (host)
+Sync (pendiente de decisión)
      │
   ┌──┴──┐
   │     │
@@ -176,8 +176,13 @@ services:
       - GEMINI_API_KEY
       - ANTHROPIC_API_KEY        # opcional
       - GOOGLE_CALENDAR_CREDS    # path al JSON de credenciales OAuth
+      - LINK_SIMILARITY_THRESHOLD  # default: 0.82
+      - VAULT_PATH               # default: /vault
+      - CONTEXT_FILE             # default: /app/data/context.json
+      - MAX_WEB_CONTENT_TOKENS   # default: 8000
+      - MAX_PAPER_CONTENT_TOKENS # default: 128000
     volumes:
-      - ./vault:/vault           # vault de Obsidian (sincronizado por Syncthing)
+      - ./vault:/vault           # vault de Obsidian
       - ./data:/app/data         # ChromaDB (embebido), contexto, caché
       - ./credentials:/credentials  # Google OAuth credentials
     restart: always

@@ -1,4 +1,4 @@
-# CLAUDE.md — Adso
+# CLAUDE.md — ADSO
 
 Instrucciones para Claude Code al trabajar en este repositorio.
 
@@ -17,7 +17,7 @@ Documentación completa en `docs/`.
 - **Hardware:** Raspberry Pi 4, 4GB RAM, ARM64
 - **Entorno:** Docker + docker-compose
 - **Lenguaje:** Python 3.11+, implementación asíncrona
-- **Vault:** Markdown en filesystem local, sincronizado via Syncthing
+- **Vault:** Markdown en filesystem local (estrategia de sync pendiente de decisión — ver `docs/architecture.md`)
 
 Toda propuesta de implementación debe evaluarse contra las restricciones de CPU y RAM de la RPi4. Mencionar explícitamente el impacto estimado en recursos.
 
@@ -34,7 +34,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
-| Tasks | Google Tasks API |
+| Tasks | Google Tasks API — sincronización unidireccional (ADSO → Tasks), vault es fuente de verdad |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 | Backup vault | Repo git privado en GitHub — push automático tras cada nota confirmada |
 
@@ -103,7 +103,7 @@ date_modified: ""  # ISO 8601
 type: ""           # project-note | paper | task | idea | inbox
 tags: []
 source: telegram
-status: active
+status: active     # active | archived | pending-classification
 ---
 ```
 
@@ -140,6 +140,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | **Captura** | Texto, audio, link, imagen con contenido a guardar |
 | **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
 | **Agenda** | Input con fecha/hora explícita |
+| **Edición** | "actualizá la nota X", "agregale esto a..." |
 | **Gestión** | Crear proyecto, archivar, cambiar contexto |
 
 **El bot es un sistema de retrieval, no de razonamiento.** En modo consulta, recupera y presenta notas relevantes del vault. No agrega conocimiento propio ni opina sobre el contenido.

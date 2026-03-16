@@ -132,11 +132,12 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 
 | Plugin | Propósito |
 |---|---|
-| **Dataview** | Queries dinámicas sobre el vault |
-| **Tasks** | Gestión de tareas con sintaxis extendida |
-| **Smart Connections** | Búsqueda semántica entre notas |
-| **Templater** | Templates con lógica dinámica |
-| **Calendar** | Vista de notas en formato calendario |
+| **Dataview** | Queries avanzadas sobre el frontmatter (esencial) |
+| **Bases** (core) | Vistas tipo spreadsheet, edición inline de propiedades |
+| **Graph Analysis** | Co-citaciones, detección de comunidades, predicción de links |
+| **Strange New Worlds** | Contador de referencias inline — identifica conceptos hub |
+| **Charts View** | Gráficos temporales de actividad, métodos, temas |
+| **Canvas** | Mapas visuales de literatura y planificación de investigación |
 
 > El plugin **Local REST API** no se utiliza. El bot escribe directamente al filesystem via volumen Docker.
 
@@ -146,7 +147,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 
 - Obsidian **no necesita estar abierto** para que el bot funcione
 - El cliente visual de Obsidian se usa opcionalmente desde otras computadoras
-- Syncthing corre en el host de la RPi4 y sincroniza el vault a los dispositivos del usuario
+- Estrategia de sync pendiente de decisión (ver opciones en `docs/architecture.md`)
 - El vault es Markdown plano — legible y editable sin Obsidian si fuera necesario
 
 ### Conflictos de Syncthing
