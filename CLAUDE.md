@@ -166,10 +166,10 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) |
-| 4 | Google Calendar + Google Tasks |
-| 5 | Imágenes y capturas |
-| 6 | Consultas RAG en lenguaje natural |
-| 7 | Integraciones externas (arXiv, NASA ADS) |
+| 4 | Imágenes y capturas |
+| 5 | Integraciones externas (arXiv, NASA ADS) |
+| 6 | Google Calendar + Google Tasks |
+| 7 | Consultas RAG en lenguaje natural |
 | 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
 
 Implementar en orden. No saltar fases.

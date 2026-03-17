@@ -109,11 +109,11 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"`
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
-### `knowledge_query.py` — RAG (Fase 6)
+### `knowledge_query.py` — RAG (Fase 7)
 - Índice vectorial: ChromaDB (embebido, sin servidor separado)
 - Embeddings: Gemini Embedding API
 - Indexa el vault completo y mantiene el índice actualizado
-- Responde consultas del usuario con fragmentos relevantes del vault
+- Responde consultas del usuario con las notas relevantes del vault (no toda la bóveda — solo las que superan el umbral de similitud)
 
 ### `calendar_client.py` — Google Calendar (Fase 4)
 - API: Google Calendar API v3
@@ -121,6 +121,14 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - **Escritura:** exclusivamente en un calendario dedicado llamado `ADSO` (creado por el bot si no existe)
 - **Borrado:** permitido solo en el calendario `ADSO`, nunca en calendarios externos
 - Criterio de routing: si el input incluye fecha/hora → Calendar; si no → vault
+
+### `tasks_client.py` — Google Tasks (Fase 4)
+- API: Google Tasks API
+- **Lectura:** todas las listas de tareas del usuario (para consultas y contexto semanal)
+- **Escritura:** exclusivamente en una lista dedicada llamada `ADSO` (creada por el bot si no existe)
+- **Borrado:** permitido solo en la lista `ADSO`, nunca en listas externas del usuario
+- Las tasks de ADSO nacen siempre en el vault: son notas de tipo `task` que se sincronizan a Google Tasks al confirmarse
+- Modelo de uso: planificación semanal (inicio de semana) + revisión semanal (fin de semana) vía reporte automático
 
 ---
 
@@ -153,12 +161,14 @@ Si el proyecto o sección no existe, el bot lo indica explícitamente y pide aut
 
 No se permite edición directa sin confirmación — el mismo principio que la creación.
 
-### Sincronización con Google Tasks — pendiente de decisión
+### Sincronización con Google Tasks
 
-| Opción | Descripción | Pros | Contras |
-|---|---|---|---|
-| **A. Unidireccional (ADSO → Tasks)** | ADSO crea/actualiza tareas en Google Tasks. Cambios desde Tasks no se leen. | Simple, sin conflictos, vault es fuente de verdad | Si completás una tarea desde Tasks, hay que decirle al bot |
-| **B. Bidireccional** | ADSO sincroniza en ambas direcciones. Cambios en Tasks se reflejan en el vault. | Completar tareas desde cualquier lado | Polling, conflictos, complejidad |
+Modelo decidido: **lista `ADSO` dedicada + lectura de listas externas**.
+
+- **Lista `ADSO`:** ADSO tiene control total (crear, actualizar, borrar). Las tasks nacen en el vault y se sincronizan aquí.
+- **Listas externas del usuario:** solo lectura. ADSO puede consultarlas pero nunca las modifica.
+- **Flujo semanal:** planificación al inicio de la semana, revisión al final. El reporte semanal incluye qué tasks de la lista `ADSO` se completaron y cuáles quedaron pendientes.
+- **Completar desde Google Tasks:** cuando el usuario marca una task como completada en Google Tasks, ADSO la detecta en la próxima sincronización y actualiza el `status` de la nota en el vault.
 
 ---
 
@@ -230,10 +240,10 @@ services:
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) |
-| 4 | Google Calendar + Google Tasks |
-| 5 | Imágenes y capturas |
-| 6 | Consultas RAG en lenguaje natural |
-| 7 | Integraciones externas (arXiv, NASA ADS, Letterboxd) |
+| 4 | Imágenes y capturas |
+| 5 | Integraciones externas (arXiv, NASA ADS) |
+| 6 | Google Calendar + Google Tasks |
+| 7 | Consultas RAG en lenguaje natural |
 | 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
 
 ---
@@ -274,17 +284,36 @@ Cron nocturno
 Pregunta del usuario
     │
     ▼
-Gemini Embedding API convierte pregunta a vector   (1 request HTTP)
+Gemini Embedding API convierte pregunta a vector        (1 request HTTP)
     │
     ▼
-ChromaDB busca K vectores más cercanos             (local, milisegundos)
+ChromaDB busca notas que superen LINK_SIMILARITY_THRESHOLD
+    (scope inicial: proyecto activo)
+    │
+    ├─ resultados suficientes → continúa
+    └─ pocos o ningún resultado → pregunta si expandir:
+           1. ¿Buscar en todos los proyectos?
+           2. ¿Buscar también en áreas y recursos?
+           (04-Archive excluido salvo pedido explícito)
     │
     ▼
 Bot lee los .md correspondientes del filesystem
     │
     ▼
-LLM genera respuesta con ese contexto
+LLM genera respuesta citando las notas fuente
+("según tu nota [[Título]], ...")
+    │
+    ▼
+Bot pregunta: ¿Querés generar un informe descargable con esto?
+    └─ sí → genera .md consolidado (resumen + notas fuente + links)
+             y lo envía como archivo por Telegram
 ```
+
+**Comportamiento ante sin resultados:** si ninguna nota supera el umbral en ningún scope, el bot responde "No encontré nada relevante sobre X en el vault" — nunca inventa.
+
+**Parámetros configurables (config.yaml):**
+- `rag.similarity_threshold` — umbral mínimo para incluir una nota en el contexto
+- `rag.max_results` — máximo de notas a incluir en el contexto del LLM
 
 ### Links automáticos al escribir
 Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` antes de confirmar. El usuario puede aceptar, modificar o descartar cada link sugerido.
@@ -373,22 +402,37 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
 | Vector DB | ChromaDB embebido | Pinecone, Weaviate | Sin servidor externo, corre en RPi4 |
 | Calendar | Google Calendar API | Registrar en Obsidian | Separación de responsabilidades: tiempo → Calendar, conocimiento → vault |
-| Google Tasks | **Pendiente de decisión** — ver opciones arriba | — | — |
+| Google Tasks | Lista `ADSO` dedicada (lectura + escritura + borrado) + lectura de listas externas | Bidireccional completo | Mismo modelo que Calendar, vault es fuente de verdad |
 | Conflictos Syncthing | Notificar, no resolver | Auto-resolución | Riesgo de pérdida de datos; el usuario decide |
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
 
-### Decisión pendiente: sincronización del vault
+### Sincronización del vault — decisión parcial
 
-Hay tres opciones en evaluación. La elección impacta el manejo de conflictos, si se necesita Syncthing, y el rol de Obsidian en los clientes.
+**Decisión tomada:**
+- **Syncthing** — sincronización en vivo entre RPi4 y clientes (desktop/mobile)
+- **Git** — backup e historial únicamente. No es el mecanismo de sync. Sirve para recuperación ante falla catastrófica (rollback a cualquier punto del historial)
+- **ADSO es el escritor principal** — el acceso desde Obsidian en clientes puede ser read-only o bidireccional (pendiente de definir), pero eso no cambia lo que hay que implementar
 
-| Opción | Escritura | Lectura en clientes | Conflictos | Pros | Contras |
-|---|---|---|---|---|---|
-| **A. Syncthing bidireccional** | ADSO + Obsidian en cualquier dispositivo | Syncthing (tiempo real) | Posibles — necesita detección y notificación | Edición desde cualquier lado, ya configurado | Riesgo de conflictos, complejidad |
-| **B. Syncthing read-only en clientes** | Solo ADSO | Syncthing read-only (tiempo real) | Imposibles — un solo escritor | Cero conflictos, Obsidian solo para visualizar | No se puede editar desde Obsidian directamente |
-| **C. Git como sync** | Solo ADSO (push) | git pull desde clientes | Imposibles — un solo escritor | Backup y sync unificados, sin Syncthing | No es tiempo real, requiere pull manual o cron |
+**Pendiente:** definir si Syncthing es bidireccional (escritura desde Obsidian) o read-only en los clientes.
 
-Notas:
-- Las opciones B y C eliminan la necesidad de la detección de conflictos de Syncthing
-- La opción C hace redundante Syncthing por completo — el repo git privado sirve como backup y sync
-- En todas las opciones, ADSO es el escritor principal; la diferencia es si los clientes también pueden escribir
+**Lo que sí está decidido para la implementación:** el bot debe detectar archivos de conflicto de Syncthing y notificar al usuario por Telegram. El usuario resuelve manualmente; ADSO nunca auto-resuelve conflictos.
+
+#### Detección de conflictos Syncthing
+
+Syncthing nombra los conflictos con el patrón:
+```
+nota.sync-conflict-20240315-143022-DEVICEID.md
+```
+
+ADSO monitorea el vault con un watcher de filesystem (`watchdog`) y alerta por Telegram cuando detecta este patrón:
+
+```
+⚠️ Conflicto de sincronización detectado:
+  nota.sync-conflict-20240315-143022-ABCD1234.md
+  en: 01-Projects/tesis/capitulo-2/
+
+Resuelve el conflicto manualmente y avisame cuando esté listo.
+```
+
+El watcher corre como tarea async en background junto al bot. No agrega presión significativa a la RPi4 (solo escucha eventos del filesystem, no polling).
