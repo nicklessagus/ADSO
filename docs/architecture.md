@@ -22,8 +22,8 @@ Usuario (Telegram)
     ▼                   ▼
 Texto / Link        Audio / Imagen
  Documento          │         │
-    │           Whisper    Vision LLM
-    │           transcr.   descripción
+    │           Whisper    OCR local
+    │           transcr.   (o desc. usuario)
     │               │         │
     └───────┬────────┘─────────┘
             │ texto unificado
@@ -61,8 +61,8 @@ Obsidian (lectura visual, opcional)
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | Whisper → texto → LLM | Nota en vault |
-| Imagen / captura | Vision LLM → descripción o extracción | Tarea o nota |
-| Link (web / arXiv) | Extracción de metadatos + LLM | Paper, recurso |
+| Imagen / captura | Descripción del usuario, o OCR local en RPi4 → texto → clasificación LLM | Nota en vault |
+| Link (web / arXiv / NASA ADS) o nombre de paper | Extracción de metadatos + LLM → nota con link clickeable al original | Paper académico |
 | PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos | Paper académico |
 
 ---
@@ -122,7 +122,30 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - **Borrado:** permitido solo en el calendario `ADSO`, nunca en calendarios externos
 - Criterio de routing: si el input incluye fecha/hora → Calendar; si no → vault
 
-### `tasks_client.py` — Google Tasks (Fase 4)
+### Imágenes y capturas (Fase 4)
+
+El usuario puede enviar una foto de dos formas:
+
+- **Con descripción:** el usuario adjunta texto junto a la imagen. El bot usa esa descripción como contenido y sigue el flujo normal (clasificación → preview → confirmación → vault). La imagen se adjunta a la nota pero no se procesa automáticamente.
+- **Sin descripción:** el bot corre un OCR local en la RPi4 para extraer el texto de la imagen, lo muestra al usuario para que confirme o corrija, y luego entra al flujo normal. Mismo principio que la corrección de transcripciones de audio.
+
+**Modelos Vision LLM (Gemini vision, etc.):** no se usan en esta fase. Quedan como opción futura si el caso de uso crece en complejidad (análisis semántico de imágenes, comprensión de diagramas, manuscritos, escenas, etc.).
+
+### Integraciones externas — arXiv y NASA ADS (Fase 5)
+
+El usuario puede enviar cualquiera de estos inputs para indexar un paper:
+- Link de arXiv (`arxiv.org/abs/...`)
+- Link de NASA ADS
+- PDF adjunto
+- Solo el nombre o título del paper (el bot busca y confirma antes de proceder)
+
+El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota estructurada en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original para consulta directa.
+
+El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → usuario confirma → escritura al vault.
+
+**Búsqueda contextual en arXiv/ADS (futuro, post Fase 8):** dado un resultado RAG o un gap detectado en la literatura, el bot podría buscar automáticamente papers relacionados en arXiv/ADS. No está planificado para esta fase.
+
+### `tasks_client.py` — Google Tasks (Fase 6)
 - API: Google Tasks API
 - **Lectura:** todas las listas de tareas del usuario (para consultas y contexto semanal)
 - **Escritura:** exclusivamente en una lista dedicada llamada `ADSO` (creada por el bot si no existe)
@@ -327,7 +350,7 @@ Comportamiento configurable:
 
 ## Fase 8 — Análisis del vault
 
-Funcionalidades que el bot genera activamente a partir de los datos ya indexados. Requiere Fase 6 (RAG) como base.
+Funcionalidades que el bot genera activamente a partir de los datos ya indexados. Requiere Fase 7 (RAG) como base.
 
 ### Reporte semanal automático
 
@@ -396,7 +419,7 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 
 | Decisión | Elección | Alternativa descartada | Razón |
 |---|---|---|---|
-| Sync del vault | **Pendiente de decisión** — ver opciones abajo | — | — |
+| Sync del vault | Syncthing (sync en vivo) + Git (backup/DR) | Git como sync | Git no es tiempo real; Syncthing ya configurado. Dirección bidi vs read-only pendiente |
 | Interfaz Obsidian | Escritura directa al filesystem | Local REST API | REST API requiere Obsidian corriendo en RPi4 (inviable con Electron) |
 | LLM primario | Gemini API | Claude API | Free tier disponible para prototipo |
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
