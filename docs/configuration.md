@@ -26,6 +26,10 @@ weekly_report:
 
 stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
 
+# ─── Google Calendar ────────────────────────────────────────────────────────
+calendar:
+  sync_interval_minutes: 30  # intervalo del cron que reconcilia Calendar → vault
+
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto

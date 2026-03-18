@@ -115,12 +115,44 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Indexa el vault completo y mantiene el índice actualizado
 - Responde consultas del usuario con las notas relevantes del vault (no toda la bóveda — solo las que superan el umbral de similitud)
 
-### `calendar_client.py` — Google Calendar (Fase 4)
+### `calendar_client.py` — Google Calendar (Fase 6)
 - API: Google Calendar API v3
 - **Lectura:** todos los calendarios del usuario (para consultas y contexto)
-- **Escritura:** exclusivamente en un calendario dedicado llamado `ADSO` (creado por el bot si no existe)
+- **Escritura:** exclusivamente en el calendario dedicado `ADSO` (creado por el bot si no existe)
 - **Borrado:** permitido solo en el calendario `ADSO`, nunca en calendarios externos
-- Criterio de routing: si el input incluye fecha/hora → Calendar; si no → vault
+
+#### Qué se puede agendar
+
+Solo ítems que ya existen en el vault: `task`, `paper` (bloque de lectura), `idea` (sesión de trabajo), `project-note` (hito o reunión). El bot no crea eventos de calendario sin un ítem del vault como origen.
+
+#### Flujos de agendamiento
+
+**Directo:**
+```
+Usuario: "agendame esta tarea" / "agendame leer este paper"
+Bot: busca el ítem en el vault, pregunta fecha/hora si no se especificó, crea evento en calendario ADSO
+```
+
+**Por lista:**
+```
+Usuario: lista sus tareas / papers / ideas
+Bot: muestra lista numerada
+Usuario: "agendame el 3"
+Bot: confirma y crea el evento
+```
+
+**Especificación de tiempo:**
+- Fecha + hora → evento con horario específico
+- Solo día → evento de día completo (sin hora)
+
+#### Sincronización bidireccional
+
+- **Vault → Calendar:** inmediato al agendar desde el bot
+- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml`) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
+  - Evento borrado en Calendar → actualiza `status` de la nota en el vault
+  - Horario modificado en Calendar → actualiza los campos de fecha en la nota
+
+El usuario típicamente gestiona sus eventos directo desde Google Calendar — el cron reconcilia sin necesidad de intervención.
 
 ### Imágenes y capturas (Fase 4)
 
