@@ -64,6 +64,8 @@ tests/
 │   ├── test_degraded_mode.py      # LLM falla → nota en 00-Inbox/pending
 │   ├── test_embeddings_pipeline.py # vault_writer → embeddings → ChromaDB
 │   ├── test_edit_flow.py          # edición de nota existente → re-index
+│   ├── test_rename_flow.py        # renombrado → backlinks actualizados → ChromaDB path actualizado
+│   ├── test_git_backup.py         # debounce, commit messages, push failures
 │   ├── test_vault_search_integration.py  # backlinks y filtros contra vault temporal
 │   └── test_calendar_sync.py      # mock Google API → parsing de eventos
 ├── e2e/
@@ -92,7 +94,7 @@ Qué se testea:
 - `date_created` y `date_modified` en formato ISO 8601
 - `tags` en kebab-case
 - `source` siempre `"telegram"`
-- `media_type` correcto según origen (`text`, `audio`, `image`, `link`)
+- `media_type` correcto según origen (`text`, `audio`, `image`, `link`, `document`)
 - Frontmatter con caracteres especiales en `title` (comillas, dos puntos, unicode)
 - YAML generado es parseable por cualquier parser YAML estándar
 
@@ -207,6 +209,32 @@ Qué se testea:
 - Edición de nota existente → `date_modified` actualizado, `date_created` intacto
 - Contenido anterior preservado si la edición es parcial (append)
 - Re-indexado en ChromaDB post-edición
+
+#### `test_rename_flow.py`
+
+Setup:
+- Vault temporal con nota A y notas B, C que la referencian con `[[A]]`
+- ChromaDB temporal con embeddings de A, B, C
+
+Qué se testea:
+- Renombrar A → A2: archivo renombrado en disco
+- Backlinks actualizados: B y C ahora contienen `[[A2]]` en vez de `[[A]]`
+- ChromaDB: el path/metadata de A actualizado al nuevo nombre
+- ChromaDB: B y C re-indexados con contenido actualizado
+- Nota sin backlinks: renombrado no falla, ChromaDB actualizado
+- `date_modified` de B y C actualizado tras cambio de backlinks
+
+#### `test_git_backup.py`
+
+Setup:
+- Vault temporal inicializado como repo git
+- Mock de `git push`
+
+Qué se testea:
+- Una nota → commit+push después del debounce
+- Varias notas rápidas → un solo commit consolidado con todos los títulos
+- Push falla → error logueado, no se pierde la nota (ya está en disco)
+- Commit message correcto según cantidad de notas
 
 #### `test_vault_search_integration.py`
 
@@ -357,6 +385,14 @@ vault:
     - "_assets"
     - ".obsidian"
     - ".trash"
+whisper:
+  model: base
+ocr:
+  engine: tesseract
+sync:
+  interval_minutes: 30
+backup:
+  debounce_seconds: 30
 llm:
   max_web_tokens: 8000
   max_paper_tokens: 128000

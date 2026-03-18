@@ -97,6 +97,7 @@ El truncado más agresivo para contenido web previene ataques que ocultan instru
 
 - [ ] `TELEGRAM_ALLOWED_USER_ID` configurado correctamente
 - [ ] `.env` no commiteado (verificar con `git status`)
-- [ ] Repositorio configurado como privado en GitHub
+- [ ] `credentials/` no commiteado (verificar con `git status`)
+- [ ] Repositorio ADSO y repositorio del vault configurados como privados en GitHub
 - [ ] Variables de entorno seteadas en `docker-compose.yml` por referencia, no por valor
 - [ ] Logs no exponen valores de variables de entorno

@@ -36,7 +36,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
 | Tasks | Google Tasks API — lista `ADSO` dedicada (escritura/borrado) + lectura de listas externas |
 | Vault | Markdown + YAML Frontmatter en filesystem |
-| Backup vault | Repo git privado en GitHub — push automático tras cada nota confirmada |
+| Backup vault | Repo git privado en GitHub — push automático con debounce configurable (`backup.debounce_seconds`) |
 
 ---
 
@@ -104,13 +104,13 @@ date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
 type: ""           # project-note | paper | task | idea | inbox | project-index
 tags: []
-source: telegram
-media_type: ""     # text | audio | image | link — automático
+source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
+media_type: ""     # text | audio | image | link | document — automático
 status: active     # valores dependen del type — ver docs/frontmatter-schema.md
 ---
 ```
 
-Schema completo en `docs/frontmatter-schema.md`.
+El tipo `project-index` se genera automáticamente al crear un proyecto (no por clasificación del LLM). Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot siempre muestra un preview del frontmatter y los links sugeridos antes de persistir.
@@ -137,8 +137,6 @@ Si el input claramente no pertenece al contexto activo, el bot lo detecta y preg
 ## Modos de operación
 
 El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
-
-El tipo `project-index` se genera automáticamente al crear un proyecto (no por clasificación del LLM). Schema completo en `docs/frontmatter-schema.md`.
 
 | Modo | Ejemplos |
 |---|---|

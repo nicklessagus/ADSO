@@ -50,4 +50,5 @@ En fase de diseño y documentación. Ver fases de desarrollo en [`docs/architect
 - Docker y docker-compose
 - Token de bot de Telegram
 - API key de Gemini (Google AI Studio — free tier)
+- Google OAuth credentials (para Calendar + Tasks — Fase 6)
 - Vault de Obsidian accesible como directorio local (montado via Docker)

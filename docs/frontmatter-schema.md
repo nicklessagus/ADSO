@@ -13,8 +13,8 @@ date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
 type: project-note                     # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
-source: telegram                       # Siempre "telegram"
-media_type: text                       # text | audio | image | link — origen del contenido, seteado automáticamente
+source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
+media_type: text                       # text | audio | image | link | document — origen del contenido, seteado automáticamente
 status: active                         # valores dependen del type — ver tabla abajo
 ---
 ```
@@ -44,7 +44,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
 | `paper` | `01-Projects/{proyecto}/papers/` | Paper académico |
-| `task` | `02-Areas/tareas/` | Tarea sin fecha (con fecha → Google Calendar) |
+| `task` | `02-Areas/tareas/` | Tarea (con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `04-Ideas/` | Idea sin proyecto definido |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
 
@@ -130,7 +130,7 @@ status: active                          # active | on-hold | completed
 goal: "Investigar X para lograr Y"     # objetivo concreto, una línea
 sections: [introduccion, experimentos, trabajos-futuros, papers]
 tags: [tesis, doctorado]
-source: telegram
+source: system                          # auto-generado por el bot, no desde un mensaje de Telegram
 ---
 ```
 
@@ -174,7 +174,7 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 TABLE date_created, priority, project
 FROM "02-Areas/tareas"
 WHERE status = "pending"
-SORT priority DESC
+SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC
 ```
 
 **Papers pendientes de leer:**
@@ -182,7 +182,7 @@ SORT priority DESC
 TABLE authors, year, priority, relevance
 FROM "01-Projects"
 WHERE type = "paper" AND status = "unread"
-SORT priority DESC, year DESC
+SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
 
 **Papers de la tesis:**

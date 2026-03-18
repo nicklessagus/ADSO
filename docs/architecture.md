@@ -22,8 +22,8 @@ Usuario (Telegram)
     ▼                   ▼
 Texto / Link        Audio / Imagen
  Documento          │         │
-    │           Whisper    OCR local
-    │           transcr.   (o desc. usuario)
+    │           Whisper    OCR (local
+    │           transcr.   o Gemini Vision)
     │               │         │
     └───────┬────────┘─────────┘
             │ texto unificado
@@ -66,7 +66,7 @@ Obsidian (lectura visual, opcional)
 | Audio | Whisper → texto → LLM | Nota en vault |
 | Imagen / captura | Descripción del usuario, o OCR local en RPi4 → texto → clasificación LLM | Nota en vault |
 | Link (web / arXiv / NASA ADS) o nombre de paper | Extracción de metadatos + LLM → nota con link clickeable al original | Paper académico |
-| PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos | Paper académico |
+| PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos. `media_type: document` (archivo) o `link` (URL) | Paper académico |
 
 ---
 
@@ -112,6 +112,17 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   | **obsidian-bases** | Genera archivos `.base` con vistas tipo spreadsheet (idea futura) |
   | **defuddle** | Extracción limpia de contenido web → útil para Fase 5 (links, papers) |
 
+### `config.py` — Configuración y constantes
+- Carga variables de entorno y `config.yaml`
+- Expone constantes y defaults para todos los módulos
+- Merge de `.env` (precedencia) con `config.yaml` (comportamiento)
+- Validación de tipos y valores al iniciar
+
+### `security.py` — Middleware de autenticación
+- Whitelist de Telegram `user_id` desde `TELEGRAM_ALLOWED_USER_ID`
+- Decorador/middleware que se aplica a todos los handlers
+- Mensajes de IDs no autorizados se ignoran silenciosamente (sin respuesta, sin log del contenido)
+
 ### `vault_writer.py` — Escritura al vault
 - Escritura directa al filesystem via volumen Docker
 - Crea carpetas de proyecto/sección si no existen (previa confirmación)
@@ -133,6 +144,13 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Persiste el contexto activo (proyecto/sección) en `CONTEXT_FILE` (JSON en disco)
 - Lectura y escritura protegidas con `asyncio.Lock` para evitar race conditions si llegan múltiples updates de Telegram simultáneamente
 - Si el archivo de contexto está corrupto o ausente, se resetea a raíz sin error
+
+### `embeddings.py` — Pipeline de embeddings y ChromaDB
+- Genera embeddings via Gemini Embedding API (remoto, no local)
+- Almacena y consulta vectores en ChromaDB embebido
+- Indexa notas nuevas inmediatamente después de confirmación (async)
+- Cron nocturno re-indexa notas modificadas o sin embedding
+- Excluye carpetas en `vault.exclude_dirs`
 
 ### `vault_search.py` — Búsqueda estructural (Fase 1)
 - **Complementa a `knowledge_query.py`.** Busca por datos exactos en el vault: wikilinks, tags, properties del frontmatter.
@@ -188,8 +206,8 @@ Bot: confirma y crea el evento
 
 - **Vault → Calendar:** inmediato al agendar desde el bot
 - **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml` via `sync.interval_minutes`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
-  - Evento borrado en Calendar → actualiza `status` de la nota en el vault
-  - Horario modificado en Calendar → actualiza los campos de fecha en la nota
+  - Evento borrado en Calendar → limpia el campo `scheduled` de la nota en el vault (no cambia `status` — borrar un evento no es completar la tarea)
+  - Horario modificado en Calendar → actualiza el campo `scheduled` en la nota
 - **Conflicto:** si entre dos syncs el usuario modifica un evento en Calendar y también lo cambia via ADSO (vault), gana el vault. El cron sobreescribe el evento en Calendar con lo que dice la nota.
 
 El usuario típicamente gestiona sus eventos directo desde Google Calendar — el cron reconcilia sin necesidad de intervención.
