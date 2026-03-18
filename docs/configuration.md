@@ -1,4 +1,18 @@
-# Configuración de ADSO
+```
+      ,
+     /|
+    / |   █████     ██████      █████     █████
+   / /   ██   ██    ██   ██    ██        ██   ██
+  | /    ██   ██    ██   ██     ████     ██   ██
+  |/     ███████    ██   ██        ██    ██   ██
+  |      ██   ██    ██████     █████      █████
+ _|_
+/   \    Autonomous Data Structuring Orchestrator
+|>_ |
+\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
+```
+
+# Configuración
 
 Parámetros que el usuario puede ajustar sin tocar el código, editando `config.yaml` en la raíz del proyecto. El bot carga este archivo al iniciar.
 

@@ -1,3 +1,17 @@
+```
+      ,
+     /|
+    / |   █████     ██████      █████     █████
+   / /   ██   ██    ██   ██    ██        ██   ██
+  | /    ██   ██    ██   ██     ████     ██   ██
+  |/     ███████    ██   ██        ██    ██   ██
+  |      ██   ██    ██████     █████      █████
+ _|_
+/   \    Autonomous Data Structuring Orchestrator
+|>_ |
+\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
+```
+
 # Schema de Frontmatter YAML
 
 Define la estructura de metadatos que el bot genera automáticamente para cada nota creada en Obsidian. El usuario nunca escribe YAML manualmente.

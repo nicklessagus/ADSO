@@ -1,4 +1,18 @@
-# Arquitectura del Sistema ADSO
+```
+      ,
+     /|
+    / |   █████     ██████      █████     █████
+   / /   ██   ██    ██   ██    ██        ██   ██
+  | /    ██   ██    ██   ██     ████     ██   ██
+  |/     ███████    ██   ██        ██    ██   ██
+  |      ██   ██    ██████     █████      █████
+ _|_
+/   \    Autonomous Data Structuring Orchestrator
+|>_ |
+\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
+```
+
+# Arquitectura del Sistema
 
 ## Visión general
 

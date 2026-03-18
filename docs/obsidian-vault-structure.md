@@ -1,4 +1,18 @@
-# Estructura del Vault de Obsidian para ADSO
+```
+      ,
+     /|
+    / |   █████     ██████      █████     █████
+   / /   ██   ██    ██   ██    ██        ██   ██
+  | /    ██   ██    ██   ██     ████     ██   ██
+  |/     ███████    ██   ██        ██    ██   ██
+  |      ██   ██    ██████     █████      █████
+ _|_
+/   \    Autonomous Data Structuring Orchestrator
+|>_ |
+\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
+```
+
+# Estructura del Vault de Obsidian
 
 ## Metodología: PARA adaptado
 
