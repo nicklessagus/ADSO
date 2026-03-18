@@ -26,10 +26,6 @@ weekly_report:
 
   stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
 
-# ─── Sync (Calendar + Tasks) ──────────────────────────────────────────────
-sync:
-  interval_minutes: 30  # intervalo del cron que reconcilia Calendar y Tasks con el vault
-
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto
@@ -55,6 +51,15 @@ whisper:
 # ─── OCR (Fase 4) ─────────────────────────────────────────────────────────
 ocr:
   engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
+
+# ─── Re-indexado nocturno ──────────────────────────────────────────────────
+reindex:
+  enabled: true
+  time: "03:00"                    # hora local del servidor (formato HH:MM)
+
+# ─── Sync (Calendar + Tasks) ──────────────────────────────────────────────
+sync:
+  interval_minutes: 30           # intervalo del cron que reconcilia Calendar y Tasks con el vault
 
 # ─── Backup (Git) ─────────────────────────────────────────────────────────
 backup:

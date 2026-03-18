@@ -373,6 +373,18 @@ def sample_config(tmp_path) -> Path:
     """config.yaml de ejemplo para tests."""
     config = tmp_path / "config.yaml"
     config.write_text("""
+weekly_report:
+  enabled: true
+  day: friday
+  time: "18:00"
+  include:
+    - notes_created
+    - active_project
+    - new_methods
+    - paper_queue
+    - stale_ideas
+    - tasks_review
+  stale_idea_days: 60
 rag:
   similarity_threshold: 0.75
   max_results: 10
@@ -389,6 +401,9 @@ whisper:
   model: base
 ocr:
   engine: tesseract
+reindex:
+  enabled: true
+  time: "03:00"
 sync:
   interval_minutes: 30
 backup:

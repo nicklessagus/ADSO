@@ -43,6 +43,11 @@ whisper:
 ocr:
   engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
 
+# ─── Re-indexado nocturno ──────────────────────────────────────────────────
+reindex:
+  enabled: true
+  time: "03:00"                    # hora local del servidor (formato HH:MM)
+
 # ─── Sync (Calendar + Tasks) ──────────────────────────────────────────────
 sync:
   interval_minutes: 30           # intervalo del cron que reconcilia Calendar y Tasks con el vault

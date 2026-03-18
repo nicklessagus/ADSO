@@ -47,6 +47,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 | `task` | `02-Areas/tareas/` | Tarea (con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `04-Ideas/` | Idea sin proyecto definido |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
+| `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 
 ---
 
@@ -118,7 +119,7 @@ related: ["[[nota-relacionada]]"]       # opcional
 
 ### `_index.md` (nota índice de proyecto)
 
-Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea por captura de mensaje — se genera automáticamente al crear un proyecto via `/gestión` o cuando el LLM clasifica una nota en un proyecto nuevo. El usuario puede editarlo después desde Obsidian.
+Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea por captura de mensaje — se genera automáticamente al crear un proyecto via `/gestión` o cuando el LLM clasifica una nota en un proyecto nuevo. El usuario puede editarlo después via el bot (modo edición por Telegram).
 
 ```yaml
 ---

@@ -37,7 +37,6 @@ credentials/
 
 # Índice vectorial (generado en runtime)
 data/chroma/
-data/faiss/
 *.index
 
 # OS
