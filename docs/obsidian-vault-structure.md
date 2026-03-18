@@ -121,6 +121,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 | `task` | `02-Areas/tareas/` + Google Tasks | Tarea (siempre en `tareas/`, con o sin proyecto asociado) |
 | `idea` | `04-Ideas/` | Intención sin proyecto definido, con ciclo de vida propio |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |
+| `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 
 ---
 

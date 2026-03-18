@@ -43,7 +43,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
-| `paper` | `01-Projects/{proyecto}/papers/` | Paper académico |
+| `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico (en Resources si no tiene proyecto asociado) |
 | `task` | `02-Areas/tareas/` | Tarea (con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `04-Ideas/` | Idea sin proyecto definido |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |

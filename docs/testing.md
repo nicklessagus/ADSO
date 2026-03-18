@@ -93,7 +93,7 @@ Qué se testea:
 - Campos específicos por tipo (ej: `paper` tiene `authors`, `year`, `doi`)
 - `date_created` y `date_modified` en formato ISO 8601
 - `tags` en kebab-case
-- `source` siempre `"telegram"`
+- `source` es `"telegram"` para notas de usuario y `"system"` para `project-index`
 - `media_type` correcto según origen (`text`, `audio`, `image`, `link`, `document`)
 - Frontmatter con caracteres especiales en `title` (comillas, dos puntos, unicode)
 - YAML generado es parseable por cualquier parser YAML estándar

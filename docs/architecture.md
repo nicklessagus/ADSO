@@ -479,6 +479,7 @@ ADSO envía por Telegram un resumen periódico:
 - Métodos nuevos encontrados (aparecen en papers pero no estaban antes)
 - Papers en cola por prioridad
 - Ideas en `status: raw` más de 60 días
+- Tasks ADSO: completadas vs pendientes de la semana
 - Sugerencia de paper a leer basada en similitud con actividad reciente
 
 ### Scoring compuesto de papers

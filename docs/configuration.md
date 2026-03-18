@@ -23,6 +23,7 @@ weekly_report:
     - paper_queue       # papers pendientes ordenados por prioridad
     - stale_ideas       # ideas en status:raw más de N días (ver stale_idea_days)
     - tasks_review      # tasks ADSO: completadas vs pendientes de la semana
+    - paper_suggestion  # sugerencia de paper a leer basada en similitud con actividad reciente
 
   stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
 
