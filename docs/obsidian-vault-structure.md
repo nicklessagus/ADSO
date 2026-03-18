@@ -4,6 +4,8 @@
 
 Se adopta el método PARA (Tiago Forte) como estructura base del vault, adaptado para ingesta automatizada via bot con soporte de proyectos, secciones dinámicas y subproyectos.
 
+> **Nota sobre Areas:** en este vault, Areas es una categoría simplificada — no el concepto amplio de "dominios de responsabilidad" del PARA original. Su único rol es contener tareas sueltas sin proyecto asignado. Si en el futuro se necesita modelar dominios de responsabilidad más amplios, se puede expandir.
+
 ```
 vault/
 ├── 00-Inbox/                    # Notas sin clasificar (baja confianza del bot)
@@ -23,8 +25,8 @@ vault/
 │   └── adso/
 │       ├── _index.md
 │       └── ...
-├── 02-Areas/                    # Responsabilidades continuas (sin fin)
-│   └── tareas/                  # Tareas sin proyecto ni fecha
+├── 02-Areas/                    # Tareas sueltas sin proyecto asignado
+│   └── tareas/
 ├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos, herramientas)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
 ├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
@@ -43,9 +45,9 @@ Tiene un tema, un inicio y un fin. Agrupa todo el trabajo relacionado con un obj
 Ejemplos: `tesis`, `adso`, `curso-python`, proyectos del trabajo
 
 ### Área
-No tiene fin. Es una responsabilidad o dominio que se mantiene indefinidamente mientras sea relevante.
+Contiene tareas sueltas que no pertenecen a ningún proyecto específico. Por ejemplo: "revisar guía de ejercicios de X materia", "llamar al banco". No modela dominios de responsabilidad amplios — para eso están los proyectos.
 
-Ejemplos: `tareas` (pendientes del día a día)
+Subcarpeta única: `tareas/`
 
 ### Sección
 Subdivisión temática dentro de un proyecto. No es un proyecto — es una categoría organizativa. Se crea dinámicamente cuando aparece contenido que no encaja en secciones existentes.
