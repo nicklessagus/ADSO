@@ -43,7 +43,7 @@ links:
 # ─── Vault ──────────────────────────────────────────────────────────────────
 vault:
   exclude_dirs:               # carpetas excluidas del índice de embeddings
-    - "04-Archive"
+    - "05-Archive"
     - ".obsidian"
     - ".trash"
 

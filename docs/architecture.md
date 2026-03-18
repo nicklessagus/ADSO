@@ -349,7 +349,7 @@ ChromaDB busca notas que superen LINK_SIMILARITY_THRESHOLD
     └─ pocos o ningún resultado → pregunta si expandir:
            1. ¿Buscar en todos los proyectos?
            2. ¿Buscar también en áreas y recursos?
-           (04-Archive excluido salvo pedido explícito)
+           (05-Archive excluido salvo pedido explícito)
     │
     ▼
 Bot lee los .md correspondientes del filesystem

@@ -17,7 +17,7 @@ Documentación completa en `docs/`.
 - **Hardware:** Raspberry Pi 4, 4GB RAM, ARM64
 - **Entorno:** Docker + docker-compose
 - **Lenguaje:** Python 3.11+, implementación asíncrona
-- **Vault:** Markdown en filesystem local (estrategia de sync pendiente de decisión — ver `docs/architecture.md`)
+- **Vault:** Markdown en filesystem local (Syncthing para sync en vivo + Git para backup/DR — ver `docs/architecture.md`)
 
 Toda propuesta de implementación debe evaluarse contra las restricciones de CPU y RAM de la RPi4. Mencionar explícitamente el impacto estimado en recursos.
 
@@ -34,7 +34,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
-| Tasks | Google Tasks API — dirección de sync pendiente de decisión (ver `docs/architecture.md`) |
+| Tasks | Google Tasks API — lista `ADSO` dedicada (escritura/borrado) + lectura de listas externas |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 | Backup vault | Repo git privado en GitHub — push automático tras cada nota confirmada |
 
@@ -217,5 +217,5 @@ MAX_PAPER_CONTENT_TOKENS   # default: 128000
 ## Decisiones clave
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
-- **Google Tasks:** dirección de sincronización pendiente de decisión (uni vs bidireccional).
+- **Google Tasks:** lista `ADSO` dedicada (escritura/borrado), lectura de listas externas. Modelo semanal: planificación + revisión via reporte.
 - **Conflictos Syncthing:** ADSO no resuelve, solo notifica. El usuario resuelve manualmente.

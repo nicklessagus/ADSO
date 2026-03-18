@@ -27,7 +27,7 @@ status: active                         # active | archived | pending-classificat
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
 | `paper` | `01-Projects/{proyecto}/papers/` | Paper académico |
 | `task` | `02-Areas/tareas/` | Tarea sin fecha (con fecha → Google Calendar) |
-| `idea` | `03-Resources/ideas/` | Idea sin proyecto definido |
+| `idea` | `04-Ideas/` | Idea sin proyecto definido |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
 
 ---
@@ -146,7 +146,7 @@ SORT year DESC
 **Ideas sin desarrollar:**
 ```dataview
 LIST
-FROM "03-Resources/ideas"
+FROM "04-Ideas"
 WHERE status = "raw"
 ```
 
