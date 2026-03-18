@@ -25,9 +25,11 @@ vault/
 │       └── ...
 ├── 02-Areas/                    # Responsabilidades continuas (sin fin)
 │   └── tareas/                  # Tareas sin proyecto ni fecha
-├── 03-Resources/                # Conocimiento atemporal
-│   └── ideas/                   # Ideas sin proyecto definido
-├── 04-Archive/                  # Proyectos completados, pausados o eliminados
+├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos, herramientas)
+│                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
+├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
+│                                # Pueden promoverse a proyecto (se mueven) o abandonarse (se borran)
+├── 05-Archive/                  # Proyectos completados, pausados o eliminados
 └── _assets/                     # Imágenes y adjuntos
 ```
 
@@ -63,20 +65,22 @@ Conocimiento o iniciativas sin proyecto asignado. Pueden convertirse en proyecto
 ## Ciclo de vida de proyectos e ideas
 
 ```
-Idea (03-Resources/ideas/)
+Idea (04-Ideas/)
         │
-        │  "convertir en proyecto"
+        │  "convertir en proyecto" → idea se mueve, no queda copia
         ▼
-Proyecto activo (01-Projects/)
+Proyecto activo (01-Projects/)    ←── también puede crearse desde cero
         │
         │  se completa o abandona
         ▼
-Archivo (04-Archive/)
+Archivo (05-Archive/)
         │
         │  borrar (doble confirmación)
         ▼
      eliminado
 ```
+
+Los resources no tienen ciclo de vida — son referencia permanente. Los proyectos los linkean con `[[wikilinks]]` pero nunca los mueven.
 
 Las áreas no tienen ciclo de vida — existen indefinidamente.
 
@@ -112,9 +116,9 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 | Tipo | Destino | Descripción |
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
-| `paper` | `01-Projects/{proyecto}/papers/` | Paper académico con metadatos |
-| `task` | `02-Areas/tareas/` + Google Tasks | Tarea sin fecha (con fecha → también Google Calendar) |
-| `idea` | `03-Resources/ideas/` | Idea sin proyecto definido, con ciclo de vida propio |
+| `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico con metadatos. En Resources si es referencia suelta; en el proyecto si está asociado |
+| `task` | `02-Areas/tareas/` + Google Tasks | Tarea sin proyecto definido |
+| `idea` | `04-Ideas/` | Intención sin proyecto definido, con ciclo de vida propio |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |
 
 ---

@@ -85,9 +85,10 @@ adso/
 ```
 01-Projects/{proyecto}/{seccion}/nota.md       # tiene inicio y fin
 02-Areas/tareas/nota.md                        # sin fin, continuo
-03-Resources/ideas/nota.md                     # pueden convertirse en proyectos
+03-Resources/                                  # material de referencia permanente (papers sueltos, etc.)
+04-Ideas/nota.md                               # intenciones sin proyecto; pueden promoverse a proyecto
 00-Inbox/nota.md                               # sin clasificar
-04-Archive/                                    # proyectos inactivos o completados
+05-Archive/                                    # proyectos inactivos o completados
 ```
 
 ### Ciclo de vida
