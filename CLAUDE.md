@@ -106,7 +106,7 @@ type: ""           # project-note | paper | task | idea | inbox
 tags: []
 source: telegram
 media_type: ""     # text | audio | image | link — automático
-status: active     # active | archived | pending-classification
+status: active     # valores dependen del type — ver docs/frontmatter-schema.md
 ---
 ```
 
@@ -167,7 +167,7 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 
 | Fase | Funcionalidad |
 |---|---|
-| 1 | Captura de texto, clasificación, confirmación, escritura al vault |
+| 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) |
 | 4 | Imágenes y capturas |

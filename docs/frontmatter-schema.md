@@ -15,9 +15,26 @@ type: project-note                     # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # Siempre "telegram"
 media_type: text                       # text | audio | image | link — origen del contenido, seteado automáticamente
-status: active                         # active | archived | pending-classification (modo degradado)
+status: active                         # valores dependen del type — ver tabla abajo
 ---
 ```
+
+---
+
+## Valores de `status` por tipo
+
+Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archivar es mover el archivo a `05-Archive/`. El status refleja el estado dentro del ciclo de vida del tipo, no la ubicación en el vault.
+
+`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado).
+
+| Tipo | Valores de `status` | Default |
+|---|---|---|
+| `project-note` | `active`, `pending-classification` | `active` |
+| `paper` | `active`, `pending-classification` | `active` |
+| `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
+| `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
+| `inbox` | `pending-classification` | `pending-classification` |
+| `project-index` | `active`, `on-hold`, `completed` | `active` |
 
 ---
 
@@ -50,8 +67,8 @@ related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el
 ```yaml
 ---
 type: paper
-project: "tesis"
-section: "papers"
+project: "tesis"                        # opcional — sin proyecto va a 03-Resources/
+section: "papers"                       # opcional — solo si tiene proyecto (default: "papers")
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
@@ -68,6 +85,8 @@ conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
 related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
+> Paper con proyecto → `01-Projects/{proyecto}/papers/`
+> Paper sin proyecto → `03-Resources/` (referencia suelta, no asociado a ningún proyecto)
 
 ### `task`
 ```yaml
@@ -75,13 +94,14 @@ related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, ele
 type: task
 status: pending                         # pending | in-progress | done
 priority: medium                        # low | medium | high — inferido o explícito
-project: "tesis"                        # opcional
-google_tasks_list: "Tesis"             # lista de Google Tasks donde se sincroniza
+project: "tesis"                        # opcional, máximo un proyecto (string, no lista). Solo metadata — no cambia la ubicación ni la lista destino
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
+> Las tasks siempre se ubican en `02-Areas/tareas/`, independientemente de si tienen proyecto. El campo `project` es para filtrar y consultar, no determina la carpeta destino.
+> Todas las tasks se sincronizan a la lista única `ADSO` en Google Tasks.
 > Si la tarea tiene fecha/hora explícita, va además a Google Calendar.
-> Si no tiene fecha, va solo a Google Tasks en la lista correspondiente al proyecto.
+> Si no tiene fecha, va solo a Google Tasks.
 
 ### `idea`
 ```yaml
@@ -148,7 +168,7 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 
 **Tareas pendientes por prioridad:**
 ```dataview
-TABLE date_created, priority, project, google_tasks_list
+TABLE date_created, priority, project
 FROM "02-Areas/tareas"
 WHERE status = "pending"
 SORT priority DESC

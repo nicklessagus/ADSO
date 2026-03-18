@@ -44,8 +44,13 @@ links:
 vault:
   exclude_dirs:               # carpetas excluidas del índice de embeddings
     - "05-Archive"
+    - "_assets"
     - ".obsidian"
     - ".trash"
+
+# ─── OCR (Fase 4) ─────────────────────────────────────────────────────────
+ocr:
+  engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:

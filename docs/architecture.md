@@ -103,19 +103,14 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   - Generar respuestas a consultas RAG a partir de notas recuperadas por `knowledge_query.py`
 - **Rate limiting:** cola interna con exponential backoff para respetar límites del free tier de Gemini. Si varias notas llegan juntas, se procesan en serie con delay adaptativo.
 - **Modo degradado:** si Gemini no responde después de N reintentos, el input se guarda en `00-Inbox/` con `status: pending-classification` y el bot avisa al usuario. Un cron reintenta clasificar las notas pendientes cuando la API vuelve.
+- **Obsidian Skills como referencia:** el LLM usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como parte del system prompt para generar contenido compatible con Obsidian. Son documentos de referencia (no ejecutables) que definen la sintaxis correcta. Se incorporan al prompt de clasificación/generación, no al código. Se actualizan independientemente del bot.
 
-### `llm_client.py` — Obsidian Skills como referencia
-
-El LLM usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como parte del system prompt para generar contenido compatible con Obsidian. Estos skills son documentos de referencia (no ejecutables) que definen la sintaxis correcta:
-
-| Skill | Uso en ADSO |
-|---|---|
-| **obsidian-markdown** | Genera wikilinks (`[[nota]]`), callouts (`> [!tip]`), embeds (`![[imagen.png]]`), properties YAML correctos |
-| **json-canvas** | Genera archivos `.canvas` para mapas visuales (idea futura post Fase 8) |
-| **obsidian-bases** | Genera archivos `.base` con vistas tipo spreadsheet (idea futura) |
-| **defuddle** | Extracción limpia de contenido web → útil para Fase 5 (links, papers) |
-
-Los skills se incorporan al prompt de clasificación/generación, no al código. Se actualizan independientemente del bot.
+  | Skill | Uso en ADSO |
+  |---|---|
+  | **obsidian-markdown** | Genera wikilinks (`[[nota]]`), callouts (`> [!tip]`), embeds (`![[imagen.png]]`), properties YAML correctos |
+  | **json-canvas** | Genera archivos `.canvas` para mapas visuales (idea futura post Fase 8) |
+  | **obsidian-bases** | Genera archivos `.base` con vistas tipo spreadsheet (idea futura) |
+  | **defuddle** | Extracción limpia de contenido web → útil para Fase 5 (links, papers) |
 
 ### `vault_writer.py` — Escritura al vault
 - Escritura directa al filesystem via volumen Docker
@@ -133,7 +128,7 @@ Los skills se incorporan al prompt de clasificación/generación, no al código.
 - Recibe una consulta, la convierte a vector, busca en ChromaDB y retorna las notas que superan `rag.similarity_threshold`
 - El flujo completo de una consulta RAG es: `bot.py` → `knowledge_query.py` (retrieval semántico) + `vault_search.py` (retrieval estructural) → `bot.py` → `llm_client.py` (generación con contexto) → respuesta al usuario
 
-### `vault_search.py` — Búsqueda estructural (Fase 2+)
+### `vault_search.py` — Búsqueda estructural (Fase 1)
 - **Complementa a `knowledge_query.py`.** Busca por datos exactos en el vault: wikilinks, tags, properties del frontmatter.
 - Parsea archivos `.md` del vault extrayendo `[[wikilinks]]`, tags (`#tag`), y YAML frontmatter.
 - **Backlinks:** dado un nombre de nota, encuentra todas las notas que la referencian con `[[wikilink]]`. Construye el grafo de conexiones que Obsidian muestra visualmente, pero accesible programáticamente.
@@ -198,9 +193,16 @@ El usuario típicamente gestiona sus eventos directo desde Google Calendar — e
 El usuario puede enviar una foto de dos formas:
 
 - **Con descripción:** el usuario adjunta texto junto a la imagen. El bot usa esa descripción como contenido y sigue el flujo normal (clasificación → preview → confirmación → vault). La imagen se adjunta a la nota pero no se procesa automáticamente.
-- **Sin descripción:** el bot corre un OCR local en la RPi4 para extraer el texto de la imagen, lo muestra al usuario para que confirme o corrija, y luego entra al flujo normal. Mismo principio que la corrección de transcripciones de audio.
+- **Sin descripción:** el bot extrae texto de la imagen, lo muestra al usuario para que confirme o corrija, y luego entra al flujo normal. Mismo principio que la corrección de transcripciones de audio.
 
-**Modelos Vision LLM (Gemini vision, etc.):** no se usan en esta fase. Quedan como opción futura si el caso de uso crece en complejidad (análisis semántico de imágenes, comprensión de diagramas, manuscritos, escenas, etc.).
+**Motor de OCR configurable:**
+
+| Motor | RAM | Calidad | Notas |
+|---|---|---|---|
+| **Tesseract** (via `pytesseract`) — **default** | ~50MB | Buena para texto impreso | Local, sin costo, empaquetado para ARM64. Requiere `tesseract-ocr` instalado en el contenedor Docker |
+| **Gemini Vision** | 0 local | Superior (manuscrito, diagramas, fotos) | Remoto, usa la misma API key de Gemini. Mejor calidad pero requiere red |
+
+Configurable en `config.yaml` via `ocr.engine` (`tesseract` o `gemini`). Default: `tesseract`.
 
 ### Integraciones externas — arXiv y NASA ADS (Fase 5)
 
@@ -254,6 +256,16 @@ Si el proyecto o sección no existe, el bot lo indica explícitamente y pide aut
 ```
 
 No se permite edición directa sin confirmación — el mismo principio que la creación.
+
+**Renombrado de notas:** si la edición cambia el título (y por tanto el nombre del archivo), `vault_search.py` busca todas las notas que referencian el nombre viejo con `[[wikilink]]`. El bot muestra la lista de notas afectadas y pide confirmación antes de actualizar los links. El flujo:
+
+```
+1. Usuario pide renombrar nota (o el título cambia en una edición)
+2. vault_search.py encuentra backlinks al nombre viejo
+3. Bot muestra: "N notas referencian esta nota: [lista]. ¿Actualizar los links?"
+4. Usuario confirma → bot reemplaza [[nombre-viejo]] por [[nombre-nuevo]] en todas
+5. Re-indexa en ChromaDB las notas modificadas
+```
 
 ### Sincronización con Google Tasks
 
@@ -319,9 +331,10 @@ services:
 - Truncado de contenido externo a límite de tokens configurable
 
 ### Secretos
-- Todas las credenciales en `.env` (nunca en código)
+- Tokens y API keys en `.env` como variables de entorno (nunca en código)
+- Google OAuth credentials como archivo JSON montado via volumen Docker (`./credentials:/credentials`)
 - `.env` en `.gitignore`
-- En Docker: variables de entorno, no archivos montados directamente
+- Directorio `credentials/` en `.gitignore`
 
 ---
 
@@ -329,7 +342,7 @@ services:
 
 | Fase | Funcionalidad |
 |---|---|
-| 1 | Captura de texto, clasificación, confirmación, escritura al vault |
+| 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) |
 | 4 | Imágenes y capturas |
@@ -387,6 +400,12 @@ ChromaDB busca notas que superen `rag.similarity_threshold`
            1. ¿Buscar en todos los proyectos?
            2. ¿Buscar también en áreas y recursos?
            (05-Archive excluido salvo pedido explícito)
+    │
+    ▼
+vault_search.py expande resultados con backlinks:
+    para cada nota encontrada por ChromaDB, busca notas
+    que la referencian con [[wikilink]] y las agrega
+    al contexto si no estaban ya (deduplica)
     │
     ▼
 Bot lee los .md correspondientes del filesystem
@@ -488,7 +507,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 
 | Decisión | Elección | Alternativa descartada | Razón |
 |---|---|---|---|
-| Sync del vault | Syncthing (sync en vivo) + Git (backup/DR) | Git como sync | Git no es tiempo real; Syncthing ya configurado. Dirección bidi vs read-only pendiente |
+| Sync del vault | Syncthing send-only desde RPi4 + Git (backup/DR) | Git como sync / Obsidian Sync / bidi | Git no es tiempo real; Syncthing ya configurado. Send-only porque ADSO es el único escritor (embeddings siempre sincronizados) |
 | Interfaz Obsidian | Escritura directa al filesystem | Obsidian CLI / Local REST API | Ver sección "Alternativa futura: Obsidian CLI" más abajo |
 | Búsqueda | ChromaDB (semántica) + parser propio (estructural) | Solo ChromaDB | ChromaDB no puede seguir wikilinks ni filtrar por frontmatter. El parser propio cubre búsqueda estructural sin dependencias externas |
 | Generación de contenido | LLM con Obsidian Skills como referencia | Spec propia de sintaxis Obsidian | Los Skills de kepano son la referencia oficial para generar markdown, properties, wikilinks, canvas y bases compatibles con Obsidian |

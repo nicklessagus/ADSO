@@ -5,10 +5,12 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 ## ¿Qué hace?
 
 - **Captura** texto, links, imágenes y audios enviados via Telegram
-- **Procesa** el contenido con Gemini API (y opcionalmente Claude)
+- **Procesa** el contenido con Gemini API (y opcionalmente Claude), usando [Obsidian Skills](https://github.com/kepano/obsidian-skills) como referencia para generar Markdown compatible
 - **Transcribe** audios localmente con `faster-whisper`
+- **Extrae texto** de imágenes con Tesseract (o Gemini Vision, configurable)
 - **Genera** archivos Markdown con Frontmatter YAML clasificados
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
+- **Busca** en el vault con dos motores complementarios: semántico (ChromaDB) y estructural (backlinks, tags, frontmatter)
 - **Agenda** con Google Calendar y Google Tasks
 - **Consulta** la base de conocimiento via RAG
 
@@ -20,12 +22,14 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | LLM primario | Gemini API (Google AI Studio) |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Transcripción | `faster-whisper` (local) |
+| OCR | Tesseract (local, default) o Gemini Vision (remoto, configurable) |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
-| Vector DB | ChromaDB (local) |
-| Infraestructura | Docker + docker-compose en Raspberry Pi 4 |
+| Búsqueda semántica | ChromaDB (local) + Gemini Embedding API (remoto) |
+| Búsqueda estructural | Parser propio de wikilinks, tags y frontmatter (`vault_search.py`) |
+| Infraestructura | Docker + docker-compose en Raspberry Pi 4 (4GB RAM) |
 | Calendar | Google Calendar API v3 + Google Tasks API |
 | Backup | Git (repo privado en GitHub) |
-| Sync | Syncthing (sync en vivo) + Git (backup/DR) |
+| Sync | Syncthing send-only desde RPi4 (clientes read-only) + Git (backup/DR) |
 
 ## Documentación
 

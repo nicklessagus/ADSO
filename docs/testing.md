@@ -57,12 +57,14 @@ tests/
 │   ├── test_config.py             # carga de config.yaml, defaults, merge con env
 │   ├── test_context.py            # contexto activo: set, get, reset, persistencia
 │   ├── test_classification.py     # parsing del modo (captura/consulta/agenda/edición/gestión)
-│   └── test_security.py           # auth middleware: allow, reject, edge cases
+│   ├── test_security.py           # auth middleware: allow, reject, edge cases
+│   └── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
 │   ├── test_degraded_mode.py      # LLM falla → nota en 00-Inbox/pending
 │   ├── test_embeddings_pipeline.py # vault_writer → embeddings → ChromaDB
 │   ├── test_edit_flow.py          # edición de nota existente → re-index
+│   ├── test_vault_search_integration.py  # backlinks y filtros contra vault temporal
 │   └── test_calendar_sync.py      # mock Google API → parsing de eventos
 ├── e2e/
 │   ├── test_capture_message.py    # Update simulado → respuesta + vault escrito
@@ -130,6 +132,15 @@ Qué se testea:
 - JSON malformado del LLM → error manejable, no excepción sin capturar
 - Campos faltantes en la respuesta → defaults razonables o error explícito
 
+#### `test_vault_search.py`
+
+Qué se testea:
+- Extracción de `[[wikilinks]]` de un texto markdown (simples, con alias `[[nota|texto]]`, de sección `[[nota#heading]]`)
+- Extracción de tags (`#tag`, `#nested/tag`, tags en frontmatter)
+- Parsing de frontmatter YAML: campos correctos, tipos correctos, YAML inválido manejado sin excepción
+- Tags jerárquicos: `#metodo/cnn` matchea búsqueda por `#metodo`
+- Wikilinks dentro de code blocks o comentarios `%%` no se extraen (son falsos positivos)
+
 #### `test_security.py`
 
 Qué se testea:
@@ -196,6 +207,21 @@ Qué se testea:
 - Edición de nota existente → `date_modified` actualizado, `date_created` intacto
 - Contenido anterior preservado si la edición es parcial (append)
 - Re-indexado en ChromaDB post-edición
+
+#### `test_vault_search_integration.py`
+
+Setup:
+- Vault temporal (`tmp_path`) con varias notas `.md` pre-creadas, con wikilinks cruzados, tags y frontmatter variado
+
+Qué se testea:
+- **Backlinks:** nota A linkea a nota B → buscar backlinks de B retorna A
+- **Backlinks múltiples:** varias notas linkean a la misma → retorna todas
+- **Backlinks inexistentes:** nota sin backlinks → retorna lista vacía
+- **Filtro por frontmatter:** buscar `type=task, status=pending` → solo retorna tasks pendientes
+- **Filtro combinado:** `project=tesis AND type=paper` → solo papers de tesis
+- **Tags:** buscar por `#metodo` retorna notas con `#metodo` y `#metodo/cnn`
+- **Vault vacío:** no falla, retorna resultados vacíos
+- **Notas con frontmatter inválido:** se ignoran sin romper la búsqueda
 
 #### `test_calendar_sync.py`
 
@@ -328,7 +354,9 @@ links:
 vault:
   exclude_dirs:
     - "05-Archive"
+    - "_assets"
     - ".obsidian"
+    - ".trash"
 llm:
   max_web_tokens: 8000
   max_paper_tokens: 128000
@@ -355,6 +383,7 @@ def make_update():
 | `security.py` | 100% | Pequeño y crítico. No hay excusa para no cubrir todo. |
 | `config.py` | ≥ 90% | Defaults incorrectos pueden causar errores difíciles de debuggear. |
 | `context.py` | ≥ 85% | Persistencia en disco, puede perder estado. |
+| `vault_search.py` | ≥ 85% | Lee el vault para backlinks/tags/filtros. Errores degradan consultas estructurales. |
 | `embeddings.py` | ≥ 80% | Errores no pierden datos (se puede re-indexar) pero degradan consultas. |
 | `knowledge_query.py` | ≥ 75% | Solo lectura, no destructivo. |
 | `calendar_client.py` | ≥ 80% | Escribe a Calendar/Tasks externo. |

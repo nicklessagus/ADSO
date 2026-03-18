@@ -152,7 +152,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 
 - Obsidian **no necesita estar abierto** para que el bot funcione
 - El cliente visual de Obsidian se usa opcionalmente desde otras computadoras
-- Estrategia de sync pendiente de decisión (ver opciones en `docs/architecture.md`)
+- Syncthing en modo send-only desde la RPi4 — los clientes reciben cambios pero no los envían (ver `docs/architecture.md`)
 - El vault es Markdown plano — legible y editable sin Obsidian si fuera necesario
 
 ### Conflictos de Syncthing
@@ -161,8 +161,8 @@ Syncthing genera archivos `.sync-conflict-*` cuando un archivo se modifica simul
 
 Política:
 - ADSO **nunca resuelve conflictos automáticamente** — solo notifica al usuario por Telegram
-- Un cron periódico escanea el vault buscando archivos `.sync-conflict-*`
-- Si encuentra alguno, envía un mensaje: "Hay N conflictos de sync pendientes: [lista de archivos]"
+- Un watcher de filesystem (`watchdog`) corre como tarea async en background y detecta archivos `.sync-conflict-*` en tiempo real
+- Al detectar uno, envía un mensaje por Telegram indicando el archivo y la carpeta afectada
 - El usuario resuelve manualmente y borra el archivo de conflicto
 
 ---
