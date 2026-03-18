@@ -97,7 +97,7 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   - Clasificar contenido y determinar destino en la taxonomía
   - Generar Frontmatter YAML + cuerpo de la nota
   - Sugerir proyecto/sección si no existe
-  - Responder consultas RAG con contexto del vault
+  - Generar respuestas a consultas RAG a partir de notas recuperadas por `knowledge_query.py`
 - **Rate limiting:** cola interna con exponential backoff para respetar límites del free tier de Gemini. Si varias notas llegan juntas, se procesan en serie con delay adaptativo.
 - **Modo degradado:** si Gemini no responde después de N reintentos, el input se guarda en `00-Inbox/` con `status: pending-classification` y el bot avisa al usuario. Un cron reintenta clasificar las notas pendientes cuando la API vuelve.
 
@@ -109,11 +109,13 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"`
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
-### `knowledge_query.py` — RAG (Fase 7)
+### `knowledge_query.py` — Retrieval (Fase 7)
+- **Solo recuperación, no generación.** Busca en ChromaDB y devuelve las notas relevantes. No llama al LLM.
 - Índice vectorial: ChromaDB (embebido, sin servidor separado)
 - Embeddings: Gemini Embedding API
 - Indexa el vault completo y mantiene el índice actualizado
-- Responde consultas del usuario con las notas relevantes del vault (no toda la bóveda — solo las que superan el umbral de similitud)
+- Recibe una consulta, la convierte a vector, busca en ChromaDB y retorna las notas que superan `rag.similarity_threshold`
+- El flujo completo de una consulta RAG es: `bot.py` → `knowledge_query.py` (retrieval) → `bot.py` → `llm_client.py` (generación con contexto) → respuesta al usuario
 
 ### `calendar_client.py` — Google Calendar (Fase 6)
 - API: Google Calendar API v3
@@ -145,12 +147,13 @@ Bot: confirma y crea el evento
 - Fecha + hora → evento con horario específico
 - Solo día → evento de día completo (sin hora)
 
-#### Sincronización bidireccional
+#### Sincronización — vault es fuente de verdad
 
 - **Vault → Calendar:** inmediato al agendar desde el bot
-- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml`) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
+- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
   - Evento borrado en Calendar → actualiza `status` de la nota en el vault
   - Horario modificado en Calendar → actualiza los campos de fecha en la nota
+- **Conflicto:** si entre dos syncs el usuario modifica un evento en Calendar y también lo cambia via ADSO (vault), gana el vault. El cron sobreescribe el evento en Calendar con lo que dice la nota.
 
 El usuario típicamente gestiona sus eventos directo desde Google Calendar — el cron reconcilia sin necesidad de intervención.
 
@@ -224,6 +227,7 @@ Modelo decidido: **lista `ADSO` dedicada + lectura de listas externas**.
 - **Listas externas del usuario:** solo lectura. ADSO puede consultarlas pero nunca las modifica.
 - **Flujo semanal:** planificación al inicio de la semana, revisión al final. El reporte semanal incluye qué tasks de la lista `ADSO` se completaron y cuáles quedaron pendientes.
 - **Completar desde Google Tasks:** cuando el usuario marca una task como completada en Google Tasks, ADSO la detecta en la próxima sincronización y actualiza el `status` de la nota en el vault.
+- **Conflicto:** si entre dos syncs el usuario modifica una task en Google Tasks y también la cambia via ADSO (vault), gana el vault. El cron sobreescribe la task en Google Tasks con lo que dice la nota. Misma regla que Calendar: el vault es fuente de verdad.
 
 ---
 
@@ -239,12 +243,9 @@ services:
       - TELEGRAM_ALLOWED_USER_ID
       - GEMINI_API_KEY
       - ANTHROPIC_API_KEY        # opcional
-      - GOOGLE_CALENDAR_CREDS    # path al JSON de credenciales OAuth
-      - LINK_SIMILARITY_THRESHOLD  # default: 0.82
+      - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
       - VAULT_PATH               # default: /vault
       - CONTEXT_FILE             # default: /app/data/context.json
-      - MAX_WEB_CONTENT_TOKENS   # default: 8000
-      - MAX_PAPER_CONTENT_TOKENS # default: 128000
     volumes:
       - ./vault:/vault           # vault de Obsidian
       - ./data:/app/data         # ChromaDB (embebido), contexto, caché
@@ -342,7 +343,7 @@ Pregunta del usuario
 Gemini Embedding API convierte pregunta a vector        (1 request HTTP)
     │
     ▼
-ChromaDB busca notas que superen LINK_SIMILARITY_THRESHOLD
+ChromaDB busca notas que superen `rag.similarity_threshold`
     (scope inicial: proyecto activo)
     │
     ├─ resultados suficientes → continúa
@@ -374,9 +375,8 @@ Bot pregunta: ¿Querés generar un informe descargable con esto?
 Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` antes de confirmar. El usuario puede aceptar, modificar o descartar cada link sugerido.
 
 Comportamiento configurable:
-- `LINK_SIMILARITY_THRESHOLD` — umbral mínimo de similitud para sugerir un link
-- `VAULT_EXCLUDE_DIRS` — carpetas excluidas del índice
-- Campo `private: true` en frontmatter — excluye una nota del índice completamente
+- `links.similarity_threshold` — umbral mínimo de similitud para sugerir un link (en `config.yaml`)
+- `vault.exclude_dirs` — carpetas excluidas del índice (en `config.yaml`)
 
 ---
 
@@ -443,7 +443,8 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 
 ## Validación de código
 
-Todo el código generado para este proyecto es validado con **OpenAI Codex** antes de incorporarse al repositorio.
+- Todo el código generado para este proyecto es validado con **OpenAI Codex** antes de incorporarse al repositorio.
+- Estrategia de testing completa en [`testing.md`](testing.md): unit, integration y e2e con cobertura ≥ 80%.
 
 ---
 
@@ -462,14 +463,17 @@ Todo el código generado para este proyecto es validado con **OpenAI Codex** ant
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
 
-### Sincronización del vault — decisión parcial
+### Sincronización del vault
 
 **Decisión tomada:**
 - **Syncthing** — sincronización en vivo entre RPi4 y clientes (desktop/mobile)
 - **Git** — backup e historial únicamente. No es el mecanismo de sync. Sirve para recuperación ante falla catastrófica (rollback a cualquier punto del historial)
-- **ADSO es el escritor principal** — el acceso desde Obsidian en clientes puede ser read-only o bidireccional (pendiente de definir), pero eso no cambia lo que hay que implementar
+- **ADSO es el único escritor** — los clientes Obsidian son read-only. Toda creación y edición de notas pasa por Telegram
+- **Syncthing en modo send-only desde la RPi4** — los clientes reciben cambios pero no los envían de vuelta
 
-**Pendiente:** definir si Syncthing es bidireccional (escritura desde Obsidian) o read-only en los clientes.
+**Razón:** los embeddings en ChromaDB se generan al escribir una nota. Si se edita un `.md` desde Obsidian, el embedding queda desactualizado y las consultas RAG y links sugeridos trabajan con información vieja. Mantener ADSO como único escritor garantiza que los embeddings siempre estén sincronizados.
+
+**Posibilidad futura:** si se necesita escritura bidireccional, implementar un watcher (o cron) que detecte `.md` modificados externamente y regenere sus embeddings via Gemini Embedding API. No es complejo pero agrega requests a la API y lógica de detección de cambios.
 
 **Lo que sí está decidido para la implementación:** el bot debe detectar archivos de conflicto de Syncthing y notificar al usuario por Telegram. El usuario resuelve manualmente; ADSO nunca auto-resuelve conflictos.
 

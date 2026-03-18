@@ -50,7 +50,7 @@ adso/
 ├── llm_client.py           # Cliente Gemini/Claude, clasificación y generación
 ├── vault_writer.py         # Escritura de .md al filesystem
 ├── embeddings.py           # Pipeline de embeddings y ChromaDB
-├── knowledge_query.py      # RAG — retrieval de notas por consulta
+├── knowledge_query.py      # Retrieval — busca notas relevantes en ChromaDB (no llama al LLM)
 ├── calendar_client.py      # Google Calendar API
 ├── tasks_client.py         # Google Tasks API
 ├── security.py             # Middleware de autenticación
@@ -104,6 +104,7 @@ date_modified: ""  # ISO 8601
 type: ""           # project-note | paper | task | idea | inbox
 tags: []
 source: telegram
+media_type: ""     # text | audio | image | link — automático
 status: active     # active | archived | pending-classification
 ---
 ```
@@ -155,8 +156,9 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 - Se calculan via **Gemini Embedding API** (nunca localmente).
 - Se almacenan en **ChromaDB** en `/app/data/chroma/`.
 - Se generan de forma asíncrona inmediatamente después de confirmar una nota.
-- Umbral de similitud para sugerir links: `LINK_SIMILARITY_THRESHOLD` (configurable).
-- Carpetas excluidas del índice: `VAULT_EXCLUDE_DIRS` en `config.py`.
+- Umbral de similitud para sugerir links: `links.similarity_threshold` en `config.yaml` (default: `0.82`).
+- Umbral de similitud para consultas RAG: `rag.similarity_threshold` en `config.yaml` (default: `0.75`).
+- Carpetas excluidas del índice: `vault.exclude_dirs` en `config.yaml`.
 
 ---
 
@@ -193,7 +195,8 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 
 ## Validación de código
 
-Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
+- Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
+- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 80%.
 
 ---
 
@@ -204,12 +207,9 @@ TELEGRAM_TOKEN
 TELEGRAM_ALLOWED_USER_ID
 GEMINI_API_KEY
 ANTHROPIC_API_KEY          # opcional
-GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks)
-LINK_SIMILARITY_THRESHOLD  # default: 0.82
+GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks) — default: /credentials/google-oauth.json
 VAULT_PATH                 # default: /vault
 CONTEXT_FILE               # default: /app/data/context.json
-MAX_WEB_CONTENT_TOKENS     # default: 8000
-MAX_PAPER_CONTENT_TOKENS   # default: 128000
 ```
 
 ---
@@ -217,5 +217,7 @@ MAX_PAPER_CONTENT_TOKENS   # default: 128000
 ## Decisiones clave
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
+- **Google Calendar y Tasks:** vault es fuente de verdad. Sync cada 30 min (configurable). Si hay conflicto entre cambios en Google y en el vault, gana el vault.
 - **Google Tasks:** lista `ADSO` dedicada (escritura/borrado), lectura de listas externas. Modelo semanal: planificación + revisión via reporte.
+- **Syncthing read-only en clientes:** ADSO es el único escritor del vault. Obsidian en clientes es solo lectura. Syncthing en modo send-only desde la RPi4.
 - **Conflictos Syncthing:** ADSO no resuelve, solo notifica. El usuario resuelve manualmente.

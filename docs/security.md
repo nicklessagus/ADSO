@@ -68,9 +68,11 @@ response_schema = {
 
 El contenido externo se trunca antes de enviarse al LLM. Los límites varían según el tipo de contenido:
 
-```python
-MAX_WEB_CONTENT_TOKENS = 8000       # links web genéricos
-MAX_PAPER_CONTENT_TOKENS = 128000   # PDFs académicos — necesitan abstract, métodos y conclusiones
+```yaml
+# config.yaml
+llm:
+  max_web_tokens: 8000       # links web genéricos
+  max_paper_tokens: 128000   # PDFs académicos — necesitan abstract, métodos y conclusiones
 ```
 
 El truncado más agresivo para contenido web previene ataques que ocultan instrucciones maliciosas al final de documentos largos. Los PDFs académicos usan un límite más alto porque ADSO necesita leer el documento completo para extraer campos estructurados (contribution, methods, conclusions). Gemini soporta ventanas de contexto largas, lo que hace viable este límite.
@@ -83,7 +85,7 @@ El truncado más agresivo para contenido web previene ataques que ocultan instru
 | `TELEGRAM_ALLOWED_USER_ID` | Variable de entorno Docker |
 | `GEMINI_API_KEY` | Variable de entorno Docker |
 | `ANTHROPIC_API_KEY` | Variable de entorno Docker |
-| Google OAuth credentials | Archivo JSON montado como volumen, path en env var |
+| Google OAuth credentials | Archivo JSON montado como volumen en `/credentials/google-oauth.json`, path en env var `GOOGLE_CALENDAR_CREDS` |
 
 - Nunca hardcodeados en código fuente
 - `.env` en `.gitignore`

@@ -14,6 +14,7 @@ date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
 type: project-note                     # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # Siempre "telegram"
+media_type: text                       # text | audio | image | link — origen del contenido, seteado automáticamente
 status: active                         # active | archived | pending-classification (modo degradado)
 ---
 ```
@@ -40,7 +41,6 @@ status: active                         # active | archived | pending-classificat
 type: project-note
 project: "tesis"                        # nombre del proyecto (carpeta)
 section: "experimentos"                 # sección dentro del proyecto
-media_type: text                        # text | audio | image | link
 summary: "Resumen generado por LLM"    # para notas largas
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
@@ -94,16 +94,42 @@ related: ["[[nota-relacionada]]"]       # opcional
 ```
 
 ### `_index.md` (nota índice de proyecto)
+
+Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea por captura de mensaje — se genera automáticamente al crear un proyecto via `/gestión` o cuando el LLM clasifica una nota en un proyecto nuevo. El usuario puede editarlo después desde Obsidian.
+
 ```yaml
 ---
 type: project-index
 title: "Tesis doctoral"
 date_created: "2025-01-01"
+date_modified: "2025-01-15"
 status: active                          # active | on-hold | completed
-goal: "Descripción del objetivo"
+goal: "Investigar X para lograr Y"     # objetivo concreto, una línea
 sections: [introduccion, experimentos, trabajos-futuros, papers]
+tags: [tesis, doctorado]
+source: telegram
 ---
 ```
+
+El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
+
+```markdown
+# {title}
+
+## Objetivo
+{goal expandido — 1-2 párrafos generados por el LLM a partir del input del usuario}
+
+## Secciones
+- [[introduccion/]] — {descripción breve}
+- [[experimentos/]] — {descripción breve}
+- [[papers/]] — {descripción breve}
+
+## Estado
+- Creado: {date_created}
+- Notas: {count} (actualizado por el reporte semanal)
+```
+
+El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatter (`date_modified`, `status`, `sections` si se agregan nuevas).
 
 ---
 

@@ -6,7 +6,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 
 - **Captura** texto, links, imágenes y audios enviados via Telegram
 - **Procesa** el contenido con Gemini API (y opcionalmente Claude)
-- **Transcribe** audios localmente con Whisper
+- **Transcribe** audios localmente con `faster-whisper`
 - **Genera** archivos Markdown con Frontmatter YAML clasificados
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
 - **Agenda** con Google Calendar y Google Tasks
@@ -19,19 +19,21 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Bot | Python 3.11+, `python-telegram-bot` (async) |
 | LLM primario | Gemini API (Google AI Studio) |
 | LLM secundario | Anthropic API / Claude (opcional) |
-| Transcripción | Whisper (local, cuantizado) |
+| Transcripción | `faster-whisper` (local) |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Vector DB | ChromaDB (local) |
 | Infraestructura | Docker + docker-compose en Raspberry Pi 4 |
 | Calendar | Google Calendar API v3 + Google Tasks API |
 | Backup | Git (repo privado en GitHub) |
-| Sync | Pendiente de decisión (Syncthing / Git) |
+| Sync | Syncthing (sync en vivo) + Git (backup/DR) |
 
 ## Documentación
 
 - [`docs/architecture.md`](docs/architecture.md) — Diagrama de flujo, componentes y fases de desarrollo
 - [`docs/obsidian-vault-structure.md`](docs/obsidian-vault-structure.md) — Estructura PARA del vault y plugins
 - [`docs/frontmatter-schema.md`](docs/frontmatter-schema.md) — Schema YAML por tipo de nota y queries Dataview
+- [`docs/configuration.md`](docs/configuration.md) — Referencia de configuración (`config.yaml`)
+- [`docs/testing.md`](docs/testing.md) — Estrategia de testing: niveles, cobertura y fixtures
 - [`docs/security.md`](docs/security.md) — Modelo de amenaza, mitigaciones y checklist de deploy
 
 ## Estado
