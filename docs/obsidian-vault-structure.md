@@ -4,7 +4,6 @@
 
 Se adopta el método PARA (Tiago Forte) como estructura base del vault, adaptado para ingesta automatizada via bot con soporte de proyectos, secciones dinámicas y subproyectos.
 
-> **Nota sobre Areas:** en este vault, Areas es una categoría simplificada — no el concepto amplio de "dominios de responsabilidad" del PARA original. Su único rol es contener tareas sueltas sin proyecto asignado. Si en el futuro se necesita modelar dominios de responsabilidad más amplios, se puede expandir.
 
 ```
 vault/
@@ -25,8 +24,8 @@ vault/
 │   └── adso/
 │       ├── _index.md
 │       └── ...
-├── 02-Areas/                    # Tareas sueltas sin proyecto asignado
-│   └── tareas/
+├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin) — concepto PARA
+│   └── tareas/                  # Área inicial: tareas sueltas sin proyecto asignado
 ├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos, herramientas)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
 ├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
@@ -45,9 +44,9 @@ Tiene un tema, un inicio y un fin. Agrupa todo el trabajo relacionado con un obj
 Ejemplos: `tesis`, `adso`, `curso-python`, proyectos del trabajo
 
 ### Área
-Contiene tareas sueltas que no pertenecen a ningún proyecto específico. Por ejemplo: "revisar guía de ejercicios de X materia", "llamar al banco". No modela dominios de responsabilidad amplios — para eso están los proyectos.
+Dominio de responsabilidad continua sin fecha de cierre — el concepto PARA original. Actualmente implementado con una sola área (`tareas`), que agrupa tareas sueltas no asociadas a ningún proyecto. Se puede ampliar con nuevas áreas según necesidad (`docencia`, `investigacion-general`, etc.).
 
-Subcarpeta única: `tareas/`
+Ejemplos de tareas en `tareas/`: "revisar guía de ejercicios de X materia", "renovar credencial", "llamar al banco".
 
 ### Sección
 Subdivisión temática dentro de un proyecto. No es un proyecto — es una categoría organizativa. Se crea dinámicamente cuando aparece contenido que no encaja en secciones existentes.
