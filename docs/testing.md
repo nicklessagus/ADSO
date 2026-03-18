@@ -86,7 +86,7 @@ Testean funciones puras sin I/O externo. Son el grueso de la suite.
 #### `test_frontmatter.py`
 
 Qué se testea:
-- Generación de frontmatter válido por cada tipo (`project-note`, `paper`, `task`, `idea`, `inbox`)
+- Generación de frontmatter válido por cada tipo (`project-note`, `paper`, `task`, `idea`, `inbox`, `project-index`)
 - Campos base siempre presentes: `title`, `date_created`, `date_modified`, `type`, `tags`, `source`, `media_type`, `status`
 - Campos específicos por tipo (ej: `paper` tiene `authors`, `year`, `doi`)
 - `date_created` y `date_modified` en formato ISO 8601

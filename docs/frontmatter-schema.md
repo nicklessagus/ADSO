@@ -30,7 +30,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 | Tipo | Valores de `status` | Default |
 |---|---|---|
 | `project-note` | `active`, `pending-classification` | `active` |
-| `paper` | `active`, `pending-classification` | `active` |
+| `paper` | `unread`, `reading`, `read`, `pending-classification` | `unread` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
 | `inbox` | `pending-classification` | `pending-classification` |
@@ -67,6 +67,7 @@ related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el
 ```yaml
 ---
 type: paper
+status: unread                          # unread | reading | read
 project: "tesis"                        # opcional — sin proyecto va a 03-Resources/
 section: "papers"                       # opcional — solo si tiene proyecto (default: "papers")
 authors: ["Apellido, N.", "Apellido, N."]
@@ -95,6 +96,8 @@ type: task
 status: pending                         # pending | in-progress | done
 priority: medium                        # low | medium | high — inferido o explícito
 project: "tesis"                        # opcional, máximo un proyecto (string, no lista). Solo metadata — no cambia la ubicación ni la lista destino
+due_date: "2025-02-01"                  # opcional — fecha límite, ISO 8601 (solo fecha)
+scheduled: "2025-01-28T10:00:00"        # opcional — fecha/hora agendada en Calendar, seteado automáticamente al agendar
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
@@ -178,7 +181,7 @@ SORT priority DESC
 ```dataview
 TABLE authors, year, priority, relevance
 FROM "01-Projects"
-WHERE type = "paper" AND status = "active"
+WHERE type = "paper" AND status = "unread"
 SORT priority DESC, year DESC
 ```
 

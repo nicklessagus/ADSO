@@ -102,7 +102,7 @@ Las áreas no tienen ciclo de vida.
 title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
-type: ""           # project-note | paper | task | idea | inbox
+type: ""           # project-note | paper | task | idea | inbox | project-index
 tags: []
 source: telegram
 media_type: ""     # text | audio | image | link — automático
@@ -137,6 +137,8 @@ Si el input claramente no pertenece al contexto activo, el bot lo detecta y preg
 ## Modos de operación
 
 El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
+
+El tipo `project-index` se genera automáticamente al crear un proyecto (no por clasificación del LLM). Schema completo en `docs/frontmatter-schema.md`.
 
 | Modo | Ejemplos |
 |---|---|
@@ -218,7 +220,7 @@ CONTEXT_FILE               # default: /app/data/context.json
 ## Decisiones clave
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
-- **Google Calendar y Tasks:** vault es fuente de verdad. Sync cada 30 min (configurable). Si hay conflicto entre cambios en Google y en el vault, gana el vault.
+- **Google Calendar y Tasks:** vault es fuente de verdad. Sync cada 30 min (configurable via `sync.interval_minutes`). Calendar y Tasks se reconcilian en el mismo cron. Si hay conflicto entre cambios en Google y en el vault, gana el vault.
 - **Google Tasks:** lista `ADSO` dedicada (escritura/borrado), lectura de listas externas. Modelo semanal: planificación + revisión via reporte.
 - **Syncthing read-only en clientes:** ADSO es el único escritor del vault. Obsidian en clientes es solo lectura. Syncthing en modo send-only desde la RPi4.
 - **Conflictos Syncthing:** ADSO no resuelve, solo notifica. El usuario resuelve manualmente.

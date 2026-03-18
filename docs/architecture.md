@@ -116,8 +116,8 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Escritura directa al filesystem via volumen Docker
 - Crea carpetas de proyecto/sección si no existen (previa confirmación)
 - Maneja conflictos de nombres y actualización de notas existentes
-- Después de cada escritura confirmada, hace `git commit + push` al repo de backup del vault
-- Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"`
+- Después de cada escritura confirmada, acumula cambios y hace `git commit + push` al repo de backup del vault con debounce configurable (`backup.debounce_seconds` en `config.yaml`, default 30s). Si llegan varias notas seguidas, se consolidan en un solo commit+push
+- Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"` (si el debounce agrupa varias, lista los títulos)
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
 ### `knowledge_query.py` — Retrieval semántico (Fase 7)
@@ -127,6 +127,12 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Indexa el vault completo y mantiene el índice actualizado
 - Recibe una consulta, la convierte a vector, busca en ChromaDB y retorna las notas que superan `rag.similarity_threshold`
 - El flujo completo de una consulta RAG es: `bot.py` → `knowledge_query.py` (retrieval semántico) + `vault_search.py` (retrieval estructural) → `bot.py` → `llm_client.py` (generación con contexto) → respuesta al usuario
+
+### `context.py` — Gestión del contexto activo
+
+- Persiste el contexto activo (proyecto/sección) en `CONTEXT_FILE` (JSON en disco)
+- Lectura y escritura protegidas con `asyncio.Lock` para evitar race conditions si llegan múltiples updates de Telegram simultáneamente
+- Si el archivo de contexto está corrupto o ausente, se resetea a raíz sin error
 
 ### `vault_search.py` — Búsqueda estructural (Fase 1)
 - **Complementa a `knowledge_query.py`.** Busca por datos exactos en el vault: wikilinks, tags, properties del frontmatter.
@@ -181,7 +187,7 @@ Bot: confirma y crea el evento
 #### Sincronización — vault es fuente de verdad
 
 - **Vault → Calendar:** inmediato al agendar desde el bot
-- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
+- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml` via `sync.interval_minutes`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
   - Evento borrado en Calendar → actualiza `status` de la nota en el vault
   - Horario modificado en Calendar → actualiza los campos de fecha en la nota
 - **Conflicto:** si entre dos syncs el usuario modifica un evento en Calendar y también lo cambia via ADSO (vault), gana el vault. El cron sobreescribe el evento en Calendar con lo que dice la nota.
@@ -224,6 +230,7 @@ El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → 
 - **Escritura:** exclusivamente en una lista dedicada llamada `ADSO` (creada por el bot si no existe)
 - **Borrado:** permitido solo en la lista `ADSO`, nunca en listas externas del usuario
 - Las tasks de ADSO nacen siempre en el vault: son notas de tipo `task` que se sincronizan a Google Tasks al confirmarse
+- Sincronización periódica: mismo cron que Calendar (`sync.interval_minutes` en `config.yaml`, default 30 min)
 - Modelo de uso: planificación semanal (inicio de semana) + revisión semanal (fin de semana) vía reporte automático
 
 ---
@@ -264,7 +271,8 @@ No se permite edición directa sin confirmación — el mismo principio que la c
 2. vault_search.py encuentra backlinks al nombre viejo
 3. Bot muestra: "N notas referencian esta nota: [lista]. ¿Actualizar los links?"
 4. Usuario confirma → bot reemplaza [[nombre-viejo]] por [[nombre-nuevo]] en todas
-5. Re-indexa en ChromaDB las notas modificadas
+5. Actualiza el path/metadata de la nota renombrada en ChromaDB
+6. Re-indexa en ChromaDB las notas que tenían backlinks modificados
 ```
 
 ### Sincronización con Google Tasks
@@ -302,6 +310,10 @@ services:
 ```
 
 > ChromaDB corre embebido como library Python dentro del bot — no necesita contenedor separado. Los datos persisten en `./data/chroma/` via volumen.
+
+### Validación del vault al startup
+
+Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas/tareas`, `03-Resources`, `04-Ideas`, `05-Archive`). Si faltan carpetas, las crea y loguea la acción. Si el path no existe o no es un directorio, el bot falla con error claro y no arranca.
 
 ### Restricciones RPi4 (4GB RAM)
 
@@ -382,6 +394,8 @@ Nota nueva confirmada
 Cron nocturno
     └─→ Re-indexa notas modificadas o sin embedding
 ```
+
+**Falla del Embedding API:** si Gemini Embedding API no responde al indexar una nota nueva, la nota se escribe correctamente al vault pero queda sin embedding. El bot loguea el error y notifica al usuario que la nota no estará disponible en búsquedas semánticas hasta que se re-indexe. El cron nocturno detecta notas sin embedding y reintenta. La nota sigue siendo encontrable por búsqueda estructural (`vault_search.py`).
 
 ### Pipeline de consulta
 
@@ -552,6 +566,8 @@ Resuelve el conflicto manualmente y avisame cuando esté listo.
 ```
 
 El watcher corre como tarea async en background junto al bot. No agrega presión significativa a la RPi4 (solo escucha eventos del filesystem, no polling).
+
+**Nota sobre Docker:** `inotify` no siempre propaga eventos de forma confiable en bind mounts de Docker. En RPi4 con ext4 y Linux nativo funciona correctamente. Si se detectan problemas, `watchdog` soporta un fallback a `PollingObserver` (polling periódico en vez de inotify). Configurable si fuera necesario.
 
 ---
 

@@ -118,7 +118,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
 | `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico con metadatos. En Resources si es referencia suelta; en el proyecto si está asociado |
-| `task` | `02-Areas/tareas/` + Google Tasks | Tarea sin proyecto definido |
+| `task` | `02-Areas/tareas/` + Google Tasks | Tarea (siempre en `tareas/`, con o sin proyecto asociado) |
 | `idea` | `04-Ideas/` | Intención sin proyecto definido, con ciclo de vida propio |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |
 

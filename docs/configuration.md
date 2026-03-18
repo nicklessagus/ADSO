@@ -24,11 +24,11 @@ weekly_report:
     - stale_ideas       # ideas en status:raw más de N días (ver stale_idea_days)
     - tasks_review      # tasks ADSO: completadas vs pendientes de la semana
 
-stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
+  stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
 
-# ─── Google Calendar ────────────────────────────────────────────────────────
-calendar:
-  sync_interval_minutes: 30  # intervalo del cron que reconcilia Calendar → vault
+# ─── Sync (Calendar + Tasks) ──────────────────────────────────────────────
+sync:
+  interval_minutes: 30  # intervalo del cron que reconcilia Calendar y Tasks con el vault
 
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
@@ -51,6 +51,10 @@ vault:
 # ─── OCR (Fase 4) ─────────────────────────────────────────────────────────
 ocr:
   engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
+
+# ─── Backup (Git) ─────────────────────────────────────────────────────────
+backup:
+  debounce_seconds: 30           # esperar N segundos sin nuevas escrituras antes de commit+push
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:

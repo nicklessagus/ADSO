@@ -19,8 +19,12 @@ ENV/
 # Variables de entorno y secretos
 .env
 .env.*
+!.env.example
 secrets.yaml
 *.key
+
+# Credenciales Google OAuth
+credentials/
 
 # Docker
 *.log
