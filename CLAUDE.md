@@ -46,8 +46,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 
 ```
 adso/
-├── bot.py                  # Orquestador principal, handlers de Telegram
-├── context.py              # Gestión del contexto activo (proyecto/sección)
+├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
 ├── transcriber.py          # Transcripción de audio con faster-whisper
 ├── llm_client.py           # Cliente Gemini/Claude, clasificación y generación (usa Obsidian Skills como referencia)
 ├── vault_writer.py         # Escritura de .md al filesystem
@@ -115,24 +114,44 @@ status: active     # valores dependen del type — ver docs/frontmatter-schema.m
 El tipo `project-index` se genera automáticamente al crear un proyecto (no por clasificación del LLM). Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
-Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot siempre muestra un preview del frontmatter y los links sugeridos antes de persistir.
+Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`).
 
 ### Prioridad inferida
 El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, paper, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
 
 ---
 
-## Contexto activo
+## Modelo de interacción
 
-El bot mantiene un contexto activo persistente en disco:
+El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
 
-- **Default:** raíz (vault completo)
-- **Cambio:** `/contexto {proyecto}` o `/contexto {proyecto} {seccion}`
-- **Volver a raíz:** `/contexto raiz`
+### Estado default: captura
+El usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
 
-Con contexto activo, todo el input se asume destino en ese proyecto/sección. Las consultas buscan primero ahí, luego en el vault completo si no encuentra. El bot muestra el contexto activo en cada respuesta.
+### Estado transiente: consulta
+El usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado (inline o como archivo `.md` con links `obsidian://`) y vuelve al estado default.
 
-Si el input claramente no pertenece al contexto activo, el bot lo detecta y pregunta antes de asumir destino.
+### Inline keyboards
+Los botones son el mecanismo principal de interacción después del lenguaje natural:
+
+| Momento | Botones |
+|---|---|
+| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
+| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+
+### Desambiguación de intención
+Si el LLM no tiene confianza alta en el modo (captura vs consulta vs otro), el bot pregunta con botones en vez de asumir.
+
+### Consultas con refinamiento de scope
+El patrón es: el LLM interpreta lo que pueda del lenguaje natural y los botones cubren lo que falta. Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope (toda la bóveda, uno o más proyectos).
+
+### Output de consultas
+- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]` para bajar archivo.
+- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+
+Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado.
 
 ---
 
@@ -146,7 +165,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
 | **Agenda** | Input con fecha/hora explícita |
 | **Edición** | "actualizá la nota X", "agregale esto a..." |
-| **Gestión** | Crear proyecto, archivar, cambiar contexto |
+| **Gestión** | Crear proyecto, archivar, renombrar |
 
 **El bot es un sistema de retrieval, no de razonamiento.** En modo consulta, recupera y presenta notas relevantes del vault. No agrega conocimiento propio ni opina sobre el contenido.
 
@@ -212,7 +231,6 @@ GEMINI_API_KEY
 ANTHROPIC_API_KEY          # opcional
 GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks) — default: /credentials/google-oauth.json
 VAULT_PATH                 # default: /vault
-CONTEXT_FILE               # default: /app/data/context.json
 ```
 
 ---

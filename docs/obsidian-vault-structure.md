@@ -123,7 +123,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 
 ## Comportamiento del bot ante la taxonomía
 
-1. Analiza el input e identifica proyecto y sección destino según el contexto activo
+1. Analiza el input e identifica proyecto y sección destino a partir del contenido
 2. Si el proyecto **existe** → propone la sección más apropiada entre las existentes
 3. Si el proyecto **no existe** → sugiere crearlo y pide confirmación
 4. Si la sección **no existe** → sugiere el nombre y pide confirmación

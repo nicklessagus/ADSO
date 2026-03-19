@@ -69,7 +69,6 @@ tests/
 │   ├── test_frontmatter.py        # generación y validación de YAML
 │   ├── test_file_naming.py        # slug, fecha, kebab-case
 │   ├── test_config.py             # carga de config.yaml, defaults, merge con env
-│   ├── test_context.py            # contexto activo: set, get, reset, persistencia
 │   ├── test_classification.py     # parsing del modo (captura/consulta/agenda/edición/gestión)
 │   ├── test_security.py           # auth middleware: allow, reject, edge cases
 │   └── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
@@ -87,7 +86,6 @@ tests/
 │   ├── test_query_message.py      # Update simulado → RAG → respuesta con notas
 │   ├── test_agenda_message.py     # Update simulado → Calendar + Tasks
 │   ├── test_confirmation_flow.py  # Update → preview → confirm/reject → resultado
-│   └── test_context_commands.py   # /contexto proyecto → siguiente mensaje usa contexto
 └── README.md                      # instrucciones para correr tests (opcional)
 ```
 
@@ -130,15 +128,6 @@ Qué se testea:
 - `config.yaml` parcial → merge con defaults
 - Valores inválidos → error claro (no falla silencioso)
 - Tipos correctos: `similarity_threshold` es float, `max_results` es int, etc.
-
-#### `test_context.py`
-
-Qué se testea:
-- Set contexto a proyecto → persiste en disco
-- Set contexto a proyecto + sección → persiste
-- Reset a raíz (`/contexto raiz`) → limpia
-- Lectura de contexto al iniciar (recupera estado previo)
-- Archivo de contexto corrupto o ausente → default a raíz sin error
 
 #### `test_classification.py`
 
@@ -311,7 +300,7 @@ Qué se testea:
 Qué se testea:
 - "qué tengo sobre X" → búsqueda en ChromaDB → respuesta con notas relevantes
 - Query sin resultados → mensaje claro al usuario
-- Query con contexto activo → busca primero en proyecto, luego expande
+- Query con scope seleccionado via inline keyboard → busca en proyecto, luego ofrece ampliar
 
 #### `test_agenda_message.py`
 
@@ -323,18 +312,12 @@ Qué se testea:
 #### `test_confirmation_flow.py`
 
 Qué se testea:
-- Preview mostrado → usuario confirma → nota escrita
-- Preview mostrado → usuario rechaza → nota NO escrita
-- Preview mostrado → usuario edita → nuevo preview → confirma → nota escrita con ediciones
-- **Crítico:** sin confirmación explícita, nunca se escribe al vault
-
-#### `test_context_commands.py`
-
-Qué se testea:
-- `/contexto tesis` → siguiente mensaje se clasifica dentro de `tesis`
-- `/contexto tesis experimentos` → destino es `01-Projects/tesis/experimentos/`
-- `/contexto raiz` → vuelve a vault completo
-- Input que claramente no pertenece al contexto → bot pregunta antes de asumir
+- Preview mostrado → usuario toca `[Confirmar]` (inline keyboard callback) → nota escrita
+- Preview mostrado → usuario toca `[Cancelar]` → nota NO escrita
+- Preview mostrado → usuario toca `[Editar]` → nuevo preview → confirma → nota escrita con ediciones
+- Desambiguación: bot muestra `[Guardar como nota]` / `[Buscar en vault]` → callback procesado correctamente
+- Scope de consulta: bot muestra botones de proyecto → callback filtra resultados
+- **Crítico:** sin confirmación explícita via callback, nunca se escribe al vault
 
 ---
 
@@ -447,7 +430,6 @@ def make_update():
 | `llm_client.py` | ≥ 85% | Parsing de JSON externo. Error acá = clasificación incorrecta. |
 | `security.py` | 100% | Pequeño y crítico. No hay excusa para no cubrir todo. |
 | `config.py` | ≥ 90% | Defaults incorrectos pueden causar errores difíciles de debuggear. |
-| `context.py` | ≥ 85% | Persistencia en disco, puede perder estado. |
 | `vault_search.py` | ≥ 85% | Lee el vault para backlinks/tags/filtros. Errores degradan consultas estructurales. |
 | `embeddings.py` | ≥ 80% | Errores no pierden datos (se puede re-indexar) pero degradan consultas. |
 | `knowledge_query.py` | ≥ 75% | Solo lectura, no destructivo. |

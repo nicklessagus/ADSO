@@ -88,9 +88,10 @@ Obsidian (lectura visual, opcional)
 
 ## Componentes
 
-### `bot.py` — Orquestador principal
+### `bot.py` — Orquestador principal, inline keyboards
 - Framework: `python-telegram-bot` (async)
 - Handlers: texto, foto, audio, documento, URL
+- Inline keyboards (`InlineKeyboardMarkup`) para confirmación, desambiguación y navegación de resultados
 - Middleware de autenticación por `user_id`
 - Gestiona el flujo de confirmación con el usuario antes de escribir
 
@@ -154,12 +155,6 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Indexa el vault completo y mantiene el índice actualizado
 - Recibe una consulta, la convierte a vector, busca en ChromaDB y retorna las notas que superan `rag.similarity_threshold`
 - El flujo completo de una consulta RAG es: `bot.py` → `knowledge_query.py` (retrieval semántico) + `vault_search.py` (retrieval estructural) → `bot.py` → `llm_client.py` (generación con contexto) → respuesta al usuario
-
-### `context.py` — Gestión del contexto activo
-
-- Persiste el contexto activo (proyecto/sección) en `CONTEXT_FILE` (JSON en disco)
-- Lectura y escritura protegidas con `asyncio.Lock` para evitar race conditions si llegan múltiples updates de Telegram simultáneamente
-- Si el archivo de contexto está corrupto o ausente, se resetea a raíz sin error
 
 ### `embeddings.py` — Pipeline de embeddings y ChromaDB
 - Genera embeddings via Gemini Embedding API (remoto, no local)
@@ -371,6 +366,74 @@ El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → 
 
 ---
 
+## Modelo de interacción
+
+El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
+
+### Dos estados
+
+**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
+
+**Estado transiente — consulta:** el usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado y vuelve al estado default. No queda ningún estado activado.
+
+### Inline keyboards
+
+Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de interacción después del lenguaje natural:
+
+| Momento | Botones |
+|---|---|
+| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
+| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+
+### Desambiguación de intención
+
+Si el LLM no tiene confianza alta en el modo (captura vs consulta vs gestión), el bot pregunta con botones en vez de asumir. Esto resuelve casos ambiguos como "paper sobre transformers en detección de objetos" (¿guardar como idea o buscar si ya existe?).
+
+### Consultas con refinamiento de scope
+
+El patrón es: **el LLM interpreta lo que pueda del lenguaje natural, los botones cubren lo que falta.**
+
+Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope: toda la bóveda, uno o más proyectos.
+
+Ejemplos:
+
+```
+Usuario: "dame todo lo que tengo que hacer"
+Bot: "¿Dónde busco?"
+     [Todo]  [Tesis]  [Proyecto X]  [Proyecto Y]
+
+Usuario: toca [Tesis]
+Bot: lista de tareas → [Informe .md]
+```
+
+```
+Usuario: "papers pendientes de tesis"
+Bot: lista directa (el LLM ya parseó el scope)
+     [Ampliar búsqueda]  [Informe .md]
+```
+
+### Output de consultas
+
+- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]`.
+- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+
+Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado con el vault.
+
+### Tipos de consulta
+
+| Tipo | Ejemplo | Motor |
+|---|---|---|
+| **Temática** | "qué tengo sobre regresión logística" | ChromaDB (semántica) |
+| **Expansión desde nodo** | "todo lo relacionado con este paper" | Backlinks + ChromaDB |
+| **Filtro estructural** | "tareas pendientes", "papers sin leer" | vault_search.py (frontmatter) |
+| **Mixta** | "tareas pendientes de tesis sobre ML" | vault_search.py + ChromaDB |
+
+Los dos primeros tipos producen un informe `.md`. Los filtros estructurales pueden resolverse inline.
+
+---
+
 ## Flujo de confirmación (comportamiento del bot)
 
 Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
@@ -382,7 +445,7 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
    - Proyecto destino (existente o nuevo)
    - Sección destino (existente o nueva sugerida)
    - Preview del Frontmatter YAML
-3. Usuario confirma o corrige
+3. Usuario confirma, edita o cancela con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`)
 4. Bot escribe la nota
 ```
 
@@ -394,7 +457,7 @@ Si el proyecto o sección no existe, el bot lo indica explícitamente y pide aut
 1. Usuario pide editar una nota (por título, búsqueda o link)
 2. Bot muestra el contenido actual (frontmatter + cuerpo)
 3. Usuario indica los cambios (texto libre)
-4. Bot genera la versión actualizada, muestra diff y pide confirmación
+4. Bot genera la versión actualizada, muestra diff y pide confirmación con inline keyboard (`[Confirmar]` `[Cancelar]`)
 5. Bot escribe la nota, actualiza `date_modified`, re-indexa en ChromaDB
 ```
 
@@ -437,7 +500,6 @@ services:
       - ANTHROPIC_API_KEY        # opcional
       - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
       - VAULT_PATH               # default: /vault
-      - CONTEXT_FILE             # default: /app/data/context.json
     volumes:
       - ./vault:/vault           # vault de Obsidian
       - ./data:/app/data         # ChromaDB (embebido), contexto, caché
@@ -670,6 +732,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 | Conflictos Syncthing | Notificar, no resolver | Auto-resolución | Riesgo de pérdida de datos; el usuario decide |
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
+| Interacción | Lenguaje natural + inline keyboards, sin contexto activo | Contexto activo persistente / Topics de Telegram | Contexto persistente es footgun (se olvida); topics agregan setup sin beneficio claro para 3-4 proyectos |
 
 ### Sincronización del vault
 

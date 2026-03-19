@@ -196,7 +196,7 @@ WRITE_NOTE, EDIT_NOTE, DELETE_NOTE, ARCHIVE_NOTE
 QUERY_VAULT
 CREATE_EVENT, DELETE_EVENT    (solo en calendario ADSO)
 CREATE_TASK, UPDATE_TASK      (solo en lista ADSO)
-CREATE_PROJECT, CHANGE_CONTEXT
+CREATE_PROJECT
 ```
 
 Cualquier output del LLM que no corresponda a una de estas operaciones es rechazado. No importa qué instrucciones contenga el contenido externo — el bot no puede hacer nada fuera de este conjunto.

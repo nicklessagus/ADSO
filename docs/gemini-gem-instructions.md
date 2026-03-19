@@ -60,8 +60,7 @@ Es un proyecto de uso personal, no un servicio público. Tiene un único usuario
 
 ```
 adso/
-├── bot.py                  # Orquestador principal, handlers de Telegram
-├── context.py              # Gestión del contexto activo (proyecto/sección), persistido en disco
+├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
 ├── transcriber.py          # Transcripción de audio con faster-whisper
 ├── llm_client.py           # Cliente Gemini/Claude — clasificación, generación de notas, respuestas RAG
 ├── vault_writer.py         # Escritura de .md al filesystem + git backup con debounce
@@ -183,7 +182,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | **Consulta** | Pregunta sobre el vault | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
 | **Agenda** | Input con fecha/hora explícita | "agendame leer este paper el jueves a las 10" |
 | **Edición** | Modificar nota existente | "actualizá la nota X", "agregale esto a..." |
-| **Gestión** | Operaciones sobre la estructura | Crear proyecto, archivar, cambiar contexto |
+| **Gestión** | Operaciones sobre la estructura | Crear proyecto, archivar, renombrar |
 
 **El bot es un sistema de retrieval, no de razonamiento.** En modo consulta, recupera y presenta notas relevantes del vault. No agrega conocimiento propio ni opina sobre el contenido.
 
@@ -215,7 +214,7 @@ Nada se escribe al vault sin confirmación explícita del usuario:
    - Sección destino (existente o nueva sugerida)
    - Preview del frontmatter YAML
    - Links sugeridos por similitud (ChromaDB)
-3. Usuario confirma o corrige
+3. Usuario confirma, edita o cancela con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`)
 4. Bot escribe la nota al vault
 5. Bot genera embedding y lo almacena en ChromaDB (async)
 6. Bot hace git commit+push al repo de backup (con debounce)
@@ -237,15 +236,41 @@ Si una edición cambia el título (y por tanto el nombre del archivo), `vault_se
 
 ---
 
-## Contexto activo
+## Modelo de interacción
 
-El bot mantiene un contexto activo persistente en disco (JSON):
+El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
 
-- **Default:** raíz (vault completo)
-- **Cambiar:** `/contexto {proyecto}` o `/contexto {proyecto} {seccion}`
-- **Volver a raíz:** `/contexto raiz`
+### Dos estados
 
-Con contexto activo, el input se asume destinado a ese proyecto/sección. Las consultas buscan primero ahí, luego en el vault completo. Si el input claramente no pertenece al contexto activo, el bot pregunta antes de asumir.
+**Estado default — captura:** el usuario manda contenido. El LLM infiere tipo, proyecto y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
+
+**Estado transiente — consulta:** el usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado (inline o como archivo `.md` con links `obsidian://`) y vuelve al estado default.
+
+### Inline keyboards
+
+Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de interacción después del lenguaje natural:
+
+| Momento | Botones |
+|---|---|
+| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
+| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+
+### Desambiguación de intención
+
+Si el LLM no tiene confianza alta en el modo (captura vs consulta vs gestión), el bot pregunta con botones en vez de asumir.
+
+### Consultas con refinamiento de scope
+
+El LLM interpreta lo que pueda del lenguaje natural, los botones cubren lo que falta. Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope.
+
+### Output de consultas
+
+- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]`.
+- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+
+Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado.
 
 ---
 
@@ -411,7 +436,6 @@ GEMINI_API_KEY                # API key de Gemini (Google AI Studio)
 ANTHROPIC_API_KEY             # Opcional — API key de Claude
 GOOGLE_CALENDAR_CREDS         # Path al JSON OAuth (Calendar + Tasks) — default: /credentials/google-oauth.json
 VAULT_PATH                    # Path al vault — default: /vault
-CONTEXT_FILE                  # Path al JSON de contexto activo — default: /app/data/context.json
 ```
 
 ---
@@ -429,7 +453,6 @@ services:
       - ANTHROPIC_API_KEY
       - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
       - VAULT_PATH
-      - CONTEXT_FILE
     volumes:
       - ./vault:/vault
       - ./data:/app/data         # ChromaDB, contexto, caché
@@ -524,6 +547,14 @@ Si Gemini no responde después de reintentos con exponential backoff:
 - **Docstrings** en funciones públicas (descripción, args, comportamiento ante error)
 - **Modular:** cada módulo tiene responsabilidad única
 - **Testing:** unit, integration y e2e con cobertura ≥ 80%. Tests nunca llaman a APIs externas reales.
+
+---
+
+## Decisiones de diseño
+
+| Decisión | Elección | Alternativa descartada | Razón |
+|---|---|---|---|
+| Interacción | Lenguaje natural + inline keyboards, sin contexto activo | Contexto activo persistente / Topics de Telegram | Contexto persistente es footgun; topics agregan setup sin beneficio claro para 3-4 proyectos |
 
 ---
 
