@@ -39,10 +39,6 @@ vault:
 whisper:
   model: base                      # tiny | base — modelos recomendados para RPi4 (< 200MB RAM)
 
-# ─── OCR (Fase 4) ─────────────────────────────────────────────────────────
-ocr:
-  engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
-
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
   enabled: true

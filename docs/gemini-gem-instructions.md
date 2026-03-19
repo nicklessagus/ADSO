@@ -47,7 +47,7 @@ Es un proyecto de uso personal, no un servicio público. Tiene un único usuario
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido (sin servidor separado) |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`, local, ARM64) |
-| OCR | Tesseract (local, default) o Gemini Vision (remoto, configurable) |
+| OCR / Visión | Tesseract (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | Calendar | Google Calendar API v3 |
 | Tasks | Google Tasks API |
 | Vault | Markdown + YAML Frontmatter en filesystem |
@@ -194,8 +194,8 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | faster-whisper → texto → usuario confirma/corrige → LLM | Nota en vault |
-| Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
-| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite. Archivo siempre guardado en vault. | Nota en vault con archivo |
+| Imagen | Descripción del usuario (primaria) o extracción automática — usuario elige entre [OCR] o [Modelo de visión] → muestra resultado → usuario corrige si hace falta | Nota en vault |
+| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite → muestra texto extraído → usuario corrige si hace falta. Archivo siempre guardado en vault. | Nota en vault con archivo |
 | Link web genérico | Extracción de contenido + LLM | Nota en vault |
 | Link arXiv / NASA ADS | API → metadatos estructurados + LLM | Nota de paper |
 | Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
@@ -377,9 +377,6 @@ vault:
 
 whisper:
   model: base                    # tiny | base (< 200MB RAM en RPi4)
-
-ocr:
-  engine: tesseract              # tesseract | gemini
 
 reindex:
   enabled: true

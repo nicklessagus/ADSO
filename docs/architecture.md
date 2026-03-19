@@ -225,19 +225,14 @@ El usuario típicamente gestiona sus eventos directo desde Google Calendar — e
 
 ### Imágenes y capturas (Fase 4)
 
-El usuario puede enviar una foto de dos formas:
+Las imágenes siguen el flujo unificado de archivos adjuntos: el usuario elige `[Describilo vos]` o `[Extraer automáticamente]`. Si elige extracción automática, elige entre dos motores:
 
-- **Con descripción:** el usuario adjunta texto junto a la imagen. El bot usa esa descripción como contenido y sigue el flujo normal (clasificación → preview → confirmación → vault). La imagen se adjunta a la nota pero no se procesa automáticamente.
-- **Sin descripción:** el bot extrae texto de la imagen, lo muestra al usuario para que confirme o corrija, y luego entra al flujo normal. Mismo principio que la corrección de transcripciones de audio.
-
-**Motor de OCR configurable:**
-
-| Motor | RAM | Calidad | Notas |
+| Motor | RAM | Calidad | Cuándo usarlo |
 |---|---|---|---|
-| **Tesseract** (via `pytesseract`) — **default** | ~50MB | Buena para texto impreso | Local, sin costo, empaquetado para ARM64. Requiere `tesseract-ocr` instalado en el contenedor Docker |
-| **Gemini Vision** | 0 local | Superior (manuscrito, diagramas, fotos) | Remoto, usa la misma API key de Gemini. Mejor calidad pero requiere red |
+| **Tesseract** (via `pytesseract`) | ~50MB | Buena para texto impreso | Capturas de pantalla, documentos escaneados, texto claro |
+| **Gemini Vision** | 0 local | Superior para contenido visual | Fotos, diagramas, manuscritos, imágenes sin texto predominante |
 
-Configurable en `config.yaml` via `ocr.engine` (`tesseract` o `gemini`). Default: `tesseract`.
+Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
 
 ### Extracción de contenido web (links genéricos)
 
@@ -279,12 +274,17 @@ Usuario manda archivo por Telegram
             │                  según el tipo:
             │                  ├─ texto plano → leer directamente
             │                  ├─ PDF → pymupdf extrae texto + metadata
-            │                  ├─ imagen → OCR (Tesseract) o modelo de visión (Gemini)
+            │                  ├─ imagen → [OCR]  [Modelo de visión]
             │                  └─ binario/no reconocido → solo [Describilo vos]
+            │                          │
+            │                  bot muestra texto extraído
+            │                  → usuario confirma o corrige
             │
-            └─ texto disponible (descripción o extracción)
+            └─ texto disponible (descripción manual o extracción corregida)
                    → LLM clasifica → preview → confirmar → vault
 ```
+
+El paso de confirmación/corrección del texto extraído aplica a **todas** las extracciones automáticas (texto plano, PDF, imagen), igual que el flujo de audio. El usuario ve lo que el bot leyó antes de que se clasifique.
 
 En todos los casos se guardan **dos archivos** en el vault:
 - El archivo original (ej: `martinez_2024.pdf`)
@@ -299,7 +299,7 @@ En todos los casos se guardan **dos archivos** en el vault:
 | **Imagen** | `.jpg`, `.png`, `.webp` | OCR (Tesseract, local) o modelo de visión (Gemini, remoto) |
 | **Binario / otro** | `.docx`, `.xlsx`, ejecutables | No disponible — solo descripción del usuario |
 
-La elección entre OCR y modelo de visión para imágenes es configurable en `config.yaml` via `ocr.engine`. El modelo de visión da descripciones semánticas más ricas (útil para diagramas, fotos, capturas); OCR es más preciso para texto impreso.
+Para imágenes, el usuario elige explícitamente entre OCR y modelo de visión al momento de la extracción — no es una configuración global. OCR es más preciso para texto impreso; el modelo de visión da descripciones semánticas más ricas para diagramas, fotos y capturas de pantalla.
 
 #### PDFs sin texto extraíble
 

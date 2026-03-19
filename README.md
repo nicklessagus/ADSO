@@ -34,7 +34,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | LLM primario | Gemini API (Google AI Studio) |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Transcripción | `faster-whisper` (local) |
-| OCR | Tesseract (local, default) o Gemini Vision (remoto, configurable) |
+| OCR / Visión | Tesseract (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Búsqueda semántica | ChromaDB (local) + Gemini Embedding API (remoto) |
 | Búsqueda estructural | Parser propio de wikilinks, tags y frontmatter (`vault_search.py`) |
