@@ -45,7 +45,12 @@ vault/
 ├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
 │                                # Pueden promoverse a proyecto (se mueven) o abandonarse (se borran)
 ├── 05-Archive/                  # Proyectos completados, pausados o eliminados
-└── _assets/                     # Imágenes y adjuntos
+└── _assets/                     # Imágenes (fotos enviadas al bot)
+```
+
+> **Archivos adjuntos (PDFs, .txt, .py, etc.):** se guardan en la misma carpeta que su nota companion, no en `_assets/`. Esto permite que el embed `![[archivo]]` funcione naturalmente y mantiene la relación archivo-nota visible en el filesystem. `_assets/` se reserva para imágenes.
+
+```
 ```
 
 ---

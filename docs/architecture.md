@@ -81,6 +81,8 @@ Obsidian (lectura visual, opcional)
 | Imagen / captura | Descripción del usuario, o OCR local en RPi4 → texto → clasificación LLM | Nota en vault |
 | Link (web / arXiv / NASA ADS) o nombre de paper | Extracción de metadatos + LLM → nota con link clickeable al original | Paper académico |
 | PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos. `media_type: document` (archivo) o `link` (URL) | Paper académico |
+| Documento adjunto (texto plano) | Lee el contenido, clasifica con LLM. Guarda el archivo original + nota companion | Nota en vault con archivo |
+| Documento adjunto (otro formato) | No extrae contenido — pide descripción al usuario. Guarda el archivo original + nota companion | Nota en vault con archivo |
 
 ---
 
@@ -264,6 +266,85 @@ URL → fetch local → trafilatura extrae texto → truncar a max_web_tokens �
 Configurable en `config.yaml` via `content_extraction.engine`. Default: `gemini`.
 
 **Límite de tokens:** en ambos casos el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
+
+### Documentos y archivos adjuntos
+
+El usuario puede enviar archivos por Telegram. El bot los procesa según el tipo, pero **siempre guarda el archivo original** en el vault junto a una nota companion `.md` con frontmatter.
+
+#### Tipos de archivo
+
+| Tipo | Ejemplos | Procesamiento |
+|---|---|---|
+| **Texto plano** | `.md`, `.txt`, `.py`, `.csv`, `.json` | Lee el contenido → LLM clasifica → preview → confirmar |
+| **PDF** | `.pdf` | Extrae texto + metadata (título, autor, páginas) con `pymupdf` → LLM clasifica → preview → confirmar |
+| **Otros** | `.docx`, `.xlsx`, binarios | No extrae contenido. Pide descripción al usuario → LLM clasifica con esa descripción |
+
+#### Flujo
+
+```
+Usuario manda archivo por Telegram
+  │
+  ├─ texto plano? → leer contenido → clasificar con LLM → preview → confirmar → vault
+  │
+  ├─ PDF? → pymupdf extrae texto + metadata → clasificar con LLM → preview → confirmar → vault
+  │
+  └─ otro? → bot pregunta "¿De qué se trata este archivo?"
+            → usuario describe → clasificar con LLM → preview → confirmar → vault
+```
+
+En todos los casos se guardan **dos archivos** en el vault:
+- El archivo original (ej: `martinez_2024.pdf`)
+- Una nota companion (ej: `martinez_2024.md`) con frontmatter, resumen/clasificación y un embed `![[archivo]]`
+
+#### Convergencia con papers por link
+
+Un PDF de paper y un link de paper siguen el mismo flujo de clasificación. La diferencia es solo la fuente:
+
+| | Link de paper | PDF de paper |
+|---|---|---|
+| **Obtener contenido** | Gemini extrae de la URL / trafilatura | `pymupdf` extrae texto del PDF |
+| **Metadata** | Del HTML (título, autores, abstract) | Del PDF (título, autores, páginas) |
+| **Clasificar** | LLM → `type: paper`, mismo schema | LLM → `type: paper`, mismo schema |
+| **Qué se guarda** | Nota `.md` solamente (`source_url`) | PDF original + nota companion (`source_file`) |
+| **Embeddings** | Del contenido extraído | Del texto extraído del PDF |
+
+Si el usuario provee un PDF **y** un link del mismo paper, la nota companion tiene ambos campos (`source_url` + `source_file`).
+
+#### Estructura en el vault
+
+```
+01-Projects/mi-proyecto/papers/
+├── martinez_2024.pdf              # archivo original
+├── martinez_2024.md               # nota companion con frontmatter
+
+01-Projects/mi-proyecto/datos/
+├── script_analisis.py             # archivo original
+├── script_analisis.md             # nota companion
+```
+
+El archivo original se ubica en la misma carpeta que la nota companion.
+
+#### PDFs escaneados (sin texto extraíble)
+
+Si `pymupdf` no puede extraer texto del PDF (escaneo, imagen), el bot cae al flujo de "otro" — pide descripción al usuario.
+
+#### Embeddings
+
+- **Texto plano:** se indexa el contenido completo del archivo (chunked si es grande).
+- **PDF:** se indexa el texto extraído por `pymupdf`.
+- **Otros:** se indexa la descripción provista por el usuario.
+
+#### Límite de tamaño
+
+Tope configurable en `config.yaml` via `documents.max_size_mb` (default: 20MB). Archivos más grandes se rechazan con mensaje al usuario.
+
+#### Impacto en RPi4
+
+| Dependencia | RAM estimada |
+|---|---|
+| `pymupdf` | ~30-50MB pico durante extracción |
+
+`pymupdf` tiene wheels ARM64 precompilados. El pico de RAM es durante la extracción y se libera inmediatamente después.
 
 ### Integraciones externas — arXiv y NASA ADS (Fase 5)
 

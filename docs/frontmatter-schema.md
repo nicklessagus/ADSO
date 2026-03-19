@@ -30,8 +30,12 @@ tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
 media_type: text                       # text | audio | image | link | document — origen del contenido, seteado automáticamente
 status: active                         # valores dependen del type — ver tabla abajo
+source_file: "archivo.pdf"            # opcional — nombre del archivo original cuando el input es un documento adjunto
+source_url: "https://..."             # opcional — URL original cuando el input es un link
 ---
 ```
+
+`source_file` y `source_url` son mutuamente opcionales y pueden coexistir (ej: un paper del que se tiene el PDF y el link).
 
 ---
 
