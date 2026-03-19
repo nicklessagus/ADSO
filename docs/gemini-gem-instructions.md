@@ -194,11 +194,11 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | faster-whisper → texto → usuario confirma/corrige → LLM | Nota en vault |
-| Imagen con descripción | Descripción como contenido, imagen adjunta | Nota en vault |
-| Imagen sin descripción | OCR (Tesseract o Gemini Vision) → usuario confirma/corrige → LLM | Nota en vault |
-| Link (web / arXiv / NASA ADS) | Extracción de metadatos + LLM | Paper académico |
-| PDF (archivo o link) | Gemini lee documento completo: abstract, contribución, métodos, dataset, conclusiones | Paper académico |
-| Nombre de paper | Bot busca en arXiv/ADS, confirma con usuario | Paper académico |
+| Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
+| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite. Archivo siempre guardado en vault. | Nota en vault con archivo |
+| Link web genérico | Extracción de contenido + LLM | Nota en vault |
+| Link arXiv / NASA ADS | API → metadatos estructurados + LLM | Nota de paper |
+| Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
 
 ---
 

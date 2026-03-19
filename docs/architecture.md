@@ -78,11 +78,11 @@ Obsidian (lectura visual, opcional)
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | Whisper → texto → LLM | Nota en vault |
-| Imagen / captura | Descripción del usuario, o OCR local en RPi4 → texto → clasificación LLM | Nota en vault |
-| Link (web / arXiv / NASA ADS) o nombre de paper | Extracción de metadatos + LLM → nota con link clickeable al original | Paper académico |
-| PDF (archivo o link) | Gemini lee el documento completo: extrae abstract, contribución, métodos, dataset, tags semánticos. `media_type: document` (archivo) o `link` (URL) | Paper académico |
-| Documento adjunto (texto plano) | Lee el contenido, clasifica con LLM. Guarda el archivo original + nota companion | Nota en vault con archivo |
-| Documento adjunto (otro formato) | No extrae contenido — pide descripción al usuario. Guarda el archivo original + nota companion | Nota en vault con archivo |
+| Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
+| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite | Nota en vault con archivo |
+| Link web genérico | Extracción de contenido + LLM | Nota en vault |
+| Link arXiv / NASA ADS | API → metadatos estructurados + LLM | Nota de paper |
+| Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
 
 ---
 
@@ -264,60 +264,75 @@ Configurable en `config.yaml` via `content_extraction.engine`. Default: `gemini`
 
 ### Documentos y archivos adjuntos
 
-El usuario puede enviar archivos por Telegram. El bot los procesa según el tipo, pero **siempre guarda el archivo original** en el vault junto a una nota companion `.md` con frontmatter.
+El usuario puede enviar cualquier archivo por Telegram. El flujo es siempre el mismo: el archivo se guarda en el vault y se crea una nota `.md` con frontmatter y un embed `![[archivo]]`.
 
-#### Tipos de archivo
+**El archivo siempre se guarda**, independientemente de si el bot puede leer su contenido o no.
 
-| Tipo | Ejemplos | Procesamiento |
-|---|---|---|
-| **Texto plano** | `.md`, `.txt`, `.py`, `.csv`, `.json` | Lee el contenido → LLM clasifica → preview → confirmar |
-| **PDF** | `.pdf` | Extrae texto + metadata (título, autor, páginas) con `pymupdf` → LLM clasifica → preview → confirmar |
-| **Otros** | `.docx`, `.xlsx`, binarios | No extrae contenido. Pide descripción al usuario → LLM clasifica con esa descripción |
-
-#### Flujo
+#### Flujo unificado
 
 ```
 Usuario manda archivo por Telegram
   │
-  ├─ texto plano? → leer contenido → clasificar con LLM → preview → confirmar → vault
-  │
-  ├─ PDF? → pymupdf extrae texto + metadata → clasificar con LLM → preview → confirmar → vault
-  │
-  └─ otro? → bot pregunta "¿De qué se trata este archivo?"
-            → usuario describe → clasificar con LLM → preview → confirmar → vault
+  └─ Bot pregunta cómo obtener el contenido:
+       [Describilo vos]  +  [Extraer automáticamente] (si el formato lo permite)
+            │                          │
+            │                  según el tipo:
+            │                  ├─ texto plano → leer directamente
+            │                  ├─ PDF → pymupdf extrae texto + metadata
+            │                  ├─ imagen → OCR (Tesseract) o modelo de visión (Gemini)
+            │                  └─ binario/no reconocido → solo [Describilo vos]
+            │
+            └─ texto disponible (descripción o extracción)
+                   → LLM clasifica → preview → confirmar → vault
 ```
 
 En todos los casos se guardan **dos archivos** en el vault:
 - El archivo original (ej: `martinez_2024.pdf`)
-- Una nota companion (ej: `martinez_2024.md`) con frontmatter, resumen/clasificación y un embed `![[archivo]]`
+- Una nota `.md` (ej: `martinez_2024.md`) con frontmatter, resumen/clasificación y `![[martinez_2024.pdf]]`
 
-#### Convergencia con papers por link
+#### Capacidad de extracción por formato
 
-Un PDF de paper y un link de paper siguen el mismo flujo de clasificación. La diferencia es solo la fuente:
-
-| | Link de paper | PDF de paper |
+| Formato | Ejemplos | Extracción automática |
 |---|---|---|
-| **Obtener contenido** | Gemini extrae de la URL / trafilatura | `pymupdf` extrae texto del PDF |
-| **Metadata** | Del HTML (título, autores, abstract) | Del PDF (título, autores, páginas) |
-| **Clasificar** | LLM → `type: paper`, mismo schema | LLM → `type: paper`, mismo schema |
-| **Qué se guarda** | Nota `.md` solamente (`source_url`) | PDF original + nota companion (`source_file`) |
-| **Embeddings** | Del contenido extraído | Del texto extraído del PDF |
+| **Texto plano** | `.md`, `.txt`, `.py`, `.csv`, `.json` | Lectura directa del contenido |
+| **PDF** | `.pdf` | `pymupdf`: texto + metadata (título, autor, páginas) |
+| **Imagen** | `.jpg`, `.png`, `.webp` | OCR (Tesseract, local) o modelo de visión (Gemini, remoto) |
+| **Binario / otro** | `.docx`, `.xlsx`, ejecutables | No disponible — solo descripción del usuario |
 
-Si el usuario provee un PDF **y** un link del mismo paper, la nota companion tiene ambos campos (`source_url` + `source_file`).
+La elección entre OCR y modelo de visión para imágenes es configurable en `config.yaml` via `ocr.engine`. El modelo de visión da descripciones semánticas más ricas (útil para diagramas, fotos, capturas); OCR es más preciso para texto impreso.
+
+#### PDFs sin texto extraíble
+
+Si `pymupdf` no puede extraer texto (PDF escaneado o basado en imagen), el bot lo detecta y cae al flujo de descripción manual.
+
+#### Papers: todas las fuentes producen la misma nota
+
+Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: paper` con el mismo schema de frontmatter. La diferencia es solo el campo de origen:
+
+| | Link arXiv/ADS | PDF adjunto | Búsqueda por nombre |
+|---|---|---|---|
+| **Obtener contenido** | API arXiv/ADS | `pymupdf` extrae texto | Bot busca en arXiv/ADS, usuario confirma |
+| **Metadata** | Estructurada desde la API | Extraída del PDF por LLM | Estructurada desde la API |
+| **Clasificar** | LLM → `type: paper` | LLM → `type: paper` | LLM → `type: paper` |
+| **Campo origen** | `source_url` | `source_file` | `source_url` |
+| **Archivo físico** | No | Sí (PDF en vault) | No |
+| **Embeddings** | Del contenido extraído | Del texto extraído del PDF | Del contenido extraído |
+
+Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos (`source_url` + `source_file`).
 
 #### Estructura en el vault
 
 ```
 01-Projects/mi-proyecto/papers/
 ├── martinez_2024.pdf              # archivo original
-├── martinez_2024.md               # nota companion con frontmatter
+├── martinez_2024.md               # nota de paper (source_file + metadatos)
 
 01-Projects/mi-proyecto/datos/
 ├── script_analisis.py             # archivo original
-├── script_analisis.md             # nota companion
+├── script_analisis.md             # nota del archivo
 ```
 
-El archivo original se ubica en la misma carpeta que la nota companion.
+El archivo original se ubica en la misma carpeta que su nota.
 
 #### PDFs escaneados (sin texto extraíble)
 
@@ -325,9 +340,7 @@ Si `pymupdf` no puede extraer texto del PDF (escaneo, imagen), el bot cae al flu
 
 #### Embeddings
 
-- **Texto plano:** se indexa el contenido completo del archivo (chunked si es grande).
-- **PDF:** se indexa el texto extraído por `pymupdf`.
-- **Otros:** se indexa la descripción provista por el usuario.
+Se indexa lo que se usó para clasificar: el texto extraído (si hubo extracción automática) o la descripción del usuario (si se describió manualmente). En ambos casos el embedding representa el significado del contenido, no el archivo binario.
 
 #### Límite de tamaño
 
@@ -349,7 +362,7 @@ El usuario puede enviar cualquiera de estos inputs para indexar un paper:
 - PDF adjunto
 - Solo el nombre o título del paper (el bot busca y confirma antes de proceder)
 
-El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota estructurada en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original para consulta directa.
+El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota de paper en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
 
 El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → usuario confirma → escritura al vault.
 

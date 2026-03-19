@@ -48,7 +48,7 @@ vault/
 └── _assets/                     # Imágenes (fotos enviadas al bot)
 ```
 
-> **Archivos adjuntos (PDFs, .txt, .py, etc.):** se guardan en la misma carpeta que su nota companion, no en `_assets/`. Esto permite que el embed `![[archivo]]` funcione naturalmente y mantiene la relación archivo-nota visible en el filesystem. `_assets/` se reserva para imágenes.
+> **Archivos adjuntos (PDFs, .txt, .py, etc.):** se guardan en la misma carpeta que su nota `.md`, no en `_assets/`. Esto permite que el embed `![[archivo]]` funcione naturalmente y mantiene la relación archivo-nota visible en el filesystem. `_assets/` se reserva para imágenes.
 
 ```
 ```
