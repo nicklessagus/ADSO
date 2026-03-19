@@ -235,6 +235,29 @@ VAULT_PATH                 # default: /vault
 
 ---
 
+## Pendiente de decisión (próxima sesión)
+
+### Taxonomía de tipos (`type`) — EN DISCUSIÓN
+
+El campo `type` actual mezcla tipo de contenido con ubicación PARA. Problema concreto: `project-note` implica que las notas solo viven en Projects, pero material de referencia suelta debería poder ir a `03-Resources/` también.
+
+**Propuesta a evaluar:** renombrar `project-note` → `note`. La carpeta destino (Projects vs Resources) la determina si la nota tiene proyecto asociado o no.
+
+| Tipo propuesto | Destino |
+|---|---|
+| `note` | `01-Projects/` si tiene proyecto, `03-Resources/` si es referencia suelta |
+| `paper` | `01-Projects/.../papers/` si tiene proyecto, `03-Resources/` si es suelta |
+| `task` | `02-Areas/tareas/` siempre |
+| `idea` | `04-Ideas/` siempre |
+| `inbox` | `00-Inbox/` siempre |
+| `project-index` | `01-Projects/{proyecto}/` — auto-generado |
+
+`paper` se mantiene como tipo propio (schema rico: authors, year, doi, methods, dataset, contribution, conclusions; workflow arXiv/pymupdf; lifecycle unread→read).
+
+Si se aprueba: actualizar `docs/frontmatter-schema.md`, `docs/obsidian-vault-structure.md`, `docs/architecture.md`, `docs/gemini-gem-instructions.md` y este CLAUDE.md.
+
+---
+
 ## Decisiones clave
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
