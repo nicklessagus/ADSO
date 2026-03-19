@@ -54,8 +54,8 @@ tests/
 │   │   ├── classify_link.json
 │   │   ├── classify_image.json
 │   │   ├── classify_document.json
-│   │   ├── generate_frontmatter_project_note.json
-│   │   ├── generate_frontmatter_paper.json
+│   │   ├── generate_frontmatter_note.json
+│   │   ├── generate_frontmatter_note_academic.json  # note con campos académicos opcionales
 │   │   ├── generate_frontmatter_task.json
 │   │   ├── generate_frontmatter_idea.json
 │   │   ├── disambiguation_response.json  # respuesta con confianza baja en modo
@@ -63,8 +63,8 @@ tests/
 │   │   ├── malformed_json.json    # respuesta inválida para test de error handling
 │   │   └── empty_response.json    # respuesta vacía para test de modo degradado
 │   └── sample_notes/              # notas .md de ejemplo con frontmatter válido
-│       ├── project_note.md
-│       ├── paper.md
+│       ├── note.md
+│       ├── note_academic.md          # note con campos académicos (authors, doi, etc.)
 │       ├── task.md
 │       ├── idea.md
 │       └── inbox_pending.md
@@ -104,9 +104,9 @@ Testean funciones puras sin I/O externo. Son el grueso de la suite.
 #### `test_frontmatter.py`
 
 Qué se testea:
-- Generación de frontmatter válido por cada tipo (`project-note`, `paper`, `task`, `idea`, `inbox`, `project-index`)
+- Generación de frontmatter válido por cada tipo (`note`, `task`, `idea`, `inbox`, `project-index`)
 - Campos base siempre presentes: `title`, `date_created`, `date_modified`, `type`, `tags`, `source`, `media_type`, `status`
-- Campos específicos por tipo (ej: `paper` tiene `authors`, `year`, `doi`)
+- Campos académicos opcionales en `note` (`authors`, `year`, `doi`, `methods`, etc.) presentes solo cuando aplica
 - `date_created` y `date_modified` en formato ISO 8601
 - `tags` en kebab-case
 - `source` es `"telegram"` para notas de usuario y `"system"` para `project-index`
@@ -262,7 +262,7 @@ Qué se testea:
 - **Backlinks múltiples:** varias notas linkean a la misma → retorna todas
 - **Backlinks inexistentes:** nota sin backlinks → retorna lista vacía
 - **Filtro por frontmatter:** buscar `type=task, status=pending` → solo retorna tasks pendientes
-- **Filtro combinado:** `project=tesis AND type=paper` → solo papers de tesis
+- **Filtro combinado:** `project=tesis AND type=note` → solo notas de tesis
 - **Tags:** buscar por `#metodo` retorna notas con `#metodo` y `#metodo/cnn`
 - **Vault vacío:** no falla, retorna resultados vacíos
 - **Notas con frontmatter inválido:** se ignoran sin romper la búsqueda
@@ -338,8 +338,8 @@ from unittest.mock import AsyncMock
 @pytest.fixture
 def vault_path(tmp_path) -> Path:
     """Crea estructura de vault temporal con carpetas PARA."""
-    for d in ["00-Inbox", "01-Projects", "02-Areas/tareas",
-              "03-Resources", "04-Ideas", "05-Archive"]:
+    for d in ["00-Inbox", "01-Projects", "02-Areas",
+              "03-Resources", "05-Archive"]:
         (tmp_path / d).mkdir(parents=True)
     return tmp_path
 
@@ -354,10 +354,10 @@ def chroma_path(tmp_path) -> Path:
 def mock_llm_client() -> AsyncMock:
     """Mock de llm_client con respuestas default."""
     client = AsyncMock()
-    # Respuesta default: project-note clasificada
+    # Respuesta default: note clasificada
     client.classify.return_value = {
         "mode": "captura",
-        "type": "project-note",
+        "type": "note",
         "project": "tesis",
         "section": "experimentos",
         ...

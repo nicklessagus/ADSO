@@ -25,7 +25,7 @@ Define la estructura de metadatos que el bot genera automáticamente para cada n
 title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
-type: project-note                     # Ver tipos válidos abajo
+type: note                              # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
 media_type: text                       # text | audio | image | link | document — origen del contenido, seteado automáticamente
@@ -47,8 +47,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 
 | Tipo | Valores de `status` | Default |
 |---|---|---|
-| `project-note` | `active`, `pending-classification` | `active` |
-| `paper` | `unread`, `reading`, `read`, `pending-classification` | `unread` |
+| `note` | `active`, `pending-classification` | `active` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
 | `inbox` | `pending-classification` | `pending-classification` |
@@ -60,8 +59,7 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
-| `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
-| `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico (en Resources si no tiene proyecto asociado) |
+| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `03-Resources/` si es referencia suelta | Nota de contenido general (incluye papers y cualquier material de referencia) |
 | `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `02-Areas/{area}/` | Idea sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
@@ -71,24 +69,27 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 
 ## Campos adicionales por tipo
 
-### `project-note`
+### `note`
 ```yaml
 ---
-type: project-note
-project: "tesis"                        # nombre del proyecto (carpeta)
-section: "experimentos"                 # sección dentro del proyecto
+type: note
+project: "tesis"                        # nombre del proyecto (carpeta) — opcional, sin proyecto va a 03-Resources/
+section: "experimentos"                 # sección dentro del proyecto — opcional, solo si tiene proyecto
 summary: "Resumen generado por LLM"    # para notas largas
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
 
-### `paper`
+### Campos opcionales para contenido académico
+
+Cuando el pipeline de extracción detecta contenido académico (papers, artículos, preprints), estos campos se agregan al frontmatter de la nota. No definen un tipo separado — un paper es una `note` con tag `#paper` y estos campos poblados.
+
+Los papers se identifican por la presencia del tag `#paper` y/o la presencia de estos campos en el frontmatter.
+
 ```yaml
 ---
-type: paper
-status: unread                          # unread | reading | read
-project: "tesis"                        # opcional — sin proyecto va a 03-Resources/
-section: "papers"                       # opcional — solo si tiene proyecto (default: "papers")
+type: note
+tags: [paper, cosmologia, machine-learning]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
@@ -96,7 +97,6 @@ doi: "10.XXXX/..."                      # opcional
 relevance: "Para qué sirve este paper" # provisto por el usuario o inferido por LLM
 context: "Contexto adicional de uso"   # opcional, ej: "comparar con modelo actual"
 priority: medium                        # low | medium | high — inferido o explícito
-tags: [cosmologia, machine-learning]
 # Extraídos por Gemini del PDF completo:
 contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
 methods: ["transformer", "contrastive-learning"]   # métodos/técnicas usadas
@@ -105,8 +105,6 @@ conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
 related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
-> Paper con proyecto → `01-Projects/{proyecto}/papers/`
-> Paper sin proyecto → `03-Resources/` (referencia suelta, no asociado a ningún proyecto)
 
 ### `task`
 ```yaml
@@ -184,7 +182,7 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 - Los `tags` se generan en kebab-case, en el idioma del contenido
 - El bot actualiza `date_modified` al editar notas existentes
 - `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
-- **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. La prioridad explícita del usuario siempre gana sobre la inferida. Si no hay señal clara, sugiere `medium` y pregunta. Solo aplica a tipos accionables: `task`, `paper`, `idea`.
+- **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. La prioridad explícita del usuario siempre gana sobre la inferida. Si no hay señal clara, sugiere `medium` y pregunta. Solo aplica a tipos accionables: `task`, `idea`.
 
 ---
 
@@ -201,15 +199,16 @@ SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC
 **Papers pendientes de leer:**
 ```dataview
 TABLE authors, year, priority, relevance
-FROM "01-Projects"
-WHERE type = "paper" AND status = "unread"
+FROM "01-Projects" OR "03-Resources"
+WHERE contains(tags, "paper") AND authors
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
 
 **Papers de la tesis:**
 ```dataview
 TABLE authors, year, relevance
-FROM "01-Projects/tesis/papers"
+FROM "01-Projects/tesis"
+WHERE contains(tags, "paper")
 SORT year DESC
 ```
 

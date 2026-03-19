@@ -132,8 +132,7 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 
 | Tipo | Destino | Descripción |
 |---|---|---|
-| `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
-| `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico con metadatos. En Resources si es referencia suelta; en el proyecto si está asociado |
+| `note` | `01-Projects/{proyecto}/{seccion}/` o `03-Resources/` (si es referencia suelta, sin proyecto) | Nota general. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
 | `task` | `02-Areas/{area}/` + Google Tasks | Tarea sin proyecto activo — el área determina la carpeta destino |
 | `idea` | `02-Areas/{area}/` | Intención sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |

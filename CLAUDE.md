@@ -103,7 +103,7 @@ Las áreas no tienen ciclo de vida.
 title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
-type: ""           # project-note | paper | task | idea | inbox | project-index
+type: ""           # note | task | idea | inbox | project-index
 tags: []
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
@@ -117,7 +117,7 @@ El tipo `project-index` se genera automáticamente al crear un proyecto (no por 
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`).
 
 ### Prioridad inferida
-El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, paper, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
+El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
 
 ---
 
@@ -235,30 +235,9 @@ VAULT_PATH                 # default: /vault
 
 ---
 
-## Pendiente de decisión (próxima sesión)
-
-### Taxonomía de tipos (`type`) — EN DISCUSIÓN
-
-El campo `type` actual mezcla tipo de contenido con ubicación PARA. Problema concreto: `project-note` implica que las notas solo viven en Projects, pero material de referencia suelta debería poder ir a `03-Resources/` también.
-
-**Propuesta a evaluar:** renombrar `project-note` → `note`. La carpeta destino (Projects vs Resources) la determina si la nota tiene proyecto asociado o no.
-
-| Tipo propuesto | Destino |
-|---|---|
-| `note` | `01-Projects/` si tiene proyecto, `03-Resources/` si es referencia suelta |
-| `paper` | `01-Projects/.../papers/` si tiene proyecto, `03-Resources/` si es suelta |
-| `task` | `02-Areas/{area}/` siempre |
-| `idea` | `02-Areas/{area}/` siempre |
-| `inbox` | `00-Inbox/` siempre |
-| `project-index` | `01-Projects/{proyecto}/` — auto-generado |
-
-`paper` se mantiene como tipo propio (schema rico: authors, year, doi, methods, dataset, contribution, conclusions; workflow arXiv/pymupdf; lifecycle unread→read).
-
-Si se aprueba: actualizar `docs/frontmatter-schema.md`, `docs/obsidian-vault-structure.md`, `docs/architecture.md`, `docs/gemini-gem-instructions.md` y este CLAUDE.md.
-
----
-
 ## Decisiones clave
+
+- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `note`, `task`, `idea`, `inbox`, `project-index`. No existe `type: paper` — un paper es un `note` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
 - **Google Calendar y Tasks:** vault es fuente de verdad. Sync cada 30 min (configurable via `sync.interval_minutes`). Calendar y Tasks se reconcilian en el mismo cron. Si hay conflicto entre cambios en Google y en el vault, gana el vault.

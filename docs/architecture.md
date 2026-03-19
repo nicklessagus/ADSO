@@ -81,8 +81,8 @@ Obsidian (lectura visual, opcional)
 | Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
 | Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite | Nota en vault con archivo |
 | Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
-| Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota de paper |
-| Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
+| Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota con campos académicos |
+| Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota con campos académicos |
 
 ---
 
@@ -191,7 +191,7 @@ En una consulta RAG el bot puede usar ambos: ChromaDB encuentra notas relevantes
 
 #### Qué se puede agendar
 
-Solo ítems que ya existen en el vault: `task`, `paper` (bloque de lectura), `idea` (sesión de trabajo), `project-note` (hito o reunión). El bot no crea eventos de calendario sin un ítem del vault como origen.
+Solo ítems que ya existen en el vault: `task`, `idea` (sesión de trabajo), `note` (hito o reunión). El bot no crea eventos de calendario sin un ítem del vault como origen.
 
 #### Flujos de agendamiento
 
@@ -316,13 +316,13 @@ Si `pymupdf` no puede extraer texto (PDF escaneado o basado en imagen), el bot l
 
 #### Papers: todas las fuentes producen la misma nota
 
-Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: paper` con el mismo schema de frontmatter. La diferencia es solo el campo de origen:
+Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: note` con campos académicos poblados (authors, year, doi, methods, dataset, contribution, conclusions). La diferencia es solo el campo de origen:
 
 | | Link arXiv/ADS | PDF adjunto | Búsqueda por nombre |
 |---|---|---|---|
 | **Obtener contenido** | API arXiv/ADS | `pymupdf` extrae texto | Bot busca en arXiv/ADS, usuario confirma |
 | **Metadata** | Estructurada desde la API | Extraída del PDF por LLM | Estructurada desde la API |
-| **Clasificar** | LLM → `type: paper` | LLM → `type: paper` | LLM → `type: paper` |
+| **Clasificar** | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos |
 | **Campo origen** | `source_url` | `source_file` | `source_url` |
 | **Archivo físico** | No | Sí (PDF en vault) | No |
 | **Embeddings** | Del contenido extraído | Del texto extraído del PDF | Del contenido extraído |
@@ -334,7 +334,7 @@ Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos 
 ```
 01-Projects/mi-proyecto/papers/
 ├── martinez_2024.pdf              # archivo original
-├── martinez_2024.md               # nota de paper (source_file + metadatos)
+├── martinez_2024.md               # nota con campos académicos (source_file + metadatos)
 
 01-Projects/mi-proyecto/datos/
 ├── script_analisis.py             # archivo original
@@ -371,7 +371,7 @@ El usuario puede enviar cualquiera de estos inputs para indexar un paper:
 - PDF adjunto
 - Solo el nombre o título del paper (el bot busca y confirma antes de proceder)
 
-El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota de paper en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
+El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota (`type: note` con campos académicos) en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
 
 El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → usuario confirma → escritura al vault.
 
@@ -533,7 +533,7 @@ services:
 
 ### Validación del vault al startup
 
-Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas/tareas`, `03-Resources`, `04-Ideas`, `05-Archive`). Si faltan carpetas, las crea y loguea la acción. Si el path no existe o no es un directorio, el bot falla con error claro y no arranca.
+Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas`, `03-Resources`, `05-Archive`). Si faltan carpetas, las crea y loguea la acción. Si el path no existe o no es un directorio, el bot falla con error claro y no arranca.
 
 ### Restricciones RPi4 (4GB RAM)
 

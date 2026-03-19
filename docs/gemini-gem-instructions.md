@@ -91,9 +91,10 @@ vault/
 │   │   └── papers/              # Papers asociados al proyecto
 │   └── ...
 ├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin)
-│   └── tareas/                  # Tareas sueltas sin proyecto asignado
+│   ├── docencia/                # Área real: docencia
+│   ├── investigacion/           # Área real: investigación
+│   └── {area}/                  # Otras áreas según necesidad
 ├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos)
-├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
 ├── 05-Archive/                  # Proyectos completados, pausados o abandonados
 └── _assets/                     # Imágenes y adjuntos
 ```
@@ -103,13 +104,13 @@ vault/
 - **Proyecto:** tiene tema, inicio y fin. Agrupa trabajo hacia un objetivo concreto. Tiene `_index.md`.
 - **Sección:** subdivisión temática dentro de un proyecto. Se crea dinámicamente.
 - **Subproyecto:** proyecto anidado dentro de otro, con su propio `_index.md`.
-- **Área:** dominio de responsabilidad continua sin fecha de cierre (ej: `tareas`).
-- **Idea:** intención sin proyecto asignado. Puede promoverse a proyecto.
+- **Área:** dominio de responsabilidad continua sin fecha de cierre (ej: `docencia`, `investigacion`).
+- **Idea:** intención sin proyecto asignado. Vive en su área correspondiente. Puede promoverse a proyecto.
 
 ### Ciclo de vida
 
 ```
-Idea (04-Ideas/) → Proyecto activo (01-Projects/) → Archivo (05-Archive/) → eliminado (doble confirmación)
+Idea (02-Areas/{area}/) → Proyecto activo (01-Projects/) → Archivo (05-Archive/) → eliminado (doble confirmación)
 ```
 
 Los resources no tienen ciclo de vida (referencia permanente). Las áreas no tienen ciclo de vida.
@@ -131,7 +132,7 @@ Los resources no tienen ciclo de vida (referencia permanente). Las áreas no tie
 title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
-type: project-note                     # project-note | paper | task | idea | inbox | project-index
+type: note                             # note | task | idea | inbox | project-index
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case, idioma del contenido
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: text                       # text | audio | image | link | document
@@ -143,10 +144,9 @@ status: active                         # valores dependen del type
 
 | Tipo | Carpeta destino | Valores de `status` | Default |
 |---|---|---|---|
-| `project-note` | `01-Projects/{proyecto}/{seccion}/` | `active`, `pending-classification` | `active` |
-| `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | `unread`, `reading`, `read`, `pending-classification` | `unread` |
-| `task` | `02-Areas/tareas/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
-| `idea` | `04-Ideas/` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
+| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `03-Resources/` si es referencia suelta | `active`, `pending-classification` | `active` |
+| `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
+| `idea` | `02-Areas/{area}/` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
 | `inbox` | `00-Inbox/` | `pending-classification` | `pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed` | `active` |
 
@@ -156,9 +156,9 @@ No existe `status: archived` — archivar es mover el archivo a `05-Archive/`.
 
 ### Campos adicionales por tipo
 
-**`project-note`:** `project`, `section`, `summary`, `related`
+**`note`:** `project` (opcional), `section` (opcional), `summary`, `related`
 
-**`paper`:** `project` (opcional), `section` (default: "papers"), `authors`, `year`, `url`, `doi` (opcional), `relevance`, `context` (opcional), `priority` (low/medium/high), `contribution`, `methods`, `dataset` (opcional), `conclusions`, `related`
+Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
 **`task`:** `priority` (low/medium/high), `project` (opcional — solo metadata, no cambia ubicación), `due_date` (ISO 8601, solo fecha), `scheduled` (ISO 8601, fecha/hora — seteado al agendar), `related`
 
@@ -168,7 +168,7 @@ No existe `status: archived` — archivar es mover el archivo a `05-Archive/`.
 
 ### Prioridad inferida
 
-El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (`task`, `paper`, `idea`). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
+El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (`task`, `idea`). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
 
 ---
 
@@ -324,7 +324,7 @@ Al crear una nota nueva, el bot busca en ChromaDB las notas más similares y sug
 
 - **Lectura:** todos los calendarios del usuario
 - **Escritura y borrado:** solo en calendario dedicado `ADSO` (creado por el bot si no existe)
-- Solo se agendan ítems que ya existen en el vault: `task`, `paper` (bloque de lectura), `idea` (sesión de trabajo), `project-note` (hito o reunión)
+- Solo se agendan ítems que ya existen en el vault: `task`, `idea` (sesión de trabajo), `note` (hito, reunión o bloque de lectura)
 - Fecha + hora → evento con horario. Solo día → evento de día completo.
 
 ### Tasks
@@ -458,7 +458,7 @@ services:
 ```
 
 ### Validación al startup
-Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas/tareas`, `03-Resources`, `04-Ideas`, `05-Archive`). Si faltan carpetas, las crea. Si el path no existe, falla con error claro.
+Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas`, `03-Resources`, `05-Archive`). Si faltan carpetas, las crea. Si el path no existe, falla con error claro.
 
 ### Estimación de recursos RPi4
 

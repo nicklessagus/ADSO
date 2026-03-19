@@ -76,7 +76,7 @@ response_schema = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
-        "note_type": {"type": "string", "enum": ["project-note", "paper", "task", "idea", "inbox"]},
+        "note_type": {"type": "string", "enum": ["note", "task", "idea", "inbox"]},
         "project": {"type": "string"},
         "section": {"type": "string"},
         "frontmatter": {"type": "object"},
@@ -91,11 +91,10 @@ response_schema = {
 El JSON del LLM se valida contra el schema completo antes de escribir al vault. Si cualquier campo falla, la nota va a `00-Inbox/` con `status: pending-classification` y se loguea el intento.
 
 ```python
-VALID_TYPES = {"project-note", "paper", "task", "idea", "inbox", "project-index"}
+VALID_TYPES = {"note", "task", "idea", "inbox", "project-index"}
 
 VALID_STATUS = {
-    "project-note":   {"active", "pending-classification"},
-    "paper":          {"unread", "reading", "read", "pending-classification"},
+    "note":           {"active", "pending-classification"},
     "task":           {"pending", "in-progress", "done", "pending-classification"},
     "idea":           {"raw", "developing", "mature", "pending-classification"},
     "inbox":          {"pending-classification"},
