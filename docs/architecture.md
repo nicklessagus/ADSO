@@ -242,6 +242,29 @@ El usuario puede enviar una foto de dos formas:
 
 Configurable en `config.yaml` via `ocr.engine` (`tesseract` o `gemini`). Default: `tesseract`.
 
+### Extracción de contenido web (links genéricos)
+
+Cuando el usuario envía una URL que no es arXiv ni NASA ADS, el bot extrae el contenido de la página antes de enviarlo al LLM para clasificación.
+
+**Motor configurable:**
+
+| Motor | Cómo funciona | Cuándo usar |
+|---|---|---|
+| **`gemini`** — default | La URL se pasa directamente a Gemini, que la lee y extrae el contenido relevante sin fetch local | Producción — sin dependencias extra, Gemini maneja JS, paywalls parciales, etc. |
+| **`trafilatura`** — fallback | Fetch local con `trafilatura` (Python puro): extrae el cuerpo principal descartando nav, ads, footers. El texto resultante se envía al LLM | Desarrollo y testing — no requiere conectividad de Gemini, reproducible, sin costo de API |
+
+```
+# Motor gemini (producción):
+URL → Gemini API (lee y extrae) → clasifica → frontmatter
+
+# Motor trafilatura (desarrollo):
+URL → fetch local → trafilatura extrae texto → truncar a max_web_tokens → Gemini clasifica → frontmatter
+```
+
+Configurable en `config.yaml` via `content_extraction.engine`. Default: `gemini`.
+
+**Límite de tokens:** en ambos casos el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
+
 ### Integraciones externas — arXiv y NASA ADS (Fase 5)
 
 El usuario puede enviar cualquiera de estos inputs para indexar un paper:

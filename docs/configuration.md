@@ -67,6 +67,12 @@ whisper:
 ocr:
   engine: tesseract              # tesseract | gemini — motor de extracción de texto de imágenes
 
+# ─── Extracción de contenido web ───────────────────────────────────────────
+content_extraction:
+  engine: gemini                 # gemini | trafilatura
+                                 # gemini: Gemini lee la URL directamente (producción, default)
+                                 # trafilatura: fetch local con trafilatura Python (desarrollo/testing)
+
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
   enabled: true
