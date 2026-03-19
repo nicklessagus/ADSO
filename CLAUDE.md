@@ -86,15 +86,15 @@ adso/
 ### Taxonomía
 ```
 01-Projects/{proyecto}/{seccion}/nota.md       # tiene inicio y fin
-02-Areas/tareas/nota.md                        # sin fin, continuo
+02-Areas/{area}/nota.md                        # sin fin, continuo — áreas reales (docencia, investigacion, etc.)
 03-Resources/                                  # material de referencia permanente (papers sueltos, etc.)
-04-Ideas/nota.md                               # intenciones sin proyecto; pueden promoverse a proyecto
 00-Inbox/nota.md                               # sin clasificar
 05-Archive/                                    # proyectos inactivos o completados
 ```
+Las ideas (`type: idea`) viven en su área correspondiente. No hay carpeta `04-Ideas/`.
 
 ### Ciclo de vida
-Idea → Proyecto activo → Archivo → (borrado con doble confirmación)
+Nota con `type: idea` en área → Proyecto activo → Archivo → (borrado con doble confirmación)
 Las áreas no tienen ciclo de vida.
 
 ### Frontmatter mínimo requerido
@@ -247,8 +247,8 @@ El campo `type` actual mezcla tipo de contenido con ubicación PARA. Problema co
 |---|---|
 | `note` | `01-Projects/` si tiene proyecto, `03-Resources/` si es referencia suelta |
 | `paper` | `01-Projects/.../papers/` si tiene proyecto, `03-Resources/` si es suelta |
-| `task` | `02-Areas/tareas/` siempre |
-| `idea` | `04-Ideas/` siempre |
+| `task` | `02-Areas/{area}/` siempre |
+| `idea` | `02-Areas/{area}/` siempre |
 | `inbox` | `00-Inbox/` siempre |
 | `project-index` | `01-Projects/{proyecto}/` — auto-generado |
 

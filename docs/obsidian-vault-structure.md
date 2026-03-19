@@ -39,11 +39,11 @@ vault/
 │       ├── _index.md
 │       └── ...
 ├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin) — concepto PARA
-│   └── tareas/                  # Área inicial: tareas sueltas sin proyecto asignado
+│   ├── docencia/                # Tareas, notas e ideas de docencia sin proyecto asignado
+│   ├── investigacion/           # Tareas, notas e ideas de investigación sin proyecto asignado
+│   └── personal/                # (ilustrativo — las áreas reales se crean según necesidad)
 ├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos, herramientas)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
-├── 04-Ideas/                    # Intenciones sin proyecto definido (tienen ciclo de vida)
-│                                # Pueden promoverse a proyecto (se mueven) o abandonarse (se borran)
 ├── 05-Archive/                  # Proyectos completados, pausados o eliminados
 └── _assets/                     # Imágenes (fotos enviadas al bot)
 ```
@@ -63,9 +63,9 @@ Tiene un tema, un inicio y un fin. Agrupa todo el trabajo relacionado con un obj
 Ejemplos: `tesis`, `adso`, `curso-python`, proyectos del trabajo
 
 ### Área
-Dominio de responsabilidad continua sin fecha de cierre — el concepto PARA original. Actualmente implementado con una sola área (`tareas`), que agrupa tareas sueltas no asociadas a ningún proyecto. Se puede ampliar con nuevas áreas según necesidad (`docencia`, `investigacion-general`, etc.).
+Dominio de responsabilidad continua sin fecha de cierre — el concepto PARA original. Las áreas agrupan tareas, notas e ideas que no pertenecen a ningún proyecto activo. Son estables y se crean manualmente según la estructura real del usuario (ej: `docencia`, `investigacion`, `personal`).
 
-Ejemplos de tareas en `tareas/`: "revisar guía de ejercicios de X materia", "renovar credencial", "llamar al banco".
+Ejemplos de tareas en `docencia/`: "preparar guía de ejercicios de X materia". Ejemplos en `personal/`: "renovar credencial", "llamar al banco".
 
 ### Sección
 Subdivisión temática dentro de un proyecto. No es un proyecto — es una categoría organizativa. Se crea dinámicamente cuando aparece contenido que no encaja en secciones existentes.
@@ -77,17 +77,14 @@ Proyecto anidado dentro de otro que tiene objetivo y ciclo de vida propios. Se m
 
 Ejemplo: una herramienta desarrollada durante la tesis que luego tiene vida propia.
 
-### Ideas
-Conocimiento o iniciativas sin proyecto asignado. Pueden convertirse en proyectos mediante una operación explícita del bot.
-
 ---
 
 ## Ciclo de vida de proyectos e ideas
 
 ```
-Idea (04-Ideas/)
+Nota con type:idea en 02-Areas/{area}/
         │
-        │  "convertir en proyecto" → idea se mueve, no queda copia
+        │  "convertir en proyecto" → nota se mueve, no queda copia
         ▼
 Proyecto activo (01-Projects/)    ←── también puede crearse desde cero
         │
@@ -112,7 +109,7 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 |---|---|---|
 | Crear proyecto / subproyecto | Sí | — |
 | Crear sección | Sí | — |
-| Convertir idea en proyecto | Sí | La idea se mueve, no se borra |
+| Convertir idea en proyecto | Sí | La nota se mueve de su área a Projects, no se borra |
 | Archivar proyecto | Sí | Sí — se puede desarchivar |
 | Borrar proyecto | Doble confirmación | No |
 | Borrar nota | Sí | No |
@@ -137,8 +134,8 @@ El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
 | `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico con metadatos. En Resources si es referencia suelta; en el proyecto si está asociado |
-| `task` | `02-Areas/tareas/` + Google Tasks | Tarea (siempre en `tareas/`, con o sin proyecto asociado) |
-| `idea` | `04-Ideas/` | Intención sin proyecto definido, con ciclo de vida propio |
+| `task` | `02-Areas/{area}/` + Google Tasks | Tarea sin proyecto activo — el área determina la carpeta destino |
+| `idea` | `02-Areas/{area}/` | Intención sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 

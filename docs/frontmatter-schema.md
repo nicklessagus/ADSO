@@ -62,8 +62,8 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 |---|---|---|
 | `project-note` | `01-Projects/{proyecto}/{seccion}/` | Nota dentro de un proyecto |
 | `paper` | `01-Projects/{proyecto}/papers/` o `03-Resources/` | Paper académico (en Resources si no tiene proyecto asociado) |
-| `task` | `02-Areas/tareas/` | Tarea (con `due_date`/`scheduled` opcionales → Google Calendar) |
-| `idea` | `04-Ideas/` | Idea sin proyecto definido |
+| `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
+| `idea` | `02-Areas/{area}/` | Idea sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 
@@ -114,13 +114,14 @@ related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, ele
 type: task
 status: pending                         # pending | in-progress | done
 priority: medium                        # low | medium | high — inferido o explícito
+area: "investigacion"                   # determina la carpeta destino (02-Areas/{area}/) — inferido por LLM
 project: "tesis"                        # opcional, máximo un proyecto (string, no lista). Solo metadata — no cambia la ubicación ni la lista destino
 due_date: "2025-02-01"                  # opcional — fecha límite, ISO 8601 (solo fecha)
 scheduled: "2025-01-28T10:00:00"        # opcional — fecha/hora agendada en Calendar, seteado automáticamente al agendar
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
-> Las tasks siempre se ubican en `02-Areas/tareas/`, independientemente de si tienen proyecto. El campo `project` es para filtrar y consultar, no determina la carpeta destino.
+> Las tasks se ubican en `02-Areas/{area}/`. El campo `project` es metadata, no determina la carpeta destino.
 > Todas las tasks se sincronizan a la lista única `ADSO` en Google Tasks.
 > Si la tarea tiene fecha/hora explícita, va además a Google Calendar.
 > Si no tiene fecha, va solo a Google Tasks.
@@ -130,6 +131,7 @@ related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el
 ---
 type: idea
 status: raw                             # raw | developing | mature
+area: "investigacion"                   # opcional — determina la carpeta destino (02-Areas/{area}/). Si no hay área clara → 00-Inbox/
 priority: low                           # low | medium | high — inferido o explícito
 related: ["[[nota-relacionada]]"]       # opcional
 ---
@@ -190,9 +192,9 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 
 **Tareas pendientes por prioridad:**
 ```dataview
-TABLE date_created, priority, project
-FROM "02-Areas/tareas"
-WHERE status = "pending"
+TABLE date_created, priority, area, project
+FROM "02-Areas"
+WHERE type = "task" AND status = "pending"
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC
 ```
 
@@ -214,8 +216,8 @@ SORT year DESC
 **Ideas sin desarrollar:**
 ```dataview
 LIST
-FROM "04-Ideas"
-WHERE status = "raw"
+FROM "02-Areas"
+WHERE type = "idea" AND status = "raw"
 ```
 
 **Todo lo anotado esta semana:**
