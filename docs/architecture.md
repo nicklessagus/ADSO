@@ -130,7 +130,7 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   | **defuddle** | Extracción limpia de contenido web → útil para Fase 5 (links, papers) |
 
 ### `config.py` — Configuración y constantes
-- Carga variables de entorno y `config.yaml`
+- Carga variables de entorno y `config.yaml` (obligatorio; si no existe, el bot falla con error)
 - Expone constantes y defaults para todos los módulos
 - Merge de `.env` (precedencia) con `config.yaml` (comportamiento)
 - Validación de tipos y valores al iniciar
@@ -268,7 +268,7 @@ El motor de extracción para links genéricos (`gemini` o `trafilatura`) es un d
 
 ### Documentos y archivos adjuntos
 
-El usuario puede enviar cualquier archivo por Telegram. El flujo es siempre el mismo: el archivo se guarda en el vault y se crea una nota `.md` con frontmatter y un embed `![[archivo]]`.
+El usuario puede enviar cualquier archivo por Telegram. El flujo es siempre el mismo: el archivo se guarda en `03-Resources/` y se crea una nota `.md` en la carpeta que determine la clasificación del LLM, con frontmatter y un embed `![[archivo]]`.
 
 **El archivo siempre se guarda**, independientemente de si el bot puede leer su contenido o no.
 
@@ -296,8 +296,8 @@ Usuario manda archivo por Telegram
 El paso de confirmación/corrección del texto extraído aplica a **todas** las extracciones automáticas (texto plano, PDF, imagen), igual que el flujo de audio. El usuario ve lo que el bot leyó antes de que se clasifique.
 
 En todos los casos se guardan **dos archivos** en el vault:
-- El archivo original (ej: `martinez_2024.pdf`)
-- Una nota `.md` (ej: `martinez_2024.md`) con frontmatter, resumen/clasificación y `![[martinez_2024.pdf]]`
+- El archivo original (ej: `martinez_2024.pdf`) → siempre en `03-Resources/`
+- Una nota `.md` (ej: `martinez_2024.md`) con frontmatter, resumen/clasificación y `![[martinez_2024.pdf]]` → en la carpeta que determine la clasificación del LLM (proyecto, área, etc.)
 
 #### Capacidad de extracción por formato
 
@@ -324,7 +324,7 @@ Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda po
 | **Metadata** | Estructurada desde la API | Extraída del PDF por LLM | Estructurada desde la API |
 | **Clasificar** | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos |
 | **Campo origen** | `source_url` | `source_file` | `source_url` |
-| **Archivo físico** | No | Sí (PDF en vault) | No |
+| **Archivo físico** | No | Sí (PDF en `03-Resources/`) | No |
 | **Embeddings** | Del contenido extraído | Del texto extraído del PDF | Del contenido extraído |
 
 Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos (`source_url` + `source_file`).
@@ -332,16 +332,18 @@ Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos 
 #### Estructura en el vault
 
 ```
+03-Resources/
+├── martinez_2024.pdf              # archivo original (siempre en Resources)
+├── script_analisis.py             # archivo original (siempre en Resources)
+
 01-Projects/mi-proyecto/papers/
-├── martinez_2024.pdf              # archivo original
-├── martinez_2024.md               # nota con campos académicos (source_file + metadatos)
+├── martinez_2024.md               # nota con campos académicos (source_file + ![[martinez_2024.pdf]])
 
 01-Projects/mi-proyecto/datos/
-├── script_analisis.py             # archivo original
-├── script_analisis.md             # nota del archivo
+├── script_analisis.md             # nota del archivo (![[script_analisis.py]])
 ```
 
-El archivo original se ubica en la misma carpeta que su nota.
+El archivo original siempre va a `03-Resources/`. La nota `.md` va donde el LLM clasifique el contenido (proyecto, área, etc.) y referencia al archivo con `![[archivo]]`.
 
 #### PDFs escaneados (sin texto extraíble)
 
@@ -534,6 +536,8 @@ services:
 ### Validación del vault al startup
 
 Al iniciar, el bot verifica que `VAULT_PATH` existe y contiene la estructura base (`00-Inbox`, `01-Projects`, `02-Areas`, `03-Resources`, `05-Archive`). Si faltan carpetas, las crea y loguea la acción. Si el path no existe o no es un directorio, el bot falla con error claro y no arranca.
+
+También verifica que `config.yaml` existe. Si no existe, el bot falla con error claro y no arranca.
 
 ### Restricciones RPi4 (4GB RAM)
 

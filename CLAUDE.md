@@ -87,7 +87,7 @@ adso/
 ```
 01-Projects/{proyecto}/{seccion}/nota.md       # tiene inicio y fin
 02-Areas/{area}/nota.md                        # sin fin, continuo — áreas reales (docencia, investigacion, etc.)
-03-Resources/                                  # material de referencia permanente (papers sueltos, etc.)
+03-Resources/                                  # archivos adjuntos (PDFs, imágenes, etc.) y material de referencia permanente
 00-Inbox/nota.md                               # sin clasificar
 05-Archive/                                    # proyectos inactivos o completados
 ```
@@ -181,6 +181,10 @@ Acciones destructivas (archivar, borrar, renombrar) siempre requieren confirmaci
 - Umbral de similitud para sugerir links: `links.similarity_threshold` en `config.yaml` (default: `0.82`).
 - Umbral de similitud para consultas RAG: `rag.similarity_threshold` en `config.yaml` (default: `0.75`).
 - Carpetas excluidas del índice: `vault.exclude_dirs` en `config.yaml`.
+
+`config.yaml` debe existir siempre; si falta, el bot falla con error claro al arrancar.
+
+Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el primer arranque, y luego se gestionan via el bot.
 
 ---
 

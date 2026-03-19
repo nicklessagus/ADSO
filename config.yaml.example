@@ -1,5 +1,5 @@
 # Configuración de ADSO — copiar a config.yaml y ajustar.
-# Si config.yaml no existe, el bot usa estos defaults.
+# config.yaml debe existir; si falta, el bot falla con error al iniciar.
 # Referencia completa: docs/configuration.md
 
 # ─── Reporte semanal ────────────────────────────────────────────────────────
@@ -31,7 +31,6 @@ links:
 vault:
   exclude_dirs:               # carpetas excluidas del índice de embeddings
     - "05-Archive"
-    - "_assets"
     - ".obsidian"
     - ".trash"
 

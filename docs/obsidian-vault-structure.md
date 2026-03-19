@@ -42,13 +42,12 @@ vault/
 │   ├── docencia/                # Tareas, notas e ideas de docencia sin proyecto asignado
 │   ├── investigacion/           # Tareas, notas e ideas de investigación sin proyecto asignado
 │   └── personal/                # (ilustrativo — las áreas reales se crean según necesidad)
-├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos, herramientas)
+├── 03-Resources/                # Material de referencia permanente + archivos adjuntos (PDFs, imágenes, .txt, .py, etc.)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
-├── 05-Archive/                  # Proyectos completados, pausados o eliminados
-└── _assets/                     # Imágenes (fotos enviadas al bot)
+└── 05-Archive/                  # Proyectos completados, pausados o eliminados
 ```
 
-> **Archivos adjuntos (PDFs, .txt, .py, etc.):** se guardan en la misma carpeta que su nota `.md`, no en `_assets/`. Esto permite que el embed `![[archivo]]` funcione naturalmente y mantiene la relación archivo-nota visible en el filesystem. `_assets/` se reserva para imágenes.
+> **Archivos adjuntos (PDFs, imágenes, .txt, .py, etc.):** siempre se guardan en `03-Resources/`, independientemente de dónde se clasifique la nota `.md` asociada. La nota referencia al archivo con un embed `![[archivo]]`, que Obsidian resuelve automáticamente. Esto centraliza los archivos crudos en un solo lugar y mantiene las carpetas de proyectos y áreas limpias de binarios.
 
 ```
 ```

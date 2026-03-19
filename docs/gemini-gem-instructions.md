@@ -94,9 +94,8 @@ vault/
 │   ├── docencia/                # Área real: docencia
 │   ├── investigacion/           # Área real: investigación
 │   └── {area}/                  # Otras áreas según necesidad
-├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos)
-├── 05-Archive/                  # Proyectos completados, pausados o abandonados
-└── _assets/                     # Imágenes y adjuntos
+├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos) y archivos adjuntos (PDFs, imágenes, etc.)
+└── 05-Archive/                  # Proyectos completados, pausados o abandonados
 ```
 
 ### Taxonomía
@@ -195,7 +194,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | faster-whisper → texto → usuario confirma/corrige → LLM | Nota en vault |
 | Imagen | Descripción del usuario (primaria) o extracción automática — usuario elige entre [OCR] o [Modelo de visión] → muestra resultado → usuario corrige si hace falta | Nota en vault |
-| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite → muestra texto extraído → usuario corrige si hace falta. Archivo siempre guardado en vault. | Nota en vault con archivo |
+| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite → muestra texto extraído → usuario corrige si hace falta. Archivo guardado en `03-Resources/`, nota donde se clasifique con embed `![[archivo]]`. | Nota en vault con archivo |
 | Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
 | Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota de paper |
 | Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
@@ -371,7 +370,6 @@ links:
 vault:
   exclude_dirs:                  # carpetas excluidas del índice de embeddings
     - "05-Archive"
-    - "_assets"
     - ".obsidian"
     - ".trash"
 
@@ -394,7 +392,7 @@ llm:
   degraded_retry_minutes: 30     # cron que reintenta clasificar inbox pendiente
 ```
 
-Si `config.yaml` no existe, se usan los defaults. Cambios requieren reiniciar el bot.
+`config.yaml` debe existir; si falta, el bot falla con error al startup. Cambios requieren reiniciar el bot.
 
 ---
 
