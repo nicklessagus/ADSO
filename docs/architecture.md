@@ -80,8 +80,8 @@ Obsidian (lectura visual, opcional)
 | Audio | Whisper → texto → LLM | Nota en vault |
 | Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
 | Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite | Nota en vault con archivo |
-| Link web genérico | Extracción de contenido + LLM | Nota en vault |
-| Link arXiv / NASA ADS | API → metadatos estructurados + LLM | Nota de paper |
+| Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
+| Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota de paper |
 | Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
 
 ---
@@ -234,28 +234,37 @@ Las imágenes siguen el flujo unificado de archivos adjuntos: el usuario elige `
 
 Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
 
-### Extracción de contenido web (links genéricos)
+### Links
 
-Cuando el usuario envía una URL que no es arXiv ni NASA ADS, el bot extrae el contenido de la página antes de enviarlo al LLM para clasificación.
-
-**Motor configurable:**
-
-| Motor | Cómo funciona | Cuándo usar |
-|---|---|---|
-| **`gemini`** — default | La URL se pasa directamente a Gemini, que la lee y extrae el contenido relevante sin fetch local | Producción — sin dependencias extra, Gemini maneja JS, paywalls parciales, etc. |
-| **`trafilatura`** — fallback | Fetch local con `trafilatura` (Python puro): extrae el cuerpo principal descartando nav, ads, footers. El texto resultante se envía al LLM | Desarrollo y testing — no requiere conectividad de Gemini, reproducible, sin costo de API |
+Cuando el usuario envía un link, el flujo es el mismo que para archivos adjuntos: descripción del usuario como opción primaria, extracción automática como secundaria.
 
 ```
-# Motor gemini (producción):
-URL → Gemini API (lee y extrae) → clasifica → frontmatter
-
-# Motor trafilatura (desarrollo):
-URL → fetch local → trafilatura extrae texto → truncar a max_web_tokens → Gemini clasifica → frontmatter
+Usuario manda link por Telegram
+  │
+  ├─ Link arXiv / NASA ADS → Bot pregunta:
+  │      [Describilo vos]  +  [Extraer de arXiv/ADS]
+  │                                    │
+  │                           API extrae metadatos estructurados
+  │                           (título, autores, abstract, métodos, dataset)
+  │                           → bot muestra metadata extraída
+  │                           → usuario confirma o corrige
+  │
+  └─ Link genérico → Bot pregunta:
+         [Describilo vos]  +  [Extraer automáticamente]
+                                      │
+                              Gemini lee la URL y extrae contenido
+                              → bot muestra texto extraído
+                              → usuario confirma o corrige
+  │
+  └─ texto disponible (descripción manual o extracción corregida)
+         → LLM clasifica → preview → confirmar → vault
 ```
 
-Configurable en `config.yaml` via `content_extraction.engine`. Default: `gemini`.
+El paso de confirmación/corrección aplica en ambos casos: el usuario ve lo que el bot leyó antes de que el LLM clasifique.
 
-**Límite de tokens:** en ambos casos el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
+El motor de extracción para links genéricos (`gemini` o `trafilatura`) es un detalle de implementación configurable en `config.yaml` via `content_extraction.engine`, no una elección del usuario en runtime.
+
+**Límite de tokens:** el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación para links genéricos. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
 
 ### Documentos y archivos adjuntos
 

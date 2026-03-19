@@ -196,8 +196,8 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | Audio | faster-whisper → texto → usuario confirma/corrige → LLM | Nota en vault |
 | Imagen | Descripción del usuario (primaria) o extracción automática — usuario elige entre [OCR] o [Modelo de visión] → muestra resultado → usuario corrige si hace falta | Nota en vault |
 | Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite → muestra texto extraído → usuario corrige si hace falta. Archivo siempre guardado en vault. | Nota en vault con archivo |
-| Link web genérico | Extracción de contenido + LLM | Nota en vault |
-| Link arXiv / NASA ADS | API → metadatos estructurados + LLM | Nota de paper |
+| Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
+| Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota de paper |
 | Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota de paper |
 
 ---
