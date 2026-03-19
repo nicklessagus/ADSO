@@ -53,10 +53,13 @@ tests/
 │   │   ├── classify_audio.json
 │   │   ├── classify_link.json
 │   │   ├── classify_image.json
+│   │   ├── classify_document.json
 │   │   ├── generate_frontmatter_project_note.json
 │   │   ├── generate_frontmatter_paper.json
 │   │   ├── generate_frontmatter_task.json
 │   │   ├── generate_frontmatter_idea.json
+│   │   ├── disambiguation_response.json  # respuesta con confianza baja en modo
+│   │   ├── query_response.json    # respuesta RAG con notas como contexto
 │   │   ├── malformed_json.json    # respuesta inválida para test de error handling
 │   │   └── empty_response.json    # respuesta vacía para test de modo degradado
 │   └── sample_notes/              # notas .md de ejemplo con frontmatter válido
@@ -70,6 +73,7 @@ tests/
 │   ├── test_file_naming.py        # slug, fecha, kebab-case
 │   ├── test_config.py             # carga de config.yaml, defaults, merge con env
 │   ├── test_classification.py     # parsing del modo (captura/consulta/agenda/edición/gestión)
+│   ├── test_knowledge_query.py    # parsing de resultados ChromaDB, threshold, dedup
 │   ├── test_security.py           # auth middleware: allow, reject, edge cases
 │   └── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
 ├── integration/
@@ -145,6 +149,15 @@ Qué se testea:
 - Parsing de frontmatter YAML: campos correctos, tipos correctos, YAML inválido manejado sin excepción
 - Tags jerárquicos: `#metodo/cnn` matchea búsqueda por `#metodo`
 - Wikilinks dentro de code blocks o comentarios `%%` no se extraen (son falsos positivos)
+
+#### `test_knowledge_query.py`
+
+Qué se testea:
+- Parsing de resultados de ChromaDB: scores, metadata, deduplicación
+- Filtrado por `rag.similarity_threshold` — notas debajo del umbral no se incluyen
+- `max_results` respetado — no se devuelven más notas que el límite
+- Query vacía o sin embedding → error manejable
+- Resultados vacíos → lista vacía (no excepción)
 
 #### `test_security.py`
 
@@ -273,20 +286,9 @@ Qué se testea:
 
 Simulan el flujo completo desde un mensaje de Telegram hasta el resultado final. Usan objetos `Update` construidos programáticamente — no requieren un bot real corriendo ni conexión a Telegram.
 
-#### Construcción de Updates
+#### Construcción de Updates y Callbacks
 
-`conftest.py` expone una factory `make_update()` que construye objetos `Update` de `python-telegram-bot`:
-
-```python
-@pytest.fixture
-def make_update():
-    """Construye un Update de Telegram con user_id autorizado."""
-    def _make(text: str = "", photo: bool = False, voice: bool = False) -> Update:
-        # Construye Update con effective_user.id = ALLOWED_USER_ID
-        # Según parámetros, incluye message.text, message.photo, o message.voice
-        ...
-    return _make
-```
+`conftest.py` expone factories `make_update()` y `make_callback_query()` para simular mensajes y respuestas a inline keyboards. Ver sección "Fixtures globales" más abajo.
 
 #### `test_capture_message.py`
 
@@ -298,9 +300,13 @@ Qué se testea:
 #### `test_query_message.py`
 
 Qué se testea:
-- "qué tengo sobre X" → búsqueda en ChromaDB → respuesta con notas relevantes
-- Query sin resultados → mensaje claro al usuario
+- "qué tengo sobre X" → búsqueda semántica en ChromaDB → respuesta con notas relevantes
+- Query sin resultados → mensaje claro "No encontré nada relevante sobre X"
 - Query con scope seleccionado via inline keyboard → busca en proyecto, luego ofrece ampliar
+- Expansión desde nodo: "todo lo relacionado con [[nota]]" → backlinks + vecinos semánticos
+- Query mixta: filtro estructural + semántico ("papers pendientes sobre ML")
+- Resultado corto (≤ 3 notas) → respuesta inline con botón `[Informe .md]`
+- Resultado largo → bot envía archivo `.md` con links `obsidian://`
 
 #### `test_agenda_message.py`
 
@@ -415,7 +421,19 @@ llm:
 @pytest.fixture
 def make_update():
     """Factory de objetos Update de Telegram."""
-    ...
+    def _make(text: str = "", photo: bool = False, voice: bool = False) -> Update:
+        # Construye Update con effective_user.id = ALLOWED_USER_ID
+        ...
+    return _make
+
+@pytest.fixture
+def make_callback_query():
+    """Factory de CallbackQuery para simular respuestas a inline keyboards."""
+    def _make(data: str, message: Message = None) -> CallbackQuery:
+        # Construye CallbackQuery con callback_data=data
+        # message es el mensaje original que contenía los botones
+        ...
+    return _make
 ```
 
 ---
@@ -436,7 +454,7 @@ def make_update():
 | `calendar_client.py` | ≥ 80% | Escribe a Calendar/Tasks externo. |
 | `tasks_client.py` | ≥ 80% | Escribe a Google Tasks externo. |
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
-| `bot.py` | ≥ 60% | Mayormente glue code y handlers. Lo cubre e2e. |
+| `bot.py` | ≥ 70% | Handlers + inline keyboard callbacks. Lo cubre e2e. |
 
 **Target global: ≥ 80%.**
 

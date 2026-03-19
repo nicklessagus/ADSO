@@ -502,7 +502,7 @@ services:
       - VAULT_PATH               # default: /vault
     volumes:
       - ./vault:/vault           # vault de Obsidian
-      - ./data:/app/data         # ChromaDB (embebido), contexto, caché
+      - ./data:/app/data         # ChromaDB (embebido), caché
       - ./credentials:/credentials  # Google OAuth credentials
     restart: always
 ```

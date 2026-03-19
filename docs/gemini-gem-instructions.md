@@ -455,7 +455,7 @@ services:
       - VAULT_PATH
     volumes:
       - ./vault:/vault
-      - ./data:/app/data         # ChromaDB, contexto, caché
+      - ./data:/app/data         # ChromaDB, caché
       - ./credentials:/credentials
     restart: always
 ```
