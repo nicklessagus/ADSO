@@ -98,8 +98,8 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 | Crear área | Simple | Crea `02-Areas/{nombre}/` |
 | Crear sección | Simple | Crea subcarpeta dentro de un proyecto |
 | Convertir idea en proyecto | Simple | Mueve la nota de `02-Areas/` a `01-Projects/`, no queda copia |
-| Archivar proyecto | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md`, elimina embeddings de ChromaDB |
-| Desarchivar proyecto | Simple | Mueve de `05-Archive/` a `01-Projects/`, regenera embeddings |
+| Archivar proyecto | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md` y en metadata de ChromaDB |
+| Desarchivar proyecto | Simple | Mueve de `05-Archive/` a `01-Projects/`, actualiza `status: active` en `_index.md` y en metadata de ChromaDB |
 | Borrar proyecto | Doble + resolución de backlinks | Ver reglas abajo |
 | Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
 | Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
@@ -120,9 +120,10 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 
 ### Notas sobre archivar
 
-- `05-Archive/` se excluye del índice de ChromaDB → los proyectos archivados no aparecen en búsquedas semánticas ni en clasificación
+- Los embeddings de notas archivadas se **conservan** en ChromaDB con `status: archived` en metadata — no se recalculan al desarchivar
+- Las búsquedas semánticas excluyen archivados por default; el usuario puede pedir explícitamente "buscar también en archivados"
 - Los wikilinks que apunten a notas archivadas siguen funcionando (Obsidian resuelve por nombre de archivo, no por ruta)
-- Archivar es reversible (desarchivar regenera embeddings); borrar no lo es
+- Archivar es reversible; borrar no lo es — al borrar sí se eliminan los embeddings definitivamente
 
 ---
 
