@@ -266,6 +266,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | Momento | Botones |
 |---|---|
 | **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
@@ -390,6 +391,14 @@ rag:
 links:
   similarity_threshold: 0.82     # umbral mínimo para sugerir [[wikilink]]
   max_suggestions: 5             # máximo de links sugeridos por nota nueva
+
+vault_seed:                        # opcional — proyectos y áreas creados en el primer arranque si no existen
+  projects:                        # cada ítem requiere name + description
+    - name: tesis
+      description: "Papers de doctorado, experimentos de ML, escritura académica."
+  areas:
+    - name: docencia
+      description: "Preparación de clases, guías de ejercicios, consultas de alumnos."
 
 vault:
   exclude_dirs:                  # carpetas excluidas del índice de embeddings

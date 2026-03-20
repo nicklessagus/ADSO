@@ -394,11 +394,22 @@ rag:
 links:
   similarity_threshold: 0.82
   max_suggestions: 5
+vault_seed:
+  projects:
+    - name: tesis
+      description: "Papers de doctorado, experimentos de ML."
+  areas:
+    - name: docencia
+      description: "Preparación de clases, guías de ejercicios."
 vault:
   exclude_dirs:
     - "05-Archive"
     - ".obsidian"
     - ".trash"
+content_extraction:
+  engine: gemini
+documents:
+  max_size_mb: 20
 whisper:
   model: base
 reindex:

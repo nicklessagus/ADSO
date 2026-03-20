@@ -405,7 +405,7 @@ El bot funciona en un único chat de Telegram. No hay estado de contexto persist
 
 ### Dos estados
 
-**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
+**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto/área y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards. Si el LLM no puede asignar proyecto ni área a una nota, el bot pregunta destino con botones (`[Resources]` `[Elegir área]` `[Inbox]`).
 
 **Estado transiente — consulta:** el usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado y vuelve al estado default. No queda ningún estado activado.
 
@@ -416,6 +416,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | Momento | Botones |
 |---|---|
 | **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
