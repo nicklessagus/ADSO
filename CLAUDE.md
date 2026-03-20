@@ -136,10 +136,14 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 
 | Momento | Botones |
 |---|---|
-| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
-| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
+| **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
+| **Imagen recibida** | `[Tesseract]` `[Gemini Vision]` `[Sin extracción]` |
+| **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
-| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
+| **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
 
 ### Desambiguación de intención

@@ -74,15 +74,15 @@ Obsidian (lectura visual, opcional)
 
 ## Tipos de input soportados
 
-| Input | Procesamiento | Destino típico |
+| Input | read_status | Procesamiento |
 |---|---|---|
-| Texto libre | Clasificación LLM | Nota en vault |
-| Audio | Whisper → texto → LLM | Nota en vault |
-| Imagen | `[Procesar ahora]` → OCR o modelo de visión / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault |
-| Archivo adjunto (cualquier tipo) | `[Procesar ahora]` → extracción automática si el formato lo permite / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault con archivo |
-| Link web genérico | `[Procesar ahora]` → extracción automática del contenido / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault |
-| Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota con campos académicos |
-| Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota con campos académicos |
+| Texto libre | No | Clasificación LLM directa |
+| Audio | No | Whisper → texto → LLM |
+| Imagen | No | [Tesseract] [Gemini Vision] [Sin extracción] → LLM |
+| PDF | Sí | [Ya lo leí] [Lo quiero leer] → pymupdf → LLM |
+| Link web genérico | Sí | [Ya lo leí] [Lo quiero leer] → extracción web → LLM |
+| Link arXiv / NASA ADS | Sí | [Ya lo leí] [Lo quiero leer] → extracción API → LLM |
+| Nombre de paper | Sí | Bot busca en arXiv/ADS, usuario confirma → LLM |
 
 ---
 
@@ -240,69 +240,66 @@ Ambos motores siempre disponibles. El usuario elige en el momento, no hay config
 
 ### Links
 
-Cuando el usuario envía un link, el flujo es el mismo que para archivos adjuntos: descripción del usuario como opción primaria, extracción automática como secundaria.
-
 ```
 Usuario manda link por Telegram
   │
-  ├─ Link arXiv / NASA ADS → Bot pregunta:
-  │      [Describilo vos]  +  [Extraer de arXiv/ADS]
-  │                                    │
-  │                           API extrae metadatos estructurados
-  │                           (título, autores, abstract, métodos, dataset)
-  │                           → bot muestra metadata extraída
-  │                           → usuario confirma o corrige
+  ├─ [Ya lo leí]  [Lo quiero leer]   ← setea read_status: read / unread
   │
-  └─ Link genérico → Bot pregunta:
-         [Describilo vos]  +  [Extraer automáticamente]
-                                      │
-                              Gemini lee la URL y extrae contenido
-                              → bot muestra texto extraído
-                              → usuario confirma o corrige
+  ├─ Link arXiv / NASA ADS → extrae metadatos estructurados via API
+  │      (título, autores, abstract, métodos, dataset)
+  │      → bot muestra metadata extraída → usuario confirma o corrige
   │
-  └─ texto disponible (descripción manual o extracción corregida)
-         → LLM clasifica → preview → confirmar → vault
+  └─ Link genérico → extrae contenido (Gemini o trafilatura)
+         → bot muestra texto extraído → usuario confirma o corrige
+  │
+  └─ texto disponible → LLM clasifica → flujo de confirmación → vault
 ```
 
-El paso de confirmación/corrección aplica en ambos casos: el usuario ve lo que el bot leyó antes de que el LLM clasifique.
+El motor de extracción para links genéricos (`gemini` o `trafilatura`) es configurable en `config.yaml` via `content_extraction.engine`, no una elección del usuario en runtime.
 
-El motor de extracción para links genéricos (`gemini` o `trafilatura`) es un detalle de implementación configurable en `config.yaml` via `content_extraction.engine`, no una elección del usuario en runtime.
-
-**Límite de tokens:** el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación para links genéricos. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
+**Límite de tokens:** el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
 
 ### Documentos y archivos adjuntos
 
-El usuario puede enviar cualquier archivo por Telegram. El flujo es siempre el mismo: el archivo se guarda en `03-Resources/` y se crea una nota `.md` en la carpeta que determine la clasificación del LLM, con frontmatter y un embed `![[archivo]]`.
+El usuario puede enviar cualquier archivo por Telegram. El archivo siempre se guarda en `03-Resources/`. Se crea una nota `.md` con frontmatter y embed `![[archivo]]` en la carpeta que determine la clasificación del LLM.
 
 **El archivo siempre se guarda**, independientemente de si el bot puede leer su contenido o no.
 
-#### Flujo unificado
+#### Flujo por tipo de archivo
 
+**PDF:**
 ```
-Usuario manda archivo por Telegram
+Usuario manda PDF
   │
-  ├─ [Guardar para después]
-  │    └─ Guarda archivo en 03-Resources/ + nota en 00-Inbox/ con read_status: unread
-  │       Sin extracción ni clasificación LLM hasta que el usuario lo revise
+  [Ya lo leí]  [Lo quiero leer]   ← setea read_status
   │
-  └─ [Procesar ahora]
-       └─ Bot pregunta cómo obtener el contenido:
-            [Describilo vos]  +  [Extraer automáticamente] (si el formato lo permite)
-            │                          │
-            │                  según el tipo:
-            │                  ├─ texto plano → leer directamente
-            │                  ├─ PDF → pymupdf extrae texto + metadata
-            │                  ├─ imagen → [OCR]  [Modelo de visión]
-            │                  └─ binario/no reconocido → solo [Describilo vos]
-            │                          │
-            │                  bot muestra texto extraído
-            │                  → usuario confirma o corrige
-            │
-            └─ texto disponible (descripción manual o extracción corregida)
-                   → LLM clasifica → preview → confirmar → vault
+  pymupdf extrae texto + metadata
+  → bot muestra texto extraído → usuario confirma o corrige
+  → LLM clasifica → flujo de confirmación → vault
 ```
 
-El paso de confirmación/corrección del texto extraído aplica a **todas** las extracciones automáticas (texto plano, PDF, imagen), igual que el flujo de audio. El usuario ve lo que el bot leyó antes de que se clasifique.
+**Imagen:**
+```
+Usuario manda imagen
+  │
+  [Tesseract]  [Gemini Vision]  [Sin extracción]
+  │
+  → bot muestra texto/descripción extraída → usuario confirma o corrige
+  → LLM clasifica → flujo de confirmación → vault
+```
+Sin pregunta de read_status — la imagen se manda para guardar algo, no como contenido a leer.
+
+**Otros formatos (texto plano, binarios):**
+```
+Usuario manda archivo
+  │
+  ├─ texto plano (.md, .txt, .py, .csv, .json) → lectura directa
+  └─ binario/no reconocido → [Describilo vos]
+  │
+  → LLM clasifica → flujo de confirmación → vault
+```
+
+El paso de confirmación/corrección del texto extraído aplica a todas las extracciones automáticas — el usuario ve lo que el bot leyó antes de que el LLM clasifique.
 
 En todos los casos se guardan **dos archivos** en el vault:
 - El archivo original (ej: `martinez_2024.pdf`) → siempre en `03-Resources/`
@@ -589,16 +586,24 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 
 ```
 1. Usuario manda input
-2. Bot procesa y propone:
-   - Tipo de nota
-   - Proyecto destino (existente o nuevo)
-   - Sección destino (existente o nueva sugerida)
-   - Preview del Frontmatter YAML
-3. Usuario confirma, edita o cancela con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`)
+2. Bot procesa y propone: tipo, destino (proyecto/área), frontmatter completo
+3a. LLM encontró destino claro:
+       preview del frontmatter
+       [Confirmar]  [Corregir]  [Cancelar]
+           │
+       [Corregir] → [Resources]  [Elegir área]  [Elegir proyecto]  [Inbox]
+           │
+       preview actualizado → [Confirmar]  [Cancelar]
+
+3b. LLM no encontró destino:
+       [Resources]  [Elegir área]  [Elegir proyecto]  [Inbox]
+           │
+       preview del frontmatter → [Confirmar]  [Corregir]  [Cancelar]
+
 4. Bot escribe la nota
 ```
 
-Si el proyecto o sección no existe, el bot lo indica explícitamente y pide autorización para crearlo.
+Si el proyecto o área no existe, el bot lo indica explícitamente y pide autorización para crearlo.
 
 ### Flujo de edición de notas existentes
 

@@ -203,39 +203,26 @@ source: system
 
 ## `read_status`
 
-Campo opcional que indica si el contenido fue revisado/leído. Se aplica a cualquier nota, independientemente del tipo de input (paper, link, archivo, imagen, texto). Se setea únicamente cuando el usuario elige "guardar para después" — nunca automáticamente por tipo de contenido.
+Campo opcional que indica si el contenido fue leído/revisado. Aplica únicamente a **PDFs y links** (web genérico, arXiv, NASA ADS) — los tipos que representan contenido externo que el usuario puede o no haber consumido.
+
+No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como contenido a leer).
 
 | Valor | Significado |
 |---|---|
-| `unread` | Guardado pero no revisado todavía |
+| `unread` | Guardado pero no leído todavía |
 | `reading` | En proceso de lectura (principalmente para papers y documentos largos) |
-| `read` | Revisado / leído |
+| `read` | Leído / revisado |
 
 **Cuándo se setea:**
-- Cualquier input (paper, link, archivo, imagen, texto): `unread` cuando el usuario elige "guardar para después" en el flujo de captura
-- No se setea automáticamente por tipo de contenido — es siempre una decisión explícita del usuario
+- Al recibir un PDF o link, el bot pregunta `[Ya lo leí]` `[Lo quiero leer]`
+- `[Ya lo leí]` → `read_status: read` — el usuario lo agrega al vault para que se relacione con el resto
+- `[Lo quiero leer]` → `read_status: unread`
+- Es siempre una decisión explícita del usuario — nunca automático
 
 **Cómo se actualiza:**
-- El usuario dice "marqué como leído el paper X" → bot actualiza `read_status: read`
+- El usuario dice "ya leí el paper X" → bot actualiza `read_status: read`
 - El usuario dice "estoy leyendo X" → `reading`
 - Desde el bot al listar inbox: botón `[Marcar como leído]` junto a cada ítem
-
-**Flujo "guardar para después":**
-
-Para links, archivos e imágenes, el bot ofrece dos opciones al recibirlos:
-
-```
-[Procesar ahora]        → flujo normal de extracción + clasificación LLM
-[Guardar para después]  → guarda en 00-Inbox/ con read_status: unread
-                          extracción mínima: título/nombre + URL o archivo + fecha
-                          sin clasificación LLM hasta que el usuario lo revise
-```
-
-Al revisar después, el usuario elige:
-```
-[Procesarlo]  → flujo normal de clasificación → mueve a destino correcto
-[Borrarlo]    → confirmación + borrado
-```
 
 ---
 
