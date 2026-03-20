@@ -485,21 +485,101 @@ Bot: lista directa (el LLM ya parseó el scope)
 
 ### Output de consultas
 
-- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]`.
-- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+**Formato de cada ítem** (igual en inline y en informe `.md`):
+```
+📄 Baseline CNN — experimento inicial de tesis
+Estado: active | Área: investigacion
+"Los resultados del primer experimento muestran una accuracy de 0.87..."
+obsidian://open?vault=ADSO&file=2026-01-10-baseline-cnn-results
+```
+
+**Respuesta inline** (2-3 ítems): ítems directamente en el chat de Telegram + botones de acción.
+
+**Informe `.md`** (resultado largo o cuando el usuario lo pide): archivo generado y enviado como documento en Telegram. El usuario lo abre en Obsidian donde tiene links clicables.
+
+#### Estructura del informe `.md`
+
+Todo informe generado por ADSO incluye un header estándar:
+
+```markdown
+# Informe: {título de la consulta}
+Generado por ADSO v{version} · {fecha y hora}
+
+      ,
+     /|
+    / |   █████     ██████      █████     █████
+   / /   ██   ██    ██   ██    ██        ██   ██
+  | /    ██   ██    ██   ██     ████     ██   ██
+  |/     ███████    ██   ██        ██    ██   ██
+  |      ██   ██    ██████     █████      █████
+ _|_
+/   \    Autonomous Data Structuring Orchestrator
+|>_ |
+\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
+
+---
+
+## Síntesis
+{respuesta generada por el LLM a partir de las notas recuperadas — presente en consultas RAG y temáticas; omitida en filtros estructurales puros}
+
+## Resultados ({N} notas)
+
+### {Título de la nota}
+**Estado:** {status} | **Área/Proyecto:** {area o project}
+**Tipo:** {type}
+> {snippet relevante del contenido}
+obsidian://open?vault=ADSO&file={path}
+
+---
+{se repite por cada nota}
+
+## Notas relacionadas (si aplica)
+{backlinks y conexiones expandidas, si el usuario eligió expandir}
+```
 
 Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado con el vault.
 
 ### Tipos de consulta
 
-| Tipo | Ejemplo | Motor |
-|---|---|---|
-| **Temática** | "qué tengo sobre regresión logística" | ChromaDB (semántica) |
-| **Expansión desde nodo** | "todo lo relacionado con este paper" | Backlinks + ChromaDB |
-| **Filtro estructural** | "tareas pendientes", "papers sin leer" | vault_search.py (frontmatter) |
-| **Mixta** | "tareas pendientes de tesis sobre ML" | vault_search.py + ChromaDB |
+| Tipo | Ejemplo | Motor | Output típico |
+|---|---|---|---|
+| **Filtro estructural** | "tareas pendientes", "papers sin leer" | `vault_search.py` | Inline o `.md` |
+| **Temática** | "qué tengo sobre regresión logística" | ChromaDB (Fase 7) | `.md` con síntesis |
+| **Expansión desde nodo** | "todo lo relacionado con el baseline CNN" | Backlinks + ChromaDB (Fase 7) | `.md` |
+| **RAG** | "qué métodos usé en tesis para el problema X" | ChromaDB + LLM (Fase 7) | `.md` con síntesis |
+| **Mixta** | "tareas pendientes de tesis sobre ML" | `vault_search.py` + ChromaDB | `.md` |
 
-Los dos primeros tipos producen un informe `.md`. Los filtros estructurales pueden resolverse inline.
+#### Flujo de expansión desde nodo
+
+```
+1. Usuario: "dame todo lo relacionado con el baseline CNN"
+2. LLM identifica: expansión desde nodo + target = nota "Baseline CNN"
+3. Bot encuentra la nota en el vault
+4. Ejecuta en paralelo:
+   - get_backlinks() → notas que apuntan a la nota target
+   - get_wikilinks() → notas a las que la nota target apunta
+   - ChromaDB → notas semánticamente similares (Fase 7)
+5. Bot pregunta antes de generar:
+   [Solo relaciones directas]  [Expandir un grado más]
+6. Si expande: repite búsqueda sobre cada nota encontrada, agrega, deduplica
+7. Genera informe .md
+```
+
+#### Flujo RAG (Fase 7)
+
+```
+1. Usuario: "qué métodos usé en tesis para el problema X"
+2. LLM clasifica como consulta RAG + identifica scope
+3. ChromaDB recupera notas relevantes por similitud vectorial
+4. vault_search.py agrega notas conectadas por backlinks a las recuperadas
+5. LLM genera síntesis a partir del contexto recuperado
+6. Bot responde:
+   [síntesis generada]
+   Basado en N notas: • Nota 1 · obsidian://... • Nota 2 · obsidian://...
+   [Ver referencias completas]  [Generar informe .md]
+```
+
+El LLM sintetiza pero no agrega conocimiento propio — solo organiza y resume lo que está en las notas recuperadas.
 
 ---
 

@@ -149,10 +149,14 @@ Si el LLM no tiene confianza alta en el modo (captura vs consulta vs otro), el b
 El patrón es: el LLM interpreta lo que pueda del lenguaje natural y los botones cubren lo que falta. Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope (toda la bóveda, uno o más proyectos).
 
 ### Output de consultas
-- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]` para bajar archivo.
-- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+Formato de cada ítem (igual en inline y en informe): título, estado/área, snippet de contenido, link `obsidian://`.
 
-Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado.
+- **Resultados cortos** (2-3 ítems): inline + botones `[Ver referencias completas]` `[Generar informe .md]`.
+- **Resultados largos o expansión desde nodo**: informe `.md` enviado como documento en Telegram. Incluye header con logo ASCII + versión de ADSO + fecha, síntesis LLM (si aplica), todas las notas con snippet + link, sección de relaciones si se expandió.
+- **RAG** (Fase 7): síntesis inline primero, notas fuente con links, botones para profundizar.
+- **Expansión desde nodo**: bot pregunta `[Solo relaciones directas]` `[Expandir un grado más]` antes de generar el informe. Usa backlinks + outgoing links + ChromaDB en paralelo.
+
+Todos los informes `.md` tienen header estándar con logo ASCII, versión y fecha. Se asume Obsidian instalado y sincronizado.
 
 ---
 

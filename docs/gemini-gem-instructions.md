@@ -281,8 +281,13 @@ El LLM interpreta lo que pueda del lenguaje natural, los botones cubren lo que f
 
 ### Output de consultas
 
-- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram, con botón `[Informe .md]`.
-- **Resultados largos**: archivo `.md` generado con título, resumen, relaciones y links `obsidian://open?vault=X&file=Y` para cada nota.
+Formato de cada ítem (igual en inline y en informe): título, estado/área, snippet de contenido, link `obsidian://`.
+
+- **Resultados cortos** (2-3 ítems): inline en el mensaje de Telegram + botones `[Ver referencias completas]` `[Generar informe .md]`.
+- **Resultados largos o expansión desde nodo**: informe `.md` enviado como documento. Incluye header con logo y versión de ADSO, síntesis generada por LLM (si aplica), todas las notas con snippet + link, y sección de relaciones si se expandió.
+- **RAG** (Fase 7): síntesis inline primero, luego notas fuente con links, luego botones para profundizar.
+
+Todos los informes `.md` tienen header estándar: logo ASCII de ADSO, versión y fecha de generación.
 
 Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado.
 
