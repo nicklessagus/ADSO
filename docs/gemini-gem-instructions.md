@@ -347,6 +347,9 @@ Al crear una nota nueva, el bot busca en ChromaDB las notas más similares y sug
 - **Escritura y borrado:** solo en lista dedicada `ADSO` (creada por el bot si no existe)
 - Las tasks nacen en el vault y se sincronizan a Google Tasks
 - Cuando el usuario marca una task como completada en Google Tasks, ADSO la detecta y actualiza el `status` en el vault
+- Las tasks son intenciones de trabajo (scope = proyecto/área), no punteros a notas individuales
+- El campo `notes` de Google Tasks recibe: descripción + subtareas como bullets `•` + links `obsidian://` al proyecto/área y a notas relevantes encontradas en el vault. Es vault → Google Tasks únicamente (unidireccional)
+- Las tasks no se editan via ADSO — cambios de título, `due_date` o `status` se hacen en Google Tasks/Calendar; el cron los reconcilia al vault
 
 ### Sincronización
 

@@ -397,6 +397,41 @@ El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → 
 - Sincronización periódica: mismo cron que Calendar (`sync.interval_minutes` en `config.yaml`, default 30 min)
 - Modelo de uso: planificación semanal (inicio de semana) + revisión semanal (fin de semana) vía reporte automático
 
+#### Modelo de tarea
+
+Las tasks son **intenciones de trabajo**, no punteros a notas específicas. Ejemplos: "leer papers de tesis", "preparar presentación del experimento baseline". El scope es siempre un proyecto o área, no una nota individual.
+
+**Flujo de creación:**
+```
+1. Usuario describe la intención ("tengo que preparar la presentación del baseline de tesis")
+2. LLM clasifica como type: task + identifica scope (proyecto/área)
+3. Bot busca en vault notas relevantes del scope (vault_search + ChromaDB en Fase 7)
+4. Genera cuerpo: descripción + links a notas relevantes + link obsidian:// al proyecto/área
+5. Preview → [Confirmar] [Cancelar]
+6. Vault → sync a Google Tasks
+```
+
+El bot decide qué notas incluir como links — sin confirmación adicional de links por ahora.
+
+**Campo `notes` en Google Tasks** (vault → Google Tasks, unidireccional):
+```
+Preparar las slides del experimento baseline y resultados preliminares.
+
+• Revisar métricas del experimento
+• Comparar con paper de referencia
+• Preparar visualizaciones
+
+obsidian://open?vault=ADSO&file=01-Projects/tesis
+obsidian://open?vault=ADSO&file=2026-01-10-baseline-cnn-results
+obsidian://open?vault=ADSO&file=2025-11-03-paper-referencia-metodologia
+```
+- Descripción de la tarea (texto plano)
+- Subtareas como bullets `•` (sin checkboxes — Google Tasks no los renderiza)
+- Links `obsidian://` al proyecto/área (siempre el primero) + a todas las notas relevantes que el bot encontró en el vault
+- Wikilinks del body se convierten a links `obsidian://` directos
+
+**Edición de tareas:** las tasks no se editan via ADSO. Cambios en título, `due_date` o `status` se hacen directamente en Google Tasks o Calendar — el cron los reconcilia al vault. Para cambios sustanciales en el contenido: borrar y recrear via ADSO.
+
 ---
 
 ## Modelo de interacción
@@ -487,6 +522,8 @@ Si el proyecto o sección no existe, el bot lo indica explícitamente y pide aut
 
 ### Flujo de edición de notas existentes
 
+> **Scope:** aplica a notas `note` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
+
 ```
 1. Usuario pide editar una nota (por título, búsqueda o link)
 2. Bot muestra el contenido actual (frontmatter + cuerpo)
@@ -527,6 +564,8 @@ Modelo decidido: **lista `ADSO` dedicada + lectura de listas externas**.
 | Cambiar título en Google Tasks | Actualiza `title` en la nota (gana el último cambio) |
 | Borrar task en Google Tasks | La nota se mueve a `00-Inbox/` con `status: pending-classification` |
 | Conflicto (cambio en Tasks y en vault entre dos crons) | Gana el último cambio según timestamp |
+
+El campo `notes` de Google Tasks es de solo escritura desde el vault — los cambios en ese campo desde Google Tasks no se sincronizan de vuelta al vault.
 
 #### `due_date` y Google Calendar
 
