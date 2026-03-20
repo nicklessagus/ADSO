@@ -200,6 +200,8 @@ CREATE_PROJECT
 
 Cualquier output del LLM que no corresponda a una de estas operaciones es rechazado. No importa qué instrucciones contenga el contenido externo — el bot no puede hacer nada fuera de este conjunto.
 
+> **TODO (antes de implementar Fase 1):** definir el schema JSON exacto que el LLM devuelve para cada modo de operación (Captura, Consulta, Gestión, Agenda, Edición), incluyendo el campo de confianza (`confidence`) y el umbral por debajo del cual el bot dispara desambiguación con inline keyboard en lugar de asumir. Este schema es el contrato entre `llm_client.py` y `bot.py` y debe estar especificado antes de escribir código.
+
 ### 10. Truncado de contenido externo
 
 El contenido externo se trunca antes de enviarse al LLM. Los límites varían según el tipo de contenido:
