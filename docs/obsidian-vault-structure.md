@@ -16,7 +16,7 @@
 
 ## Metodología: PARA adaptado
 
-Se adopta el método PARA (Tiago Forte) como estructura base del vault, adaptado para ingesta automatizada via bot con soporte de proyectos, secciones dinámicas y subproyectos.
+Se adopta el método PARA (Tiago Forte) como estructura base del vault, adaptado para ingesta automatizada via bot con soporte de proyectos y secciones dinámicas.
 
 
 ```
@@ -25,26 +25,19 @@ vault/
 ├── 01-Projects/                 # Proyectos activos (tienen inicio y fin)
 │   ├── tesis/
 │   │   ├── _index.md            # Nota índice del proyecto
-│   │   ├── introduccion/
-│   │   ├── experimentos/
-│   │   ├── trabajos-futuros/
-│   │   └── papers/
-│   ├── trabajo/
-│   │   ├── _index.md
-│   │   ├── proyecto-x/          # Subproyecto
-│   │   │   ├── _index.md
-│   │   │   └── ...
-│   │   └── proyecto-y/
+│   │   ├── introduccion/        # Sección
+│   │   ├── experimentos/        # Sección
+│   │   └── papers/              # Sección
 │   └── adso/
 │       ├── _index.md
-│       └── ...
+│       └── diseno/              # Sección
 ├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin) — concepto PARA
 │   ├── docencia/                # Tareas, notas e ideas de docencia sin proyecto asignado
 │   ├── investigacion/           # Tareas, notas e ideas de investigación sin proyecto asignado
 │   └── personal/                # (ilustrativo — las áreas reales se crean según necesidad)
 ├── 03-Resources/                # Material de referencia permanente + archivos adjuntos (PDFs, imágenes, .txt, .py, etc.)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
-└── 05-Archive/                  # Proyectos completados, pausados o eliminados
+└── 05-Archive/                  # Proyectos archivados — excluidos del índice de ChromaDB
 ```
 
 > **Archivos adjuntos (PDFs, imágenes, .txt, .py, etc.):** siempre se guardan en `03-Resources/`, independientemente de dónde se clasifique la nota `.md` asociada. La nota referencia al archivo con un embed `![[archivo]]`, que Obsidian resuelve automáticamente. Esto centraliza los archivos crudos en un solo lugar y mantiene las carpetas de proyectos y áreas limpias de binarios.
@@ -70,11 +63,6 @@ Ejemplos de tareas en `docencia/`: "preparar guía de ejercicios de X materia". 
 Subdivisión temática dentro de un proyecto. No es un proyecto — es una categoría organizativa. Se crea dinámicamente cuando aparece contenido que no encaja en secciones existentes.
 
 Ejemplos dentro de `tesis`: `introduccion`, `experimentos`, `trabajos-futuros`, `papers`
-
-### Subproyecto
-Proyecto anidado dentro de otro que tiene objetivo y ciclo de vida propios. Se modela como carpeta con su propio `_index.md` dentro de un proyecto padre.
-
-Ejemplo: una herramienta desarrollada durante la tesis que luego tiene vida propia.
 
 ---
 
@@ -104,16 +92,37 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 
 ## Operaciones de gestión soportadas por el bot
 
-| Acción | Confirmación | Reversible |
+| Operación | Confirmación | Qué hace |
 |---|---|---|
-| Crear proyecto / subproyecto | Sí | — |
-| Crear sección | Sí | — |
-| Convertir idea en proyecto | Sí | La nota se mueve de su área a Projects, no se borra |
-| Archivar proyecto | Sí | Sí — se puede desarchivar |
-| Borrar proyecto | Doble confirmación | No |
-| Borrar nota | Sí | No |
+| Crear proyecto | Simple | Crea `01-Projects/{nombre}/` + `_index.md` vacío |
+| Crear área | Simple | Crea `02-Areas/{nombre}/` |
+| Crear sección | Simple | Crea subcarpeta dentro de un proyecto |
+| Convertir idea en proyecto | Simple | Mueve la nota de `02-Areas/` a `01-Projects/`, no queda copia |
+| Archivar proyecto | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md`, elimina embeddings de ChromaDB |
+| Desarchivar proyecto | Simple | Mueve de `05-Archive/` a `01-Projects/`, regenera embeddings |
+| Borrar proyecto | Doble + resolución de backlinks | Ver reglas abajo |
+| Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
+| Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
+| Mover nota | Simple | Mueve archivo, actualiza ChromaDB |
+| Borrar nota | Simple | Borra archivo, elimina embeddings |
 
-El borrado de proyecto requiere doble confirmación: primero "¿seguro?" y luego confirmación explícita del nombre del proyecto.
+### Reglas de borrado de proyecto
+
+Antes de borrar, el bot resuelve backlinks automáticamente según cuántas notas externas apuntan al proyecto:
+
+- **0 backlinks** → doble confirmación (nombre del proyecto) y borra
+- **1 backlink** → mueve las notas del proyecto al área/proyecto que contiene ese backlink, luego doble confirmación y borra
+- **2+ backlinks** → mueve las notas al área/proyecto más frecuente entre los backlinks, luego doble confirmación y borra
+
+En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no quedan links rotos.
+
+> **Futuro:** mover notas entre proyectos/áreas desde Obsidian directamente (actualmente toda gestión es via bot).
+
+### Notas sobre archivar
+
+- `05-Archive/` se excluye del índice de ChromaDB → los proyectos archivados no aparecen en búsquedas semánticas ni en clasificación
+- Los wikilinks que apunten a notas archivadas siguen funcionando (Obsidian resuelve por nombre de archivo, no por ruta)
+- Archivar es reversible (desarchivar regenera embeddings); borrar no lo es
 
 ---
 
