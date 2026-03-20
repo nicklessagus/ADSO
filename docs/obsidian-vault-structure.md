@@ -106,7 +106,7 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 | Borrar proyecto | Doble + resolución de backlinks | Ver reglas abajo |
 | Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
 | Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
-| Mover nota | — | **Fuera de scope por ahora** — se hace desde Obsidian directamente |
+| Mover nota | — | **Fuera de scope por ahora** — pendiente de implementar |
 | Borrar nota | Simple o con aviso de backlinks | Ver reglas abajo |
 
 ### Reglas de borrado de nota
@@ -128,7 +128,7 @@ Antes de borrar, el bot resuelve backlinks automáticamente según cuántas nota
 
 En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no quedan links rotos.
 
-> **Futuro:** mover notas entre proyectos/áreas desde el bot. Por ahora se hace desde Obsidian directamente.
+> **Futuro:** mover notas entre proyectos/áreas desde el bot. Obsidian en clientes es read-only — ADSO es el único escritor del vault.
 
 ### Notas sobre archivar
 
