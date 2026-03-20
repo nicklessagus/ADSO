@@ -32,6 +32,7 @@ media_type: text                       # text | audio | image | link | document 
 status: active                         # valores dependen del type — ver tabla abajo
 source_file: "archivo.pdf"            # opcional — nombre del archivo original cuando el input es un documento adjunto
 source_url: "https://..."             # opcional — URL original cuando el input es un link
+read_status: unread                    # opcional — unread | reading | read (ver sección read_status abajo)
 ---
 ```
 
@@ -90,6 +91,7 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ---
 type: note
 tags: [paper, cosmologia, machine-learning]
+read_status: unread                     # unread | reading | read — siempre presente en papers
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
@@ -175,6 +177,66 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 
 ---
 
+## `read_status`
+
+Campo opcional que indica si el contenido fue revisado/leído. Se aplica a cualquier nota con contenido externo (papers, links, archivos, imágenes). No aplica a notas de texto propio (`task`, `idea`, notas libres).
+
+| Valor | Significado |
+|---|---|
+| `unread` | Guardado pero no revisado todavía |
+| `reading` | En proceso de lectura (principalmente para papers y documentos largos) |
+| `read` | Revisado / leído |
+
+**Cuándo se setea automáticamente:**
+- Papers: siempre `unread` al crear la nota
+- Links, archivos, imágenes: `unread` cuando el usuario elige "guardar para después" en el flujo de captura
+- No se setea en notas de texto libre, tasks ni ideas
+
+**Cómo se actualiza:**
+- El usuario dice "marqué como leído el paper X" → bot actualiza `read_status: read`
+- El usuario dice "estoy leyendo X" → `reading`
+- Desde el bot al listar inbox: botón `[Marcar como leído]` junto a cada ítem
+
+**Flujo "guardar para después":**
+
+Para links, archivos e imágenes, el bot ofrece dos opciones al recibirlos:
+
+```
+[Procesar ahora]        → flujo normal de extracción + clasificación LLM
+[Guardar para después]  → guarda en 00-Inbox/ con read_status: unread
+                          extracción mínima: título/nombre + URL o archivo + fecha
+                          sin clasificación LLM hasta que el usuario lo revise
+```
+
+Al revisar después, el usuario elige:
+```
+[Procesarlo]  → flujo normal de clasificación → mueve a destino correcto
+[Borrarlo]    → confirmación + borrado
+```
+
+---
+
+## `## Notas personales` — sección en el body
+
+Toda nota con `read_status` incluye en su body una sección vacía al crear:
+
+```markdown
+## Notas personales
+
+```
+
+El usuario la completa después de leer/revisar el contenido — es su interpretación propia, distinta de los campos auto-generados:
+
+| Campo/sección | Quién lo llena | Qué es |
+|---|---|---|
+| `contribution`, `methods`, `conclusions` | LLM (del paper) | Lo que dice el autor |
+| `relevance`, `context` | Usuario/LLM al guardar | Por qué lo guardaste |
+| `## Notas personales` | Usuario después de leer | Tu interpretación — cómo te sirve, con qué linkear, qué aplicar |
+
+El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me sirve para el capítulo 3, linkear con [[baseline-cnn]]", el bot formatea y escribe en esa sección.
+
+---
+
 ## Notas de implementación
 
 - El LLM recibe el contenido crudo y devuelve el frontmatter completo + cuerpo de la nota en JSON estructurado
@@ -187,6 +249,22 @@ El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatte
 ---
 
 ## Consultas Dataview de ejemplo
+
+**Papers sin leer por prioridad:**
+```dataview
+TABLE authors, year, priority, relevance
+FROM "01-Projects" OR "03-Resources"
+WHERE contains(tags, "paper") AND read_status = "unread"
+SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
+```
+
+**Todo el inbox pendiente de revisar:**
+```dataview
+TABLE media_type, date_created, source_url, source_file
+FROM "00-Inbox"
+WHERE read_status = "unread"
+SORT date_created ASC
+```
 
 **Tareas pendientes por prioridad:**
 ```dataview

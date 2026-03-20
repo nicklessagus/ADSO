@@ -78,9 +78,9 @@ Obsidian (lectura visual, opcional)
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | Whisper → texto → LLM | Nota en vault |
-| Imagen | Descripción del usuario (primaria) o extracción automática (OCR / modelo de visión) | Nota en vault |
-| Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite | Nota en vault con archivo |
-| Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
+| Imagen | `[Procesar ahora]` → OCR o modelo de visión / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault |
+| Archivo adjunto (cualquier tipo) | `[Procesar ahora]` → extracción automática si el formato lo permite / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault con archivo |
+| Link web genérico | `[Procesar ahora]` → extracción automática del contenido / `[Guardar para después]` → inbox con `read_status: unread` | Nota en vault |
 | Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota con campos académicos |
 | Nombre de paper | Bot busca en arXiv/ADS, usuario confirma | Nota con campos académicos |
 
@@ -281,8 +281,13 @@ El usuario puede enviar cualquier archivo por Telegram. El flujo es siempre el m
 ```
 Usuario manda archivo por Telegram
   │
-  └─ Bot pregunta cómo obtener el contenido:
-       [Describilo vos]  +  [Extraer automáticamente] (si el formato lo permite)
+  ├─ [Guardar para después]
+  │    └─ Guarda archivo en 03-Resources/ + nota en 00-Inbox/ con read_status: unread
+  │       Sin extracción ni clasificación LLM hasta que el usuario lo revise
+  │
+  └─ [Procesar ahora]
+       └─ Bot pregunta cómo obtener el contenido:
+            [Describilo vos]  +  [Extraer automáticamente] (si el formato lo permite)
             │                          │
             │                  según el tipo:
             │                  ├─ texto plano → leer directamente
