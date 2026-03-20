@@ -42,7 +42,7 @@ read_status: unread                    # opcional — unread | reading | read (v
 
 ## Valores de `status` por tipo
 
-Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archivar es mover el archivo a `05-Archive/`. El status refleja el estado dentro del ciclo de vida del tipo, no la ubicación en el vault.
+Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor. El status refleja el estado dentro del ciclo de vida del tipo.
 
 `pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado).
 
@@ -52,7 +52,8 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
 | `inbox` | `pending-classification` | `pending-classification` |
-| `project-index` | `active`, `on-hold`, `completed` | `active` |
+| `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
+| `area-index` | — (sin ciclo de vida) | — |
 
 ---
 
@@ -60,11 +61,12 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
-| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `03-Resources/` si es referencia suelta | Nota de contenido general (incluye papers y cualquier material de referencia) |
+| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
 | `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `02-Areas/{area}/` | Idea sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
+| `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 
 ---
 
@@ -74,12 +76,14 @@ Cada tipo tiene su propio ciclo de vida. No existe `status: archived` — archiv
 ```yaml
 ---
 type: note
-project: "tesis"                        # nombre del proyecto (carpeta) — opcional, sin proyecto va a 03-Resources/
+project: "tesis"                        # nombre del proyecto (carpeta) — opcional
 section: "experimentos"                 # sección dentro del proyecto — opcional, solo si tiene proyecto
+area: "docencia"                        # opcional — solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
 summary: "Resumen generado por LLM"    # para notas largas
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
+> Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el bot pregunta con botones: `[Resources]` `[Elegir área]` `[Inbox]`.
 
 ### Campos opcionales para contenido académico
 
@@ -199,7 +203,7 @@ source: system
 
 ## `read_status`
 
-Campo opcional que indica si el contenido fue revisado/leído. Se aplica a cualquier nota con contenido externo (papers, links, archivos, imágenes). No aplica a notas de texto propio (`task`, `idea`, notas libres).
+Campo opcional que indica si el contenido fue revisado/leído. Se aplica a cualquier nota, independientemente del tipo de input (paper, link, archivo, imagen, texto). Se setea únicamente cuando el usuario elige "guardar para después" — nunca automáticamente por tipo de contenido.
 
 | Valor | Significado |
 |---|---|

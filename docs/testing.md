@@ -104,7 +104,7 @@ Testean funciones puras sin I/O externo. Son el grueso de la suite.
 #### `test_frontmatter.py`
 
 Qué se testea:
-- Generación de frontmatter válido por cada tipo (`note`, `task`, `idea`, `inbox`, `project-index`)
+- Generación de frontmatter válido por cada tipo (`note`, `task`, `idea`, `inbox`, `project-index`, `area-index`)
 - Campos base siempre presentes: `title`, `date_created`, `date_modified`, `type`, `tags`, `source`, `media_type`, `status`
 - Campos académicos opcionales en `note` (`authors`, `year`, `doi`, `methods`, etc.) presentes solo cuando aplica
 - `date_created` y `date_modified` en formato ISO 8601
@@ -397,13 +397,10 @@ links:
 vault:
   exclude_dirs:
     - "05-Archive"
-    - "_assets"
     - ".obsidian"
     - ".trash"
 whisper:
   model: base
-ocr:
-  engine: tesseract
 reindex:
   enabled: true
   time: "03:00"

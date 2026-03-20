@@ -32,9 +32,12 @@ vault/
 │       ├── _index.md
 │       └── diseno/              # Sección
 ├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin) — concepto PARA
-│   ├── docencia/                # Tareas, notas e ideas de docencia sin proyecto asignado
-│   ├── investigacion/           # Tareas, notas e ideas de investigación sin proyecto asignado
+│   ├── docencia/
+│   │   └── _index.md            # Nota índice del área (con description requerida)
+│   ├── investigacion/
+│   │   └── _index.md
 │   └── personal/                # (ilustrativo — las áreas reales se crean según necesidad)
+│       └── _index.md
 ├── 03-Resources/                # Material de referencia permanente + archivos adjuntos (PDFs, imágenes, .txt, .py, etc.)
 │                                # No tiene ciclo de vida — los proyectos linkean a esto, no lo mueven
 └── 05-Archive/                  # Proyectos archivados — excluidos del índice de ChromaDB
@@ -150,11 +153,12 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 
 | Tipo | Destino | Descripción |
 |---|---|---|
-| `note` | `01-Projects/{proyecto}/{seccion}/` o `03-Resources/` (si es referencia suelta, sin proyecto) | Nota general. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
+| `note` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o el bot pregunta destino si no tiene proyecto ni área | Nota general. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
 | `task` | `02-Areas/{area}/` + Google Tasks | Tarea sin proyecto activo — el área determina la carpeta destino |
 | `idea` | `02-Areas/{area}/` | Intención sin proyecto definido — se promueve a proyecto o se descarta |
 | `inbox` | `00-Inbox/` | Bot no pudo clasificar con confianza |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
+| `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 
 ---
 

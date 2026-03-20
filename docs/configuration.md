@@ -72,7 +72,6 @@ vault_seed:
 vault:
   exclude_dirs:               # carpetas excluidas del índice de embeddings
     - "05-Archive"
-    - "_assets"
     - ".obsidian"
     - ".trash"
 
@@ -99,6 +98,10 @@ sync:
 backup:
   debounce_seconds: 30           # esperar N segundos sin nuevas escrituras antes de commit+push
 
+# ─── Documentos adjuntos ──────────────────────────────────────────────────
+documents:
+  max_size_mb: 20             # archivos más grandes se rechazan con mensaje al usuario
+
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
   max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
@@ -110,6 +113,6 @@ llm:
 
 ## Notas
 
-- Si `config.yaml` no existe, el bot usa los valores por defecto documentados arriba.
+- `config.yaml` debe existir. Si falta, el bot falla con error claro al arrancar.
 - Cambios en `config.yaml` requieren reiniciar el bot (`docker compose restart adso-bot`).
 - Los valores de `.env` tienen precedencia sobre `config.yaml` para los parámetros que aparezcan en ambos (compatibilidad con despliegues que ya usan solo `.env`).

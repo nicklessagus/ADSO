@@ -105,11 +105,13 @@ async def create_note(
 2. Calcula el directorio destino a partir del frontmatter según estas reglas (en orden):
    - `type: inbox` → `{vault_path}/00-Inbox/`
    - `type: note` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
-   - `type: note` sin `project` → `{vault_path}/03-Resources/`
+   - `type: note` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
+   - `type: note` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: Resources, elegir área, o Inbox)
    - `type: task` → `{vault_path}/02-Areas/{area}/`
    - `type: idea` con `area` → `{vault_path}/02-Areas/{area}/`
    - `type: idea` sin `area` → `{vault_path}/00-Inbox/`
    - `type: project-index` → `{vault_path}/01-Projects/{project}/` con nombre fijo `_index.md`
+   - `type: area-index` → `{vault_path}/02-Areas/{area}/` con nombre fijo `_index.md`
 3. Si el directorio no existe, lo crea (incluyendo intermedios).
 4. Si ya existe un archivo con ese nombre, agrega sufijo numérico: `-2.md`, `-3.md`, etc.
 5. Construye el archivo: bloque `---` con el frontmatter serializado por `python-frontmatter` + `\n\n` + body.
@@ -190,7 +192,7 @@ async def set_property(
 | Campo | Validación |
 |---|---|
 | `status` | Debe pertenecer al conjunto válido para el `type` de la nota |
-| `type` | Debe ser uno de: `note`, `task`, `idea`, `inbox`, `project-index` |
+| `type` | Debe ser uno de: `note`, `task`, `idea`, `inbox`, `project-index`, `area-index` |
 | `priority` | Debe ser: `low`, `medium`, `high` |
 | `media_type` | Debe ser: `text`, `audio`, `image`, `link`, `document` |
 | `source` | Debe ser: `telegram`, `system` |

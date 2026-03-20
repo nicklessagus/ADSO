@@ -137,6 +137,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | Momento | Botones |
 |---|---|
 | **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
+| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |

@@ -91,9 +91,12 @@ vault/
 │   │   └── papers/              # Papers asociados al proyecto
 │   └── ...
 ├── 02-Areas/                    # Dominios de responsabilidad continua (sin fin)
-│   ├── docencia/                # Área real: docencia
-│   ├── investigacion/           # Área real: investigación
+│   ├── docencia/
+│   │   └── _index.md            # Nota índice del área (con description requerida)
+│   ├── investigacion/
+│   │   └── _index.md
 │   └── {area}/                  # Otras áreas según necesidad
+│       └── _index.md
 ├── 03-Resources/                # Material de referencia permanente (papers sueltos, artículos) y archivos adjuntos (PDFs, imágenes, etc.)
 └── 05-Archive/                  # Proyectos completados, pausados o abandonados
 ```
@@ -102,7 +105,6 @@ vault/
 
 - **Proyecto:** tiene tema, inicio y fin. Agrupa trabajo hacia un objetivo concreto. Tiene `_index.md`.
 - **Sección:** subdivisión temática dentro de un proyecto. Se crea dinámicamente.
-- **Subproyecto:** proyecto anidado dentro de otro, con su propio `_index.md`.
 - **Área:** dominio de responsabilidad continua sin fecha de cierre (ej: `docencia`, `investigacion`).
 - **Idea:** intención sin proyecto asignado. Vive en su área correspondiente. Puede promoverse a proyecto.
 
@@ -131,7 +133,7 @@ Los resources no tienen ciclo de vida (referencia permanente). Las áreas no tie
 title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
-type: note                             # note | task | idea | inbox | project-index
+type: note                             # note | task | idea | inbox | project-index | area-index
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case, idioma del contenido
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: text                       # text | audio | image | link | document
@@ -143,19 +145,21 @@ status: active                         # valores dependen del type
 
 | Tipo | Carpeta destino | Valores de `status` | Default |
 |---|---|---|---|
-| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `03-Resources/` si es referencia suelta | `active`, `pending-classification` | `active` |
+| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
 | `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `02-Areas/{area}/` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
 | `inbox` | `00-Inbox/` | `pending-classification` | `pending-classification` |
-| `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed` | `active` |
+| `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed`, `archived` | `active` |
 
-No existe `status: archived` — archivar es mover el archivo a `05-Archive/`.
+`status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor.
+
+`area-index` no tiene status — las áreas no tienen ciclo de vida.
 
 `pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado).
 
 ### Campos adicionales por tipo
 
-**`note`:** `project` (opcional), `section` (opcional), `summary`, `related`, `read_status` (opcional — ver abajo)
+**`note`:** `project` (opcional), `section` (opcional), `area` (opcional — solo si no tiene proyecto), `summary`, `related`, `read_status` (opcional — ver abajo)
 
 Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
@@ -165,7 +169,9 @@ Campos opcionales para contenido académico (populados por el pipeline cuando de
 
 **`idea`:** `priority` (low/medium/high), `related`
 
-**`project-index`:** `goal`, `sections`, `source: system`
+**`project-index`:** `goal`, `description` (requerida), `sections`, `source: system`
+
+**`area-index`:** `description` (requerida), `source: system`. Sin `goal` — las áreas tienen scope continuo, no objetivo puntual.
 
 ### Prioridad inferida
 
@@ -534,7 +540,7 @@ Si Gemini no responde después de reintentos con exponential backoff:
 
 | Acción | Confirmación | Reversible |
 |---|---|---|
-| Crear proyecto / subproyecto | Sí | — |
+| Crear proyecto | Sí | — |
 | Crear sección | Sí | — |
 | Convertir idea en proyecto | Sí | La idea se mueve |
 | Archivar proyecto | Sí | Sí (desarchivar) |

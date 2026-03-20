@@ -91,14 +91,15 @@ response_schema = {
 El JSON del LLM se valida contra el schema completo antes de escribir al vault. Si cualquier campo falla, la nota va a `00-Inbox/` con `status: pending-classification` y se loguea el intento.
 
 ```python
-VALID_TYPES = {"note", "task", "idea", "inbox", "project-index"}
+VALID_TYPES = {"note", "task", "idea", "inbox", "project-index", "area-index"}
 
 VALID_STATUS = {
     "note":           {"active", "pending-classification"},
     "task":           {"pending", "in-progress", "done", "pending-classification"},
     "idea":           {"raw", "developing", "mature", "pending-classification"},
     "inbox":          {"pending-classification"},
-    "project-index":  {"active", "on-hold", "completed"},
+    "project-index":  {"active", "on-hold", "completed", "archived"},
+    "area-index":     set(),  # no tiene status — áreas no tienen ciclo de vida
 }
 
 VALID_PRIORITY  = {"low", "medium", "high"}
