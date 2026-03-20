@@ -233,6 +233,12 @@ Nada se escribe al vault sin confirmación explícita del usuario:
 
 Si una edición cambia el título (y por tanto el nombre del archivo), `vault_search.py` busca todas las notas que referencian el nombre viejo con `[[wikilink]]`. El bot muestra la lista de notas afectadas y pide confirmación antes de actualizar los links.
 
+### Borrado con aviso de backlinks
+
+Al borrar una nota, `vault_search.py` busca todas las notas que la referencian con `[[wikilink]]`:
+- **0 backlinks** → confirmación simple y borra
+- **1+ backlinks** → el bot muestra la lista de notas afectadas y avisa que quedarán links rotos. El usuario decide si confirma o cancela. El bot no modifica las notas apuntantes.
+
 ---
 
 ## Modelo de interacción
@@ -335,10 +341,20 @@ Al crear una nota nueva, el bot busca en ChromaDB las notas más similares y sug
 
 ### Sincronización
 
-- **Vault es fuente de verdad.** Si hay conflicto entre cambios en Google y en el vault, gana el vault.
 - Vault → Calendar/Tasks: inmediato al agendar
 - Calendar/Tasks → Vault: cron periódico (default 30 min, configurable en `config.yaml` via `sync.interval_minutes`)
 - Calendar y Tasks se reconcilian en el mismo cron
+
+**Fuentes de verdad:**
+
+| Campo | Fuente |
+|---|---|
+| Contenido y título de la nota | Vault (impacta embeddings) |
+| Estructura (type, project, tags, section) | Vault |
+| Existencia de la nota | Vault |
+| `status: done` | Bidireccional |
+| `scheduled`, `due_date`, título en Tasks/Calendar | Bidireccional — gana el último cambio |
+| Borrar task en Google Tasks | La nota vuelve a `00-Inbox/` con `status: pending-classification` |
 
 ---
 
@@ -521,7 +537,7 @@ Si Gemini no responde después de reintentos con exponential backoff:
 | Convertir idea en proyecto | Sí | La idea se mueve |
 | Archivar proyecto | Sí | Sí (desarchivar) |
 | Borrar proyecto | Doble confirmación | No |
-| Borrar nota | Sí | No |
+| Borrar nota | Simple (0 backlinks) o con aviso (N backlinks) | No |
 
 ---
 

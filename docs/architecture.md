@@ -148,6 +148,8 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"` (si el debounce agrupa varias, lista los títulos)
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
+> Especificación detallada de todas las funciones (firmas, comportamiento, errores, validaciones) en `docs/vault-interface.md`.
+
 ### `knowledge_query.py` — Retrieval semántico (Fase 7)
 - **Solo recuperación, no generación.** Busca en ChromaDB y devuelve las notas relevantes. No llama al LLM.
 - Índice vectorial: ChromaDB (embebido, sin servidor separado)
@@ -171,6 +173,8 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
 - **Tags:** busca notas por tag, incluyendo tags jerárquicos (`#metodo/cnn` matchea `#metodo`).
 - No requiere APIs externas ni ChromaDB — solo lee archivos del filesystem.
 - Impacto en RPi4: mínimo (lectura de archivos, parsing de texto).
+
+> Especificación detallada de todas las funciones (firmas, comportamiento, errores, validaciones) en `docs/vault-interface.md`.
 
 **Diferencia entre los dos motores de búsqueda:**
 
@@ -213,13 +217,13 @@ Bot: confirma y crea el evento
 - Fecha + hora → evento con horario específico
 - Solo día → evento de día completo (sin hora)
 
-#### Sincronización — vault es fuente de verdad
+#### Sincronización
 
 - **Vault → Calendar:** inmediato al agendar desde el bot
-- **Calendar → Vault:** cron periódico (intervalo configurable en `config.yaml` via `sync.interval_minutes`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
-  - Evento borrado en Calendar → limpia el campo `scheduled` de la nota en el vault (no cambia `status` — borrar un evento no es completar la tarea)
-  - Horario modificado en Calendar → actualiza el campo `scheduled` en la nota
-- **Conflicto:** si entre dos syncs el usuario modifica un evento en Calendar y también lo cambia via ADSO (vault), gana el vault. El cron sobreescribe el evento en Calendar con lo que dice la nota.
+- **Calendar → Vault:** cron periódico (`sync.interval_minutes` en `config.yaml`, default 30 min) que lee el calendario `ADSO`, detecta cambios y actualiza el vault:
+  - Evento borrado en Calendar → limpia el campo `scheduled` de la nota (no cambia `status` — borrar un evento no es completar la tarea)
+  - Horario o título modificado en Calendar → actualiza `scheduled` o `title` en la nota
+- **Conflicto** (cambio en Calendar y en vault entre dos crons): gana el último cambio según timestamp.
 
 El usuario típicamente gestiona sus eventos directo desde Google Calendar — el cron reconcilia sin necesidad de intervención.
 
@@ -505,8 +509,22 @@ Modelo decidido: **lista `ADSO` dedicada + lectura de listas externas**.
 - **Lista `ADSO`:** ADSO tiene control total (crear, actualizar, borrar). Las tasks nacen en el vault y se sincronizan aquí.
 - **Listas externas del usuario:** solo lectura. ADSO puede consultarlas pero nunca las modifica.
 - **Flujo semanal:** planificación al inicio de la semana, revisión al final. El reporte semanal incluye qué tasks de la lista `ADSO` se completaron y cuáles quedaron pendientes.
-- **Completar desde Google Tasks:** cuando el usuario marca una task como completada en Google Tasks, ADSO la detecta en la próxima sincronización y actualiza el `status` de la nota en el vault.
-- **Conflicto:** si entre dos syncs el usuario modifica una task en Google Tasks y también la cambia via ADSO (vault), gana el vault. El cron sobreescribe la task en Google Tasks con lo que dice la nota. Misma regla que Calendar: el vault es fuente de verdad.
+- **Cron:** mismo intervalo que Calendar (`sync.interval_minutes`, default 30 min).
+
+#### Comportamiento por acción
+
+| Acción | Efecto en vault |
+|---|---|
+| Marcar completada en Google Tasks | `status: done` en la nota |
+| Marcar completada desde ADSO | `status: done` en nota + marca completada en Google Tasks |
+| Cambiar `due_date` en Google Tasks | Actualiza `due_date` en la nota (gana el último cambio) |
+| Cambiar título en Google Tasks | Actualiza `title` en la nota (gana el último cambio) |
+| Borrar task en Google Tasks | La nota se mueve a `00-Inbox/` con `status: pending-classification` |
+| Conflicto (cambio en Tasks y en vault entre dos crons) | Gana el último cambio según timestamp |
+
+#### `due_date` y Google Calendar
+
+El `due_date` de una task va al campo de fecha límite de Google Tasks. Google Calendar muestra automáticamente ese deadline como un chip en el día correspondiente — no se crea un evento de Calendar separado para el deadline.
 
 ---
 
@@ -754,7 +772,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
 | Vector DB | ChromaDB embebido | Pinecone, Weaviate | Sin servidor externo, corre en RPi4 |
 | Calendar | Google Calendar API | Registrar en Obsidian | Separación de responsabilidades: tiempo → Calendar, conocimiento → vault |
-| Google Tasks | Lista `ADSO` dedicada (lectura + escritura + borrado) + lectura de listas externas | Bidireccional completo | Mismo modelo que Calendar, vault es fuente de verdad |
+| Google Tasks | Lista `ADSO` dedicada (lectura + escritura + borrado) + lectura de listas externas | Bidireccional completo | Metadata de tarea es bidireccional; contenido y estructura de la nota solo via ADSO |
 | Conflictos Syncthing | Notificar, no resolver | Auto-resolución | Riesgo de pérdida de datos; el usuario decide |
 | API caída | Inbox con pending-classification + cron | Bloquear hasta que vuelva | No perder input del usuario por un problema temporal de red/API |
 | Truncado papers | 128K tokens (ventana Gemini) | 8K como web genérico | Papers necesitan abstract, métodos y conclusiones completos |
@@ -769,6 +787,20 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 - **Syncthing en modo send-only desde la RPi4** — los clientes reciben cambios pero no los envían de vuelta
 
 **Razón:** los embeddings en ChromaDB se generan al escribir una nota. Si se edita un `.md` desde Obsidian, el embedding queda desactualizado y las consultas RAG y links sugeridos trabajan con información vieja. Mantener ADSO como único escritor garantiza que los embeddings siempre estén sincronizados.
+
+#### Fuentes de verdad
+
+| Campo | Fuente de verdad | Motivo |
+|---|---|---|
+| Contenido de la nota (body) | Vault | Impacta embeddings — solo editable via ADSO |
+| Título de la nota | Vault | Impacta embeddings — solo editable via ADSO |
+| Estructura (type, project, tags, section) | Vault | Solo ADSO gestiona la taxonomía |
+| Existencia de la nota | Vault | Solo ADSO crea y borra notas |
+| `status: done` | Bidireccional | Completar desde ADSO o desde Google Tasks → se sincroniza al otro |
+| `scheduled` (fecha/hora del evento) | Bidireccional | Gana el último cambio detectado en el cron |
+| `due_date` | Bidireccional | Gana el último cambio detectado en el cron |
+| Título de la tarea en Google Tasks/Calendar | Bidireccional | Gana el último cambio detectado en el cron |
+| Borrar task en Google Tasks | — | La nota vuelve a `00-Inbox/` con `status: pending-classification` |
 
 **Posibilidad futura:** si se necesita escritura bidireccional, implementar un watcher (o cron) que detecte `.md` modificados externamente y regenere sus embeddings via Gemini Embedding API. No es complejo pero agrega requests a la API y lógica de detección de cambios.
 

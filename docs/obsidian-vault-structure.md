@@ -104,7 +104,16 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 | Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
 | Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
 | Mover nota | Simple | Mueve archivo, actualiza ChromaDB |
-| Borrar nota | Simple | Borra archivo, elimina embeddings |
+| Borrar nota | Simple o con aviso de backlinks | Ver reglas abajo |
+
+### Reglas de borrado de nota
+
+Antes de borrar, el bot busca notas que referencian la nota a borrar con `[[wikilink]]`:
+
+- **0 backlinks** → confirmación simple y borra. Elimina archivo y embeddings.
+- **1+ backlinks** → muestra la lista de notas que apuntan a ella y avisa que quedarán links rotos. El usuario decide si confirma el borrado o cancela.
+
+El bot nunca modifica automáticamente las notas que apuntan a la nota borrada — eso queda a criterio del usuario.
 
 ### Reglas de borrado de proyecto
 
