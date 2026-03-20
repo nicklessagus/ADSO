@@ -170,11 +170,12 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 
 | Modo | Ejemplos |
 |---|---|
-| **Captura** | Texto, audio, link, imagen con contenido a guardar |
+| **Captura** | Texto, audio, link, imagen, PDF con contenido a guardar |
 | **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
-| **Agenda** | Input con fecha/hora explícita |
-| **Edición** | "actualizá la nota X", "agregale esto a..." |
+| **Edición** | "actualizá la nota X" (solo `note` e `idea`) |
 | **Gestión** | Crear proyecto, archivar, renombrar |
+
+No hay modo Agenda — el agendamiento se maneja via tasks con `due_date` (chip en Calendar) o `scheduled` (evento en Calendar ADSO). Las tasks no se editan via ADSO.
 
 **El bot es un sistema de retrieval, no de razonamiento.** En modo consulta, recupera y presenta notas relevantes del vault. No agrega conocimiento propio ni opina sobre el contenido.
 

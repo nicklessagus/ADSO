@@ -193,29 +193,13 @@ En una consulta RAG el bot puede usar ambos: ChromaDB encuentra notas relevantes
 - **Escritura:** exclusivamente en el calendario dedicado `ADSO` (creado por el bot si no existe)
 - **Borrado:** permitido solo en el calendario `ADSO`, nunca en calendarios externos
 
-#### Qué se puede agendar
+#### Agendamiento
 
-Solo ítems que ya existen en el vault: `task`, `idea` (sesión de trabajo), `note` (hito o reunión). El bot no crea eventos de calendario sin un ítem del vault como origen.
+No hay modo Agenda separado. El agendamiento se maneja via tasks:
+- `due_date` (solo fecha) → chip en Google Calendar automáticamente, sin evento separado
+- `scheduled` (fecha + hora) → evento en el calendario ADSO
 
-#### Flujos de agendamiento
-
-**Directo:**
-```
-Usuario: "agendame esta tarea" / "agendame leer este paper"
-Bot: busca el ítem en el vault, pregunta fecha/hora si no se especificó, crea evento en calendario ADSO
-```
-
-**Por lista:**
-```
-Usuario: lista sus tareas / papers / ideas
-Bot: muestra lista numerada
-Usuario: "agendame el 3"
-Bot: confirma y crea el evento
-```
-
-**Especificación de tiempo:**
-- Fecha + hora → evento con horario específico
-- Solo día → evento de día completo (sin hora)
+Las tasks con `scheduled` se crean desde el bot en el flujo normal de captura — si el usuario incluye fecha/hora en la descripción, el LLM lo detecta y setea el campo `scheduled`.
 
 #### Sincronización
 
