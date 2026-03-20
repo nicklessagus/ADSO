@@ -400,6 +400,12 @@ vault:
 whisper:
   model: base                    # tiny | base (< 200MB RAM en RPi4)
 
+content_extraction:
+  engine: gemini                 # gemini | trafilatura (gemini para producción, trafilatura para dev)
+
+documents:
+  max_size_mb: 20                # archivos más grandes se rechazan
+
 reindex:
   enabled: true
   time: "03:00"                  # cron nocturno de re-indexado

@@ -49,7 +49,7 @@ adso/
 ├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
 ├── transcriber.py          # Transcripción de audio con faster-whisper
 ├── llm_client.py           # Cliente Gemini/Claude, clasificación y generación (usa Obsidian Skills como referencia)
-├── vault_writer.py         # Escritura de .md al filesystem
+├── vault_writer.py         # Escritura de .md al filesystem + git backup con debounce
 ├── vault_search.py         # Búsqueda estructural: backlinks ([[wikilinks]]), tags, filtros por frontmatter
 ├── embeddings.py           # Pipeline de embeddings y ChromaDB
 ├── knowledge_query.py      # Retrieval semántico — busca notas por similitud vectorial en ChromaDB (no llama al LLM)

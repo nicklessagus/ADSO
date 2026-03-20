@@ -58,7 +58,7 @@ Tiene un tema, un inicio y un fin. Agrupa todo el trabajo relacionado con un obj
 Ejemplos: `tesis`, `adso`, `curso-python`, proyectos del trabajo
 
 ### Área
-Dominio de responsabilidad continua sin fecha de cierre — el concepto PARA original. Las áreas agrupan tareas, notas e ideas que no pertenecen a ningún proyecto activo. Son estables y se crean manualmente según la estructura real del usuario (ej: `docencia`, `investigacion`, `personal`).
+Dominio de responsabilidad continua sin fecha de cierre — el concepto PARA original. Las áreas agrupan tareas, notas e ideas que no pertenecen a ningún proyecto activo. Son estables y se crean via el bot o desde `vault_seed` en `config.yaml` (ej: `docencia`, `investigacion`, `personal`). Cada área tiene un `_index.md` con `description` requerida.
 
 Ejemplos de tareas en `docencia/`: "preparar guía de ejercicios de X materia". Ejemplos en `personal/`: "renovar credencial", "llamar al banco".
 
