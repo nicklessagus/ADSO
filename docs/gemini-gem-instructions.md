@@ -159,7 +159,7 @@ No existe `status: archived` — archivar es mover el archivo a `05-Archive/`.
 
 Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
-**`read_status`:** campo opcional aplicable a cualquier nota con contenido externo (papers, links, archivos, imágenes). Valores: `unread | reading | read`. Se setea automáticamente en papers (`unread` al crear) y en cualquier input cuando el usuario elige "guardar para después". Las notas con `read_status` incluyen una sección `## Notas personales` vacía en el body para que el usuario complete después de revisar. Ver spec completa en `docs/frontmatter-schema.md`.
+**`read_status`:** campo opcional, valores `unread | reading | read`. Se setea únicamente cuando el usuario elige "guardar para después" — sin importar el tipo de contenido (paper, link, archivo, imagen, texto). No se setea automáticamente por tipo. Las notas con `read_status` incluyen una sección `## Notas personales` vacía en el body. Ver spec completa en `docs/frontmatter-schema.md`.
 
 **`task`:** `priority` (low/medium/high), `project` (opcional — solo metadata, no cambia ubicación), `due_date` (ISO 8601, solo fecha), `scheduled` (ISO 8601, fecha/hora — seteado al agendar), `related`
 

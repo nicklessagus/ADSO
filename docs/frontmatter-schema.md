@@ -91,7 +91,7 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ---
 type: note
 tags: [paper, cosmologia, machine-learning]
-read_status: unread                     # unread | reading | read — siempre presente en papers
+read_status: unread                     # unread | reading | read — solo si el usuario eligió "guardar para después"
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
@@ -187,10 +187,9 @@ Campo opcional que indica si el contenido fue revisado/leído. Se aplica a cualq
 | `reading` | En proceso de lectura (principalmente para papers y documentos largos) |
 | `read` | Revisado / leído |
 
-**Cuándo se setea automáticamente:**
-- Papers: siempre `unread` al crear la nota
-- Links, archivos, imágenes: `unread` cuando el usuario elige "guardar para después" en el flujo de captura
-- No se setea en notas de texto libre, tasks ni ideas
+**Cuándo se setea:**
+- Cualquier input (paper, link, archivo, imagen, texto): `unread` cuando el usuario elige "guardar para después" en el flujo de captura
+- No se setea automáticamente por tipo de contenido — es siempre una decisión explícita del usuario
 
 **Cómo se actualiza:**
 - El usuario dice "marqué como leído el paper X" → bot actualiza `read_status: read`
