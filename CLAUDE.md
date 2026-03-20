@@ -103,7 +103,7 @@ Las áreas no tienen ciclo de vida.
 title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
-type: ""           # note | task | idea | inbox | project-index
+type: ""           # note | task | idea | inbox | project-index | area-index
 tags: []
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
@@ -111,7 +111,7 @@ status: active     # valores dependen del type — ver docs/frontmatter-schema.m
 ---
 ```
 
-El tipo `project-index` se genera automáticamente al crear un proyecto (no por clasificación del LLM). Schema completo en `docs/frontmatter-schema.md`.
+Los tipos `project-index` y `area-index` se generan automáticamente al crear proyecto/área (no por clasificación del LLM). Ambos requieren `description` — el bot la pide obligatoriamente en la creación. Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`).
@@ -241,7 +241,7 @@ VAULT_PATH                 # default: /vault
 
 ## Decisiones clave
 
-- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `note`, `task`, `idea`, `inbox`, `project-index`. No existe `type: paper` — un paper es un `note` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
+- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `note`, `task`, `idea`, `inbox`, `project-index`, `area-index`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `note` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
 
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
 - **Google Calendar y Tasks:** sync cada 30 min (configurable via `sync.interval_minutes`). Calendar y Tasks se reconcilian en el mismo cron. Fuentes de verdad: contenido y estructura de la nota → vault; `scheduled`, `due_date`, `status: done` y título de tarea → bidireccional (gana el último cambio). Borrar una task en Google Tasks mueve la nota a `00-Inbox/` con `status: pending-classification`.

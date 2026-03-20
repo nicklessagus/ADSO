@@ -149,6 +149,7 @@ date_created: "2025-01-01"
 date_modified: "2025-01-15"
 status: active                          # active | on-hold | completed
 goal: "Investigar X para lograr Y"     # objetivo concreto, una línea
+description: "Papers de doctorado, experimentos de ML, escritura académica."  # scope de clasificación — requerido
 sections: [introduccion, experimentos, trabajos-futuros, papers]
 tags: [tesis, doctorado]
 source: system                          # auto-generado por el bot, no desde un mensaje de Telegram
@@ -174,6 +175,25 @@ El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 ```
 
 El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatter (`date_modified`, `status`, `sections` si se agregan nuevas).
+
+---
+
+### `_index.md` (nota índice de área)
+
+Cada área tiene un `_index.md` en su raíz. Se genera automáticamente al crear un área. La `description` es requerida — el bot la pide al crear y no permite omitirla.
+
+```yaml
+---
+type: area-index
+title: "Docencia"
+date_created: "2025-01-01"
+date_modified: "2025-01-15"
+description: "Preparación de clases, guías de ejercicios, consultas de alumnos, material didáctico."  # requerido — usado por el LLM para clasificar
+source: system
+---
+```
+
+> `goal` no aplica a áreas — las áreas no tienen un objetivo puntual, tienen un scope continuo. Solo `description`.
 
 ---
 

@@ -94,8 +94,8 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 
 | Operación | Confirmación | Qué hace |
 |---|---|---|
-| Crear proyecto | Simple | Crea `01-Projects/{nombre}/` + `_index.md` vacío |
-| Crear área | Simple | Crea `02-Areas/{nombre}/` |
+| Crear proyecto | Simple | Crea `01-Projects/{nombre}/` + `_index.md` con description requerida |
+| Crear área | Simple | Crea `02-Areas/{nombre}/` + `_index.md` con description requerida |
 | Crear sección | Simple | Crea subcarpeta dentro de un proyecto |
 | Convertir idea en proyecto | Simple | Mueve la nota de `02-Areas/` a `01-Projects/`, no queda copia |
 | Archivar proyecto | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md` y en metadata de ChromaDB |

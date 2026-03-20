@@ -51,6 +51,23 @@ links:
   similarity_threshold: 0.82   # umbral mínimo para sugerir un [[wikilink]]
   max_suggestions: 5           # máximo de links sugeridos por nota nueva
 
+# ─── Siembra inicial del vault ──────────────────────────────────────────────
+# Proyectos y áreas creados en el primer arranque si no existen. Opcional.
+# Si se incluye un ítem sin `description`, el bot falla al iniciar con error claro.
+vault_seed:
+  projects:
+    - name: tesis
+      description: "Papers de doctorado, experimentos de ML, escritura académica y revisión bibliográfica."
+    - name: adso
+      description: "Desarrollo del bot ADSO: diseño, código, decisiones técnicas, tests."
+  areas:
+    - name: docencia
+      description: "Preparación de clases, guías de ejercicios, consultas de alumnos, material didáctico."
+    - name: investigacion
+      description: "Tareas e ideas de investigación sin proyecto asignado. Lectura general, ideas exploratorias."
+    - name: personal
+      description: "Trámites, salud, finanzas, vida personal."
+
 # ─── Vault ──────────────────────────────────────────────────────────────────
 vault:
   exclude_dirs:               # carpetas excluidas del índice de embeddings
