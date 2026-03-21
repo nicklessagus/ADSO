@@ -12,11 +12,44 @@ Documentación completa en `docs/`.
 
 ---
 
+## Setup de desarrollo
+
+```bash
+git clone git@github.com:nicklessagus/ADSO.git
+cd ADSO
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+Requiere Python ≥ 3.9. No hay dependencias nativas — venv estándar alcanza, no necesita conda.
+
+Para correr el bot (no solo tests), crear `.env` y `config.yaml`:
+
+```bash
+# .env
+TELEGRAM_TOKEN=...
+TELEGRAM_ALLOWED_USER_ID=...
+GEMINI_API_KEY=...
+VAULT_PATH=/path/al/vault
+
+# Arrancar
+python -m adso
+```
+
+Para correr con Docker (producción / RPi4):
+
+```bash
+docker compose up --build
+```
+
+---
+
 ## Infraestructura de despliegue
 
 - **Hardware:** Raspberry Pi 4, 4GB RAM, ARM64
 - **Entorno:** Docker + docker-compose
-- **Lenguaje:** Python 3.11+, implementación asíncrona
+- **Lenguaje:** Python 3.9+ (dev), 3.11 (Docker), implementación asíncrona
 - **Vault:** Markdown en filesystem local (Syncthing para sync en vivo + Git para backup/DR — ver `docs/architecture.md`)
 
 Toda propuesta de implementación debe evaluarse contra las restricciones de CPU y RAM de la RPi4. Mencionar explícitamente el impacto estimado en recursos.
