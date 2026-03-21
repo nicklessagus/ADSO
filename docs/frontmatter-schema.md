@@ -83,7 +83,7 @@ summary: "Resumen generado por LLM"    # para notas largas
 related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
-> Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el bot pregunta con botones: `[Resources]` `[Elegir área]` `[Inbox]`.
+> Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el bot pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
 
 ### Campos opcionales para contenido académico
 

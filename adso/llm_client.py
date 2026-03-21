@@ -27,6 +27,15 @@ VALID_STATUS = {
     "idea": {"raw", "developing", "mature", "pending-classification"},
     "inbox": {"pending-classification"},
 }
+# Aliases que el LLM puede devolver → valor canónico
+STATUS_ALIASES: dict[str, str] = {
+    "todo": "pending",
+    "open": "pending",
+    "new": "pending",
+    "draft": "active",
+    "published": "active",
+    "pending": "pending-classification",  # para inbox
+}
 VALID_PRIORITY = {"low", "medium", "high"}
 VALID_OPERATIONS = {
     "create_project", "create_area", "archive_project", "unarchive_project",
@@ -132,9 +141,16 @@ def _validate_capture_payload(payload: dict) -> None:
     if status is not None:
         valid = VALID_STATUS.get(note_type, set())
         if valid and status not in valid:
-            raise LLMResponseError(
-                f"status '{status}' inválido para type '{note_type}'"
-            )
+            if note_type == "inbox":
+                fm["status"] = "pending-classification"
+            else:
+                normalized = STATUS_ALIASES.get(status)
+                if normalized and normalized in valid:
+                    fm["status"] = normalized
+                else:
+                    raise LLMResponseError(
+                        f"status '{status}' inválido para type '{note_type}'"
+                    )
 
     priority = fm.get("priority")
     if priority is not None and priority not in VALID_PRIORITY:
@@ -217,14 +233,37 @@ Respondé ÚNICAMENTE con un JSON válido con esta estructura:
 }}
 
 ### Modo capture (payload):
-- frontmatter: object con title, type (note|task|idea|inbox), tags (list, kebab-case), status, project, section, area, priority (low|medium|high o null), due_date, scheduled, y campos académicos opcionales (todos null si no aplican)
-- body: string con el cuerpo en Markdown
-- suggested_links: list de wikilinks sugeridos
-- summary: string o null
+- frontmatter: object con los siguientes campos exactos (nunca inventes otros nombres):
+  - title: string
+  - type: "note" | "task" | "idea" | "inbox"
+  - tags: list de strings en kebab-case
+  - status: string según type (note→"active", task→"pending", idea→"raw", inbox→"pending-classification")
+  - project: string | null
+  - section: string | null
+  - area: string | null
+  - priority: "low" | "medium" | "high" | null
+  - due_date: string ISO 8601 | null
+  - scheduled: string ISO 8601 | null
+  - Campos académicos (solo si el contenido es un paper/artículo científico, todos null si no aplica):
+    - authors: list de strings | null  (SIEMPRE lista, nunca string)
+    - year: integer | null
+    - journal: string | null
+    - doi: string | null
+    - read_status: "read" | "unread" | null
+- body: string con el cuerpo en Markdown, siempre en español
+- suggested_links: list de strings
+- summary: string | null
 
 ### Modo manage (payload):
-- operation: string (create_project, create_area, create_section, etc.)
-- params: object con parámetros de la operación
+- operation: string (create_project, create_area, create_section, archive_project, unarchive_project, delete_project, delete_area, rename_project, rename_area, convert_idea_to_project)
+- params: object con los siguientes campos según operación:
+  - create_project: {{"name": "...", "description": "..."}}
+  - create_area: {{"name": "...", "description": "..."}}
+  - create_section: {{"project": "...", "name": "..."}}
+  - archive_project / unarchive_project / delete_project: {{"name": "..."}}
+  - delete_area: {{"name": "..."}}
+  - rename_project / rename_area: {{"old_name": "...", "new_name": "..."}}
+  - convert_idea_to_project: {{"note": "...", "project_name": "...", "description": "..."}}
 
 ## Reglas de clasificación:
 - type=note: información, contenido, referencias, papers
@@ -336,7 +375,7 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-lite",
         contents=user_message,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,

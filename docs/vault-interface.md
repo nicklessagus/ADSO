@@ -106,7 +106,7 @@ async def create_note(
    - `type: inbox` → `{vault_path}/00-Inbox/`
    - `type: note` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: note` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
-   - `type: note` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: Resources, elegir área, o Inbox)
+   - `type: note` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`)
    - `type: task` → `{vault_path}/02-Areas/{area}/`
    - `type: idea` con `area` → `{vault_path}/02-Areas/{area}/`
    - `type: idea` sin `area` → `{vault_path}/00-Inbox/`
@@ -240,6 +240,32 @@ async def move_note(source: Path, dest_dir: Path) -> Path:
 5. Retorna el nuevo path.
 
 **Nota:** actualizar ChromaDB metadata con el nuevo path es responsabilidad del caller.
+
+---
+
+### `save_resource()`
+
+```python
+async def save_resource(
+    source_path: Path,
+    original_filename: str,
+    vault_path: Path,
+) -> Path:
+```
+
+Copia un archivo a `03-Resources/` en el vault.
+
+**Comportamiento:**
+
+1. Verifica que `source_path` existe.
+2. Calcula `dest = 03-Resources/{original_filename}`.
+3. **Deduplicación:** si ya existe un archivo con el mismo nombre y el mismo tamaño, lo reutiliza y retorna el path existente sin copiar nada.
+4. Si existe con el mismo nombre pero distinto tamaño (archivo diferente), agrega sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc.
+5. Copia el archivo con `shutil.copy2` (preserva metadatos).
+6. Retorna el path del archivo en el vault.
+
+**Errores:**
+- `FileNotFoundError` si `source_path` no existe → propagar.
 
 ---
 

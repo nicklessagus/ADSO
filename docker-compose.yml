@@ -9,9 +9,11 @@ services:
       - ${VAULT_PATH:-./vault}:/vault
       - ${GOOGLE_CALENDAR_CREDS:-./credentials}:/credentials
       - adso-data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
     environment:
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config.yaml
+      - ANONYMIZED_TELEMETRY=false
 
 volumes:
   adso-data:

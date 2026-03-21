@@ -60,8 +60,8 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 
 | Componente | Tecnología |
 |---|---|
-| Bot | `python-telegram-bot` (async) |
-| LLM primario | Gemini API (Google AI Studio) |
+| Bot | `python-telegram-bot[job-queue]` v21+ (async) |
+| LLM primario | Gemini API — modelo `gemini-2.5-flash-lite` (free tier: 15 RPM, 1000 RPD) |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
@@ -149,7 +149,7 @@ Los tipos `project-index` y `area-index` se generan automáticamente al crear pr
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Corregir]` `[Cancelar]`).
 
-`[Corregir]` cambia únicamente el destino (`[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
+`[Corregir]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
 
 ### Prioridad inferida
 El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar, como cualquier otro campo.
@@ -174,8 +174,8 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
-| **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
-| **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |

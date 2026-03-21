@@ -90,11 +90,13 @@ Obsidian (lectura visual, opcional)
 ## Componentes
 
 ### `bot.py` — Orquestador principal, inline keyboards
-- Framework: `python-telegram-bot` (async)
+- Framework: `python-telegram-bot[job-queue]` v21+ (async)
+- Entry point sincrónico (`run_bot()`); el setup async del vault se ejecuta via `post_init` de PTB antes de arrancar el polling — PTB gestiona su propio event loop
 - Handlers: texto, foto, audio, documento, URL
 - Inline keyboards (`InlineKeyboardMarkup`) para confirmación, desambiguación y navegación de resultados
 - Middleware de autenticación por `user_id`
 - Gestiona el flujo de confirmación con el usuario antes de escribir
+- Flujo manage: detecta campos obligatorios faltantes (`name`, `description`) y los solicita al usuario antes de mostrar el preview de confirmación
 
 ### `transcriber.py` — Transcripción de audio
 - Modelo: `faster-whisper` (cuantizado, ARM64)
@@ -121,7 +123,9 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   - Generar respuestas a consultas RAG a partir de notas recuperadas por `knowledge_query.py`
 - **Rate limiting:** cola interna con exponential backoff para respetar límites del free tier de Gemini. Si varias notas llegan juntas, se procesan en serie con delay adaptativo.
 - **Reintentos:** 3 intentos con backoff (1s, 2s, 4s). En cada reintento el bot muestra al usuario: `"⏳ Servicio caído, reintento 2/3..."`. Después del tercer fallo → modo degradado.
-- **Modo degradado:** el input se guarda en `00-Inbox/` con `status: pending-classification` y el bot avisa `"⚠️ No pude clasificar — guardado en Inbox, se reintenta automáticamente."`. Un cron reintenta cada `llm.degraded_retry_minutes` (default 30 min).
+- **Modo degradado:** el input se guarda en `00-Inbox/` con `status: pending-classification` y el bot avisa `"⚠️ No pude clasificar — guardado en Inbox, se reintenta automáticamente."`. Un cron reintenta cada `llm.degraded_retry_minutes` (default 30 min). Cuando la reclasificación tiene éxito, el bot manda un preview al usuario (con ♻️) para confirmación — no escribe al vault sin revisión.
+- **Normalización de status:** si el LLM devuelve valores de `status` no canónicos (ej: `todo`, `open`, `new`, `draft`), el bot los normaliza automáticamente al valor más cercano antes de validar.
+- **Schema de frontmatter estricto en el prompt:** el system prompt define explícitamente cada campo con su tipo y valores válidos. El body siempre se genera en español. Campos académicos con nombres fijos: `authors` (lista), `year`, `journal`, `doi`, `read_status`.
 - **Obsidian Skills como referencia:** el LLM usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como parte del system prompt para generar contenido compatible con Obsidian. Son documentos de referencia (no ejecutables) que definen la sintaxis correcta. Se incorporan al prompt de clasificación/generación, no al código. Se actualizan independientemente del bot.
 
   | Skill | Uso en ADSO |
@@ -467,7 +471,7 @@ El bot funciona en un único chat de Telegram. No hay estado de contexto persist
 
 ### Dos estados
 
-**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto/área y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards. Si el LLM no puede asignar proyecto ni área a una nota, el bot pregunta destino con botones (`[Resources]` `[Elegir área]` `[Inbox]`).
+**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto/área y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards. Si el LLM no puede asignar proyecto ni área a una nota, el bot pregunta destino con botones (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Los binarios (PDFs, imágenes) siempre van a `03-Resources/` independientemente del destino de la nota.
 
 **Estado transiente — consulta:** el usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado y vuelve al estado default. No queda ningún estado activado.
 
@@ -480,8 +484,8 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
-| **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
-| **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
@@ -636,12 +640,12 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
        [Confirmar]  [Corregir]  [Cancelar]
            │
        [Corregir] → cambia solo el destino:
-                    [Resources]  [Elegir área]  [Elegir proyecto]  [Inbox]
+                    [Elegir área]  [Elegir proyecto]  [Inbox]
            │
        preview actualizado → [Confirmar]  [Cancelar]
 
 3b. LLM no encontró destino:
-       [Resources]  [Elegir área]  [Elegir proyecto]  [Inbox]
+       [Elegir área]  [Elegir proyecto]  [Inbox]
            │
        preview del frontmatter → [Confirmar]  [Corregir]  [Cancelar]
 
@@ -662,9 +666,16 @@ status: active
 media_type: text
 ```
 
-Si hay links sugeridos, se listan debajo del bloque:
+Si hay links sugeridos, se listan en el preview:
 ```
 Links sugeridos: [[paper-referencia-metodologia]] [[dataset-imagenet]]
+```
+
+Al confirmar, los links se escriben en el `.md` bajo `## Ver también`:
+```markdown
+## Ver también
+
+[[paper-referencia-metodologia]] [[dataset-imagenet]]
 ```
 
 **Correcciones por texto libre:** si antes de confirmar el usuario manda texto ("el título debería ser X", "agregá el tag #python"), el bot interpreta el texto como instrucción, actualiza el frontmatter y regenera el preview. `[Corregir]` es exclusivamente para cambiar el destino — cualquier otro campo se corrige por texto libre.
@@ -675,7 +686,7 @@ Si el proyecto o área no existe, el bot lo indica explícitamente y pide autori
 
 El inbox acumula notas sin destino por dos motivos: modo degradado (API caída) o baja confianza del LLM al clasificar.
 
-**Automático:** un cron reintenta clasificar notas con `status: pending-classification` cada `llm.degraded_retry_minutes` (default 30 min). Sin intervención del usuario.
+**Automático:** un cron reintenta clasificar notas con `status: pending-classification` cada `llm.degraded_retry_minutes` (default 30 min). Cuando la reclasificación tiene éxito, el bot envía un preview al usuario (marcado con ♻️) para confirmación — no escribe al vault sin revisión. El usuario puede confirmar, corregir o cancelar igual que en el flujo normal.
 
 **Manual:**
 
@@ -843,7 +854,7 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 **Incluido:**
 - `config.py`: carga de `config.yaml` + `.env`, validación, constantes
 - `security.py`: middleware de autenticación por `TELEGRAM_ALLOWED_USER_ID`
-- `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
+- `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
 - `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos con backoff (3 intentos, feedback visible), modo degradado (inbox + `pending-classification`)
 - `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()`, `update_wikilinks()` — routing por tipo/proyecto/área/sección
 - `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`
@@ -946,7 +957,7 @@ Bot pregunta: ¿Querés generar un informe descargable con esto?
 - `rag.max_results` — máximo de notas a incluir en el contexto del LLM
 
 ### Links automáticos al escribir
-Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` antes de confirmar. El usuario puede aceptar, modificar o descartar cada link sugerido.
+Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` en el preview antes de confirmar. Al confirmar, los links sugeridos se escriben automáticamente en el cuerpo de la nota bajo una sección `## Ver también`.
 
 Comportamiento configurable:
 - `links.similarity_threshold` — umbral mínimo de similitud para sugerir un link (en `config.yaml`)
@@ -1200,3 +1211,34 @@ Los [Obsidian Skills](https://github.com/kepano/obsidian-skills) son documentos 
 | `obsidian-cli` | Referencia de comandos CLI | Útil solo cuando el CLI sea viable |
 
 Los skills de `obsidian-markdown`, `obsidian-bases` y `json-canvas` se usan hoy. El de `obsidian-cli` queda para cuando se habilite esa ruta.
+
+
+---
+
+## Pendientes y cosas a revisar
+
+Issues detectados durante el testing en vivo (Fases 1–3). Ordenados por impacto.
+
+### Alta prioridad
+
+**Consistencia del frontmatter generado por el LLM**
+El LLM puede generar variaciones en el frontmatter entre clasificaciones del mismo contenido aunque el prompt tenga schema explícito: campos adicionales inventados, distinto orden de tags, cuerpo en inglés pese a la instrucción. Acciones pendientes:
+- Validar y rechazar campos que no estén en la whitelist conocida (title, type, tags, status, project, section, area, priority, due_date, scheduled, authors, year, journal, doi, read_status)
+- Normalizar el orden de campos al escribir via `vault_writer.py`
+- Agregar test que verifique el schema completo de la respuesta del LLM contra la whitelist
+
+**Deduplicación de notas `.md`**
+Si el usuario manda el mismo PDF varias veces y confirma cada vez, se crean múltiples notas `.md` (el archivo físico en Resources se reutiliza correctamente, pero la nota no). Los links sugeridos por ChromaDB muestran las notas duplicadas como relacionadas, lo que es una señal implícita pero no previene la creación. Pendiente: antes de crear la nota, buscar si ya existe una con el mismo `source_file` en el vault y avisar al usuario.
+
+### Media prioridad
+
+**Reclasificación del inbox — notas de gestión**
+Notas guardadas en modo degradado desde mensajes de gestión (ej: "quiero crear un área") quedan en inbox con body vacío o con el texto del mensaje original. El cron las saltea si no tienen body, pero podrían acumularse. Pendiente: limpiarlas automáticamente o marcarlas con un status diferente (`pending-review`) para que el usuario las resuelva manualmente.
+
+**Reclasificación del inbox — una por ciclo**
+El cron procesa de a una nota por ejecución (para no inundar al usuario con previews simultáneos). Con muchas notas acumuladas en inbox, la reclasificación puede tardar varios ciclos. Aceptable para uso personal, pero a documentar.
+
+### Baja prioridad
+
+**Idioma del body**
+El prompt instruye generar el body en español, pero el LLM a veces usa inglés (especialmente en papers). Considerar agregar detección de idioma del contenido original y ajustar la instrucción dinámicamente.

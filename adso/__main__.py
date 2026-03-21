@@ -1,6 +1,5 @@
 """Entry point: python -m adso."""
 
-import asyncio
 import logging
 
 logging.basicConfig(
@@ -10,4 +9,4 @@ logging.basicConfig(
 
 from adso.bot import run_bot  # noqa: E402
 
-asyncio.run(run_bot())
+run_bot()

@@ -45,6 +45,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 
 ## Documentación
 
+- [`docs/installation.md`](docs/installation.md) — Instalación y puesta en marcha paso a paso
 - [`docs/architecture.md`](docs/architecture.md) — Diagrama de flujo, componentes y fases de desarrollo
 - [`docs/obsidian-vault-structure.md`](docs/obsidian-vault-structure.md) — Estructura PARA del vault y plugins
 - [`docs/frontmatter-schema.md`](docs/frontmatter-schema.md) — Schema YAML por tipo de nota y queries Dataview
@@ -56,13 +57,14 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 
 ## Estado
 
-En fase de diseño y documentación. Ver fases de desarrollo en [`docs/architecture.md`](docs/architecture.md).
+Fases 1–3 implementadas y funcionando: captura de texto, audio y documentos; clasificación con Gemini; embeddings en ChromaDB; escritura al vault con confirmación. Ver fases de desarrollo en [`docs/architecture.md`](docs/architecture.md).
 
 ## Requisitos previos
 
-- Raspberry Pi 4 (4GB RAM)
-- Docker y docker-compose
-- Token de bot de Telegram
-- API key de Gemini (Google AI Studio — free tier)
+- Docker y docker-compose-v2 (`sudo apt install docker-compose-v2`)
+- Token de bot de Telegram (via @BotFather)
+- API key de Gemini (Google AI Studio — free tier, sin tarjeta de crédito)
 - Google OAuth credentials (para Calendar + Tasks — Fase 6)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
+
+Ver instrucciones detalladas en [`docs/installation.md`](docs/installation.md).

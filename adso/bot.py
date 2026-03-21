@@ -53,7 +53,6 @@ CB_CONFIRM = "confirm"
 CB_CANCEL = "cancel"
 CB_CORRECT = "correct"
 CB_DEST_INBOX = "dest:inbox"
-CB_DEST_RESOURCES = "dest:resources"
 CB_DISAMBIG_CAPTURE = "disambig:capture"
 CB_DISAMBIG_QUERY = "disambig:query"
 CB_MANAGE_CONFIRM = "manage:confirm"
@@ -165,7 +164,6 @@ def build_capture_keyboard(
     else:
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Resources", callback_data=CB_DEST_RESOURCES),
                 InlineKeyboardButton("Inbox", callback_data=CB_DEST_INBOX),
             ],
             [
@@ -182,7 +180,6 @@ def build_destination_keyboard() -> InlineKeyboardMarkup:
     """Teclado para corregir destino."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Resources", callback_data=CB_DEST_RESOURCES),
             InlineKeyboardButton("Inbox", callback_data=CB_DEST_INBOX),
         ],
         [
@@ -367,6 +364,11 @@ async def handle_text(
             resource_file=resource_info,
             extra_fm=extra_fm or None,
         )
+        return
+
+    # Si hay campos faltantes de una operación manage, rellenarlos con este texto
+    if context.user_data.get("manage_missing_fields") and context.user_data.get("pending_operation"):
+        await _handle_manage_missing_fields(update, context, text)
         return
 
     # Si hay un preview pendiente, tratar como corrección por texto libre
@@ -849,25 +851,84 @@ async def _handle_capture(
     )
 
 
+async def _handle_manage_missing_fields(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+) -> None:
+    """Rellena campos faltantes de una operación manage con el texto del usuario.
+
+    Parsea 'Nombre — Descripción' o 'Nombre: descripción' o texto libre.
+    """
+    pending = context.user_data["pending_operation"]
+    params = pending["payload"]["params"]
+
+    # Intentar parsear "nombre — descripción" o "nombre: descripción"
+    if " — " in text:
+        parts = text.split(" — ", 1)
+        name, description = parts[0].strip(), parts[1].strip()
+    elif ": " in text and not params.get("name"):
+        parts = text.split(": ", 1)
+        name, description = parts[0].strip(), parts[1].strip()
+    else:
+        name = text.strip()
+        description = ""
+
+    if not params.get("name") or params.get("name") in (None, "None", ""):
+        params["name"] = name
+    if not params.get("description") or params.get("description") in (None, "None", ""):
+        params["description"] = description or name
+
+    context.user_data.pop("manage_missing_fields", None)
+    await _handle_manage(update, context, pending)
+
+
 async def _handle_manage(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     result: dict,
 ) -> None:
-    """Procesa modo manage: muestra operación + confirmación."""
+    """Procesa modo manage: muestra operación + confirmación.
+
+    Si faltan datos obligatorios (name, description), pregunta al usuario.
+    """
     payload = result["payload"]
     operation = payload.get("operation", "?")
     params = payload.get("params", {})
 
+    # Detectar campos faltantes según operación
+    missing = []
+    if operation in ("create_project", "create_area"):
+        if not params.get("name") or params.get("name") in (None, "None", ""):
+            missing.append("nombre")
+        if not params.get("description") or params.get("description") in (None, "None", ""):
+            missing.append("descripción")
+    elif operation == "create_section":
+        if not params.get("name") or params.get("name") in (None, "None", ""):
+            missing.append("nombre de la sección")
+        if not params.get("project") or params.get("project") in (None, "None", ""):
+            missing.append("nombre del proyecto")
+
+    if missing:
+        context.user_data["pending_operation"] = result
+        context.user_data["manage_missing_fields"] = missing
+        op_label = "proyecto" if "project" in operation else "área"
+        await update.message.reply_text(
+            f"Para crear el {op_label} necesito: <b>{', '.join(missing)}</b>.\n"
+            f"Mandame el nombre y la descripción (ej: <i>Docencia — gestión de clases y materiales</i>)",
+            parse_mode="HTML",
+        )
+        return
+
     context.user_data["pending_operation"] = result
 
     op_desc = {
-        "create_project": f"Crear proyecto '{params.get('name', '?')}'\nDescripción: {params.get('description', '?')}",
-        "create_area": f"Crear área '{params.get('name', '?')}'\nDescripción: {params.get('description', '?')}",
-        "create_section": f"Crear sección '{params.get('name', '?')}' en proyecto '{params.get('project', '?')}'",
-        "archive_project": f"Archivar proyecto '{params.get('name', '?')}'",
-        "delete_project": f"Eliminar proyecto '{params.get('name', '?')}'",
-        "delete_area": f"Eliminar área '{params.get('name', '?')}'",
+        "create_project": f"Crear proyecto '{params.get('name')}'\nDescripción: {params.get('description')}",
+        "create_area": f"Crear área '{params.get('name')}'\nDescripción: {params.get('description')}",
+        "create_section": f"Crear sección '{params.get('name')}' en proyecto '{params.get('project')}'",
+        "archive_project": f"Archivar proyecto '{params.get('name')}'",
+        "delete_project": f"Eliminar proyecto '{params.get('name')}'",
+        "delete_area": f"Eliminar área '{params.get('name')}'",
     }
 
     desc = op_desc.get(operation, f"Operación: {operation}\nParams: {params}")
@@ -991,8 +1052,6 @@ async def handle_callback(
         await _cb_correct(query, context, vault_path)
     elif data == CB_DEST_INBOX:
         await _cb_dest(query, context, dest_type="inbox")
-    elif data == CB_DEST_RESOURCES:
-        await _cb_dest(query, context, dest_type="resources")
     elif data.startswith(CB_DEST_AREA_PREFIX):
         area = data[len(CB_DEST_AREA_PREFIX):]
         await _cb_dest(query, context, dest_type="area", dest_name=area)
@@ -1038,7 +1097,17 @@ async def handle_callback(
 
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
     """Confirma y escribe la nota al vault."""
-    pending = context.user_data.pop("pending_note", None)
+    # Chequear si es una reclasificación de inbox (estado en bot_data, no user_data)
+    msg_id = query.message.message_id
+    reclassify_map: dict = context.bot_data.get("reclassify_pending", {})
+    inbox_path_str: Optional[str] = None
+    if msg_id in reclassify_map:
+        entry = reclassify_map.pop(msg_id)
+        pending = entry["result"]
+        inbox_path_str = entry["inbox_path"]
+    else:
+        pending = context.user_data.pop("pending_note", None)
+
     if not pending:
         await query.edit_message_text("No hay nota pendiente.")
         return
@@ -1046,6 +1115,12 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     payload = pending["payload"]
     fm = payload["frontmatter"]
     body = payload.get("body", "")
+
+    # Agregar wikilinks sugeridos al cuerpo
+    suggested_links = payload.get("suggested_links", [])
+    if suggested_links:
+        wikilinks = " ".join(f"[[{link}]]" for link in suggested_links)
+        body = body.rstrip() + f"\n\n## Ver también\n\n{wikilinks}"
 
     # Si hay archivo para guardar en Resources (PDF, texto, etc.)
     resource_file = pending.get("_resource_file")
@@ -1075,6 +1150,13 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         asyncio.create_task(
             _index_note_safe(embeddings, path, body, fm, vault_path)
         )
+
+    # Si es reclasificación de inbox, borrar la nota vieja
+    if inbox_path_str:
+        try:
+            Path(inbox_path_str).unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning("No se pudo borrar nota de inbox: %s", e)
 
     rel_path = path.relative_to(vault_path)
     await query.edit_message_text(f"Nota guardada en {rel_path}")
@@ -1110,6 +1192,9 @@ async def _index_note_safe(
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
     _cleanup_pending(context)
+    # Limpiar reclasificación pendiente si corresponde a este mensaje
+    msg_id = query.message.message_id
+    context.bot_data.get("reclassify_pending", {}).pop(msg_id, None)
     await query.edit_message_text("Cancelado.")
 
 
@@ -1124,7 +1209,7 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_note", "pending_operation", "original_content",
             "pending_raw_content", "pending_transcript",
             "pending_extraction", "pending_description",
-            "pending_read_status",
+            "pending_read_status", "manage_missing_fields",
         )
 
     for key in keys:
@@ -1383,9 +1468,14 @@ async def handle_start(
 
 
 async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job periódico: reintenta clasificar notas de Inbox pendientes."""
+    """Job periódico: reintenta clasificar notas de Inbox pendientes.
+
+    Si la reclasificación tiene éxito, manda preview al usuario para confirmación
+    en vez de escribir directamente al vault.
+    """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
+    chat_id = settings.telegram_allowed_user_id
 
     inbox_notes = await find_by_property(
         "status", "pending-classification", vault_path,
@@ -1397,9 +1487,21 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     projects, areas = await _get_existing_items(vault_path)
 
+    # Si ya hay una reclasificación pendiente de confirmación, no mandar más
+    pending_map: dict = context.bot_data.get("reclassify_pending", {})
+    if pending_map:
+        logger.info("Reclasificación: hay %d previews pendientes de confirmación, esperando.", len(pending_map))
+        return
+
     for ref in inbox_notes:
         try:
             note = await read_note(ref.path)
+
+            # Ignorar notas sin body real (ej: mensajes de gestión guardados en degradado)
+            if not note.body or not note.body.strip():
+                logger.info("Reclasificación: saltando nota sin body: %s", ref.path)
+                continue
+
             result = await classify(
                 content=note.body,
                 media_type=note.frontmatter.get("media_type", "text"),
@@ -1408,23 +1510,62 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
                 disambiguation_threshold=settings.llm.disambiguation_threshold,
             )
 
-            if result.get("mode") != "degraded":
-                # Reclasificación exitosa — crear nueva nota y borrar la vieja
-                payload = result["payload"]
-                fm = payload["frontmatter"]
-                fm["date_created"] = note.frontmatter.get("date_created", "")
-                fm["source"] = "telegram"
-                fm["media_type"] = note.frontmatter.get("media_type", "text")
+            if result.get("mode") == "degraded":
+                continue
 
-                new_path = await create_note(fm, payload.get("body", note.body), vault_path)
-                ref.path.unlink()  # Borrar la nota vieja del inbox
-                logger.info("Reclasificada: %s → %s", ref.path, new_path)
+            # Ignorar si el LLM clasificó como manage (no es una nota capturable)
+            if result.get("mode") != "capture":
+                logger.info("Reclasificación: nota %s clasificada como '%s', omitiendo.", ref.path, result.get("mode"))
+                continue
+
+            payload = result["payload"]
+            if "frontmatter" not in payload:
+                logger.warning("Reclasificación: payload sin frontmatter en %s", ref.path)
+                continue
+
+            # Preservar metadatos originales
+            fm = payload["frontmatter"]
+            fm["date_created"] = note.frontmatter.get("date_created", "")
+            fm["source"] = "telegram"
+            fm["media_type"] = note.frontmatter.get("media_type", "text")
+            body = payload.get("body", note.body)
+
+            # Mandar preview al usuario — de a uno por cron
+            preview_text = build_preview(fm, body, payload.get("suggested_links", []))
+            preview_text = "♻️ <b>Nota reclasificada del Inbox</b>\n\n" + preview_text
+            has_dest = bool(fm.get("project") or fm.get("area"))
+            keyboard = build_capture_keyboard(fm, has_dest)
+
+            msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=preview_text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+
+            if "reclassify_pending" not in context.bot_data:
+                context.bot_data["reclassify_pending"] = {}
+            context.bot_data["reclassify_pending"][msg.message_id] = {
+                "result": result,
+                "inbox_path": str(ref.path),
+            }
+            logger.info("Reclasificación pendiente de confirmación: %s", ref.path)
+            # Mandar solo una por ciclo de cron
+            return
 
         except Exception as e:
             logger.warning("Error reclasificando %s: %s", ref.path, e)
 
 
 # ---------------------------------------------------------------------------
+async def _post_init(app: Application) -> None:
+    """Inicialización async del vault, ejecutada por PTB antes de arrancar el polling."""
+    settings: Settings = app.bot_data["settings"]
+    await ensure_vault_structure(settings.vault_path)
+    await seed_vault(settings.vault_path, settings.vault_seed)
+    logger.info("ADSO iniciando — vault en %s", settings.vault_path)
+
+
 # Creación de la aplicación
 # ---------------------------------------------------------------------------
 
@@ -1441,7 +1582,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     if settings is None:
         settings = load_settings()
 
-    app = Application.builder().token(settings.telegram_token).build()
+    app = Application.builder().token(settings.telegram_token).post_init(_post_init).build()
 
     # Bot data compartida
     app.bot_data["settings"] = settings
@@ -1458,7 +1599,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
-    app.add_handler(MessageHandler(filters.DOCUMENT, handle_document))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
@@ -1500,15 +1641,8 @@ async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Error en reindex nocturno: %s", e)
 
 
-async def run_bot() -> None:
-    """Punto de entrada async: inicializa vault y arranca el bot."""
+def run_bot() -> None:
+    """Punto de entrada: inicializa y arranca el bot. PTB gestiona el event loop."""
     settings = load_settings()
-
-    # Inicializar vault
-    await ensure_vault_structure(settings.vault_path)
-    await seed_vault(settings.vault_path, settings.vault_seed)
-
-    logger.info("ADSO iniciando — vault en %s", settings.vault_path)
-
     app = create_application(settings)
-    await app.run_polling()
+    app.run_polling()

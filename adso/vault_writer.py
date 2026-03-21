@@ -574,7 +574,12 @@ async def save_resource(
 
     dest = resources_dir / original_filename
 
-    # Evitar sobreescribir
+    # Si ya existe con el mismo nombre y tamaño, reutilizar — no duplicar
+    if dest.exists() and dest.stat().st_size == source_path.stat().st_size:
+        logger.info("Recurso ya existe (mismo nombre y tamaño), reutilizando: %s", dest.relative_to(vault_path))
+        return dest
+
+    # Mismo nombre pero distinto tamaño — agregar sufijo numérico
     if dest.exists():
         stem = Path(original_filename).stem
         suffix = Path(original_filename).suffix
