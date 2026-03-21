@@ -122,7 +122,11 @@ La corrección de la transcripción es un paso bloqueante: el bot no clasifica n
   - Sugerir proyecto/sección si no existe
   - Generar respuestas a consultas RAG a partir de notas recuperadas por `knowledge_query.py`
 - **Rate limiting:** cola interna con exponential backoff para respetar límites del free tier de Gemini. Si varias notas llegan juntas, se procesan en serie con delay adaptativo.
-- **Reintentos:** 3 intentos con backoff (1s, 2s, 4s). En cada reintento el bot muestra al usuario: `"⏳ Servicio caído, reintento 2/3..."`. Después del tercer fallo → modo degradado.
+- **Reintentos:** 3 intentos con lógica adaptativa según el tipo de error:
+  - **Cuota diaria agotada** (`PerDay` en el error): degradado inmediato, sin reintentos — no tiene sentido esperar.
+  - **Rate limit RPM**: espera el `retryDelay` sugerido por la API (máx 70s) antes de reintentar.
+  - **Otros errores** (red, timeout, parse): backoff fijo (1s, 2s, 4s).
+  En cada reintento el bot muestra al usuario: `"⏳ Servicio caído, reintento 2/3..."`. Después del tercer fallo → modo degradado.
 - **Modo degradado:** el input se guarda en `00-Inbox/` con `status: pending-classification` y el bot avisa `"⚠️ No pude clasificar — guardado en Inbox, se reintenta automáticamente."`. Un cron reintenta cada `llm.degraded_retry_minutes` (default 30 min). Cuando la reclasificación tiene éxito, el bot manda un preview al usuario (con ♻️) para confirmación — no escribe al vault sin revisión.
 - **Normalización de status:** si el LLM devuelve valores de `status` no canónicos (ej: `todo`, `open`, `new`, `draft`), el bot los normaliza automáticamente al valor más cercano antes de validar.
 - **Schema de frontmatter estricto en el prompt:** el system prompt define explícitamente cada campo con su tipo y valores válidos. El body siempre se genera en español. Campos académicos con nombres fijos: `authors` (lista), `year`, `journal`, `doi`, `read_status`.
@@ -432,9 +436,17 @@ Cuando un componente falla, el bot ofrece alternativas en vez de fallar silencio
 ### Reintentos de API (Gemini clasificación y embeddings)
 
 ```
-Intento 1 falla → "⏳ Servicio caído, reintento 2/3..." (espera 1s)
-Intento 2 falla → "⏳ Servicio caído, reintento 3/3..." (espera 2s)
-Intento 3 falla → modo degradado (inbox + aviso)
+Error genérico:
+  Intento 1 falla → "⏳ Servicio caído, reintento 2/3..." (espera 1s)
+  Intento 2 falla → "⏳ Servicio caído, reintento 3/3..." (espera 2s)
+  Intento 3 falla → modo degradado (inbox + aviso)
+
+Error 429 RPM:
+  Intento 1 falla → espera retryDelay de la API (máx 70s), reintenta
+  ...hasta 3 intentos → modo degradado
+
+Error 429 cuota diaria:
+  Intento 1 falla → modo degradado inmediato (sin reintentos)
 ```
 
 Para embeddings: la nota se escribe igual al vault — el embedding queda pendiente para el re-index nocturno.
@@ -855,7 +867,7 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 - `config.py`: carga de `config.yaml` + `.env`, validación, constantes
 - `security.py`: middleware de autenticación por `TELEGRAM_ALLOWED_USER_ID`
 - `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
-- `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos con backoff (3 intentos, feedback visible), modo degradado (inbox + `pending-classification`)
+- `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos adaptativos (cuota diaria → degradado inmediato; RPM → retryDelay de la API; otros → backoff fijo), modo degradado (inbox + `pending-classification`)
 - `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()`, `update_wikilinks()` — routing por tipo/proyecto/área/sección
 - `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`
 - Gestión básica: crear proyecto, crear área, crear sección (modo `manage` del JSON schema)

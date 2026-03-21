@@ -61,7 +61,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Componente | Tecnología |
 |---|---|
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
-| LLM primario | Gemini API — modelo `gemini-2.5-flash-lite` (free tier: 15 RPM, 1000 RPD) |
+| LLM primario | Gemini API — modelo `gemini-2.5-flash-lite` (free tier preview: ~20 RPD observado) |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |

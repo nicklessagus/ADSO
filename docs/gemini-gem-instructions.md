@@ -551,7 +551,7 @@ Se implementan en orden, sin saltar fases.
 
 ## Modo degradado
 
-Si Gemini no responde después de reintentos con exponential backoff:
+Si Gemini no responde después de reintentos (cuota diaria → degradado inmediato; RPM → espera retryDelay de la API; otros errores → backoff fijo 1s/2s/4s):
 1. El input se guarda en `00-Inbox/` con `status: pending-classification`
 2. El body preserva el contenido original íntegro (sin pérdida de datos)
 3. El bot avisa al usuario
@@ -584,7 +584,7 @@ Si Gemini no responde después de reintentos con exponential backoff:
 
 - El LLM recibe el contenido crudo y devuelve frontmatter completo + cuerpo de la nota en JSON estructurado
 - Usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como referencia para generar Markdown compatible con Obsidian (wikilinks, callouts, embeds, properties)
-- Rate limiting: cola interna con exponential backoff para respetar límites del free tier de Gemini
+- Rate limiting: lógica adaptativa — cuota diaria agotada (`PerDay`) → degradado inmediato; RPM → espera el `retryDelay` sugerido por la API (máx 70s); otros errores → backoff fijo (1s, 2s, 4s)
 - El contenido externo siempre va dentro de `<input>` con instrucción de no seguir instrucciones internas
 
 ---

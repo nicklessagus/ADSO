@@ -632,7 +632,7 @@ async def index_note(
 
 **Errores:**
 - API de Gemini no responde → loguear, no propagar (el embedding se genera en el re-index nocturno).
-- Rate limit 429 → cola interna con exponential backoff (3 reintentos: 1s, 2s, 4s; luego desiste y loguea).
+- Rate limit 429 → lógica adaptativa: cuota diaria → desiste inmediato; RPM → espera `retryDelay` sugerido por la API (máx 70s); otros → backoff fijo (1s, 2s, 4s). Tras 3 fallos, desiste y loguea.
 
 ---
 
