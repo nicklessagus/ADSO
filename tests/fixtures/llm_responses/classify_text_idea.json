@@ -1,0 +1,31 @@
+{
+  "mode": "capture",
+  "confidence": 0.88,
+  "payload": {
+    "frontmatter": {
+      "title": "Usar contrastive learning para embeddings del vault",
+      "type": "idea",
+      "tags": ["contrastive-learning", "embeddings", "mejora"],
+      "status": "raw",
+      "project": null,
+      "section": null,
+      "area": "investigacion",
+      "priority": "medium",
+      "due_date": null,
+      "scheduled": null,
+      "authors": null,
+      "year": null,
+      "doi": null,
+      "url": null,
+      "relevance": null,
+      "context": null,
+      "contribution": null,
+      "methods": null,
+      "dataset": null,
+      "conclusions": null
+    },
+    "body": "## Idea\n\nSe me ocurre que podríamos usar contrastive learning para generar mejores embeddings de las notas del vault, en vez de usar los embeddings genéricos de Gemini.\n\nVentajas:\n- Embeddings especializados en el dominio del vault\n- Mejor similitud entre notas relacionadas",
+    "suggested_links": [],
+    "summary": null
+  }
+}

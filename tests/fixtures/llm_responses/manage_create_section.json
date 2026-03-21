@@ -1,0 +1,11 @@
+{
+  "mode": "manage",
+  "confidence": 0.91,
+  "payload": {
+    "operation": "create_section",
+    "params": {
+      "project": "tesis",
+      "name": "resultados"
+    }
+  }
+}

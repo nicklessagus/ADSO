@@ -1,0 +1,11 @@
+{
+  "mode": "manage",
+  "confidence": 0.93,
+  "payload": {
+    "operation": "create_area",
+    "params": {
+      "name": "finanzas",
+      "description": "Trámites financieros, impuestos, inversiones."
+    }
+  }
+}

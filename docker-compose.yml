@@ -1,0 +1,17 @@
+services:
+  adso-bot:
+    build: .
+    container_name: adso-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ${VAULT_PATH:-./vault}:/vault
+      - ${GOOGLE_CALENDAR_CREDS:-./credentials}:/credentials
+      - adso-data:/app/data
+    environment:
+      - VAULT_PATH=/vault
+      - CONFIG_PATH=/app/config.yaml
+
+volumes:
+  adso-data:

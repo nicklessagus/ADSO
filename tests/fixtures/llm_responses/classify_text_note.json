@@ -1,0 +1,31 @@
+{
+  "mode": "capture",
+  "confidence": 0.95,
+  "payload": {
+    "frontmatter": {
+      "title": "Baseline CNN — resultados preliminares",
+      "type": "note",
+      "tags": ["machine-learning", "cnn", "baseline"],
+      "status": "active",
+      "project": "tesis",
+      "section": "experimentos",
+      "area": null,
+      "priority": null,
+      "due_date": null,
+      "scheduled": null,
+      "authors": null,
+      "year": null,
+      "doi": null,
+      "url": null,
+      "relevance": null,
+      "context": null,
+      "contribution": null,
+      "methods": null,
+      "dataset": null,
+      "conclusions": null
+    },
+    "body": "## Contenido\n\nResultados del primer experimento con CNN baseline:\n- Accuracy: 0.87\n- Loss: 0.32\n- Epochs: 50\n\nEl modelo converge rápido pero muestra signos de overfitting después de epoch 30.",
+    "suggested_links": ["[[dataset-imagenet]]", "[[paper-resnet]]"],
+    "summary": "Resultados preliminares del baseline CNN con accuracy 0.87"
+  }
+}

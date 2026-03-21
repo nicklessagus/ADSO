@@ -1,0 +1,31 @@
+{
+  "mode": "capture",
+  "confidence": 0.45,
+  "payload": {
+    "frontmatter": {
+      "title": "Transformers en astronomía",
+      "type": "note",
+      "tags": ["transformers", "astronomia"],
+      "status": "active",
+      "project": null,
+      "section": null,
+      "area": "investigacion",
+      "priority": null,
+      "due_date": null,
+      "scheduled": null,
+      "authors": null,
+      "year": null,
+      "doi": null,
+      "url": null,
+      "relevance": null,
+      "context": null,
+      "contribution": null,
+      "methods": null,
+      "dataset": null,
+      "conclusions": null
+    },
+    "body": "transformers en astronomía",
+    "suggested_links": [],
+    "summary": null
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mode": "capture",
+  "payload": {
+    "frontmatter": {
+      "title": "Nota con JSON incompleto"
+    }
+  }
+}

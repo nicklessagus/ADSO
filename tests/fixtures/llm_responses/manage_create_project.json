@@ -1,0 +1,11 @@
+{
+  "mode": "manage",
+  "confidence": 0.95,
+  "payload": {
+    "operation": "create_project",
+    "params": {
+      "name": "curso-python",
+      "description": "Curso de Python para estudiantes de ingeniería."
+    }
+  }
+}

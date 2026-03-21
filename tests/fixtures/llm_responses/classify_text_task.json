@@ -1,0 +1,31 @@
+{
+  "mode": "capture",
+  "confidence": 0.92,
+  "payload": {
+    "frontmatter": {
+      "title": "Revisar paper de Martinez et al. 2024",
+      "type": "task",
+      "tags": ["paper", "revision"],
+      "status": "pending",
+      "project": "tesis",
+      "section": null,
+      "area": "investigacion",
+      "priority": "high",
+      "due_date": "2025-02-01",
+      "scheduled": null,
+      "authors": null,
+      "year": null,
+      "doi": null,
+      "url": null,
+      "relevance": null,
+      "context": null,
+      "contribution": null,
+      "methods": null,
+      "dataset": null,
+      "conclusions": null
+    },
+    "body": "## Tarea\n\nRevisar el paper de Martinez et al. 2024 sobre transformers aplicados a series temporales.\n\nPuntos a evaluar:\n- [ ] Metodología\n- [ ] Comparación con baseline actual\n- [ ] Posible aplicación en tesis",
+    "suggested_links": ["[[paper-martinez-2024]]"],
+    "summary": null
+  }
+}
