@@ -589,6 +589,28 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 
 Si el proyecto o área no existe, el bot lo indica explícitamente y pide autorización para crearlo.
 
+### Reclasificación del inbox
+
+El inbox acumula notas sin destino por dos motivos: modo degradado (API caída) o baja confianza del LLM al clasificar.
+
+**Automático:** un cron reintenta clasificar notas con `status: pending-classification` cada `llm.degraded_retry_minutes` (default 30 min). Sin intervención del usuario.
+
+**Manual:**
+
+```
+"qué tengo en inbox"
+    → lista ítems: título + fecha + tipo de media
+
+"clasificá el paper de embeddings"
+    → LLM reclasifica → propone destino
+    → flujo de confirmación estándar → vault (sale del inbox)
+
+"clasificá todo lo que tengo en inbox"
+    → procesa uno por uno, cada uno con su preview y confirmación
+```
+
+El usuario puede listar primero y luego pedir clasificar un ítem específico por nombre, o ir directo si ya sabe lo que quiere clasificar.
+
 ### Flujo de edición de notas existentes
 
 > **Scope:** aplica a notas `note` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
