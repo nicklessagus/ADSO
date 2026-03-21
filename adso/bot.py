@@ -35,10 +35,13 @@ from adso.vault_writer import (
     create_note,
     ensure_vault_structure,
     read_note,
+    save_resource,
     seed_vault,
 )
 from adso.embeddings import EmbeddingsClient
 from adso.vault_search import find_by_property, get_note_index
+from adso.transcriber import transcribe_audio
+from adso.document_extractor import extract_pdf, extract_text_file, is_text_file, is_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,15 @@ CB_DISAMBIG_CAPTURE = "disambig:capture"
 CB_DISAMBIG_QUERY = "disambig:query"
 CB_MANAGE_CONFIRM = "manage:confirm"
 CB_MANAGE_CANCEL = "manage:cancel"
+
+# Audio / documento
+CB_TRANSCRIPT_OK = "transcript:ok"
+CB_TRANSCRIPT_CANCEL = "transcript:cancel"
+CB_READ_STATUS_READ = "read:read"
+CB_READ_STATUS_UNREAD = "read:unread"
+CB_EXTRACTION_OK = "extraction:ok"
+CB_EXTRACTION_CANCEL = "extraction:cancel"
+CB_DESCRIBE = "describe"
 
 # Prefijos
 CB_DEST_AREA_PREFIX = "dest:area:"
@@ -200,6 +212,36 @@ def build_manage_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_transcript_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para confirmar/cancelar transcripción de audio."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Confirmar transcripción", callback_data=CB_TRANSCRIPT_OK),
+            InlineKeyboardButton("Cancelar", callback_data=CB_TRANSCRIPT_CANCEL),
+        ]
+    ])
+
+
+def build_read_status_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para marcar si ya se leyó un PDF/link."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Ya lo leí", callback_data=CB_READ_STATUS_READ),
+            InlineKeyboardButton("Lo quiero leer", callback_data=CB_READ_STATUS_UNREAD),
+        ]
+    ])
+
+
+def build_extraction_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para confirmar texto extraído de un documento."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Confirmar", callback_data=CB_EXTRACTION_OK),
+            InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
+        ]
+    ])
+
+
 async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
     """Construye teclado con áreas existentes."""
     areas = await find_by_property("type", "area-index", vault_path)
@@ -287,6 +329,46 @@ async def handle_text(
     vault_path = settings.vault_path
     text = update.message.text
 
+    # Si hay transcripción pendiente, tratar como corrección del transcript
+    if context.user_data.get("pending_transcript"):
+        pt = context.user_data["pending_transcript"]
+        pt["text"] = text
+        await update.message.reply_text(
+            f"<b>Transcripción corregida.</b>\n\n<i>{_esc(text[:500])}</i>",
+            reply_markup=build_transcript_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    # Si hay extracción pendiente, tratar como corrección del texto extraído
+    if context.user_data.get("pending_extraction"):
+        pe = context.user_data["pending_extraction"]
+        pe["text"] = text
+        await update.message.reply_text(
+            f"<b>Texto corregido.</b>\n\n<i>{_esc(text[:500])}</i>",
+            reply_markup=build_extraction_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    # Si se espera descripción de un archivo binario
+    if context.user_data.get("pending_description"):
+        pd = context.user_data.pop("pending_description")
+        resource_info = {
+            "temp_path": pd["temp_path"],
+            "filename": pd["original_filename"],
+        }
+        extra_fm = {}
+        if pd.get("read_status"):
+            extra_fm["read_status"] = pd["read_status"]
+        await _classify_and_preview(
+            update, context, text,
+            media_type=pd["media_type"],
+            resource_file=resource_info,
+            extra_fm=extra_fm or None,
+        )
+        return
+
     # Si hay un preview pendiente, tratar como corrección por texto libre
     pending = context.user_data.get("pending_note")
     if pending:
@@ -353,6 +435,368 @@ async def handle_text(
         )
     else:
         await update.message.reply_text("No pude interpretar el mensaje.")
+
+
+@authorized
+async def handle_audio(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler para mensajes de audio y voz."""
+    settings: Settings = context.bot_data["settings"]
+    msg = update.message
+
+    # Obtener archivo de audio (voice o audio)
+    audio_file = msg.voice or msg.audio
+    if not audio_file:
+        await msg.reply_text("No se pudo procesar el audio.")
+        return
+
+    # Verificar tamaño
+    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    if audio_file.file_size and audio_file.file_size > max_bytes:
+        await msg.reply_text(
+            f"Audio demasiado grande (máx {settings.documents.max_size_mb}MB)."
+        )
+        return
+
+    await msg.reply_text("Transcribiendo audio...")
+
+    try:
+        # Descargar a archivo temporal
+        import tempfile
+        tg_file = await audio_file.get_file()
+        suffix = ".ogg" if msg.voice else Path(tg_file.file_path or "audio.ogg").suffix
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        await tg_file.download_to_drive(str(tmp_path))
+
+        # Transcribir
+        text = await transcribe_audio(tmp_path, model=settings.whisper.model)
+
+        if not text.strip():
+            await msg.reply_text("No se pudo extraer texto del audio.")
+            tmp_path.unlink(missing_ok=True)
+            return
+
+        # Guardar estado para confirmación
+        context.user_data["pending_transcript"] = {
+            "text": text,
+            "temp_path": str(tmp_path),
+            "media_type": "audio",
+        }
+
+        # Mostrar transcripción para confirmación
+        snippet = text[:500]
+        if len(text) > 500:
+            snippet += "..."
+        await msg.reply_text(
+            f"<b>Transcripción:</b>\n\n<i>{_esc(snippet)}</i>\n\n"
+            "Si es correcto, confirmá. Si no, mandá el texto corregido.",
+            reply_markup=build_transcript_keyboard(),
+            parse_mode="HTML",
+        )
+
+    except Exception as e:
+        logger.error("Error transcribiendo audio: %s", e)
+        await msg.reply_text(f"Error al transcribir: {e}")
+        # Cleanup
+        if "tmp_path" in dir():
+            tmp_path.unlink(missing_ok=True)
+
+
+@authorized
+async def handle_document(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler para documentos (PDF, texto, binarios)."""
+    settings: Settings = context.bot_data["settings"]
+    msg = update.message
+    doc = msg.document
+
+    if not doc:
+        await msg.reply_text("No se pudo procesar el documento.")
+        return
+
+    filename = doc.file_name or "documento"
+
+    # Verificar tamaño
+    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    if doc.file_size and doc.file_size > max_bytes:
+        await msg.reply_text(
+            f"Archivo demasiado grande (máx {settings.documents.max_size_mb}MB)."
+        )
+        return
+
+    # Descargar a archivo temporal
+    import tempfile
+    tg_file = await doc.get_file()
+    suffix = Path(filename).suffix or ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    await tg_file.download_to_drive(str(tmp_path))
+
+    if is_pdf(filename):
+        # PDF: preguntar read_status primero
+        context.user_data["pending_read_status"] = {
+            "temp_path": str(tmp_path),
+            "original_filename": filename,
+            "media_type": "document",
+        }
+        await msg.reply_text(
+            f"PDF recibido: <b>{_esc(filename)}</b>",
+            reply_markup=build_read_status_keyboard(),
+            parse_mode="HTML",
+        )
+
+    elif is_text_file(filename):
+        # Texto plano: leer directamente y clasificar
+        try:
+            text = await extract_text_file(tmp_path, max_chars=50000)
+            if not text.strip():
+                await msg.reply_text("El archivo está vacío.")
+                tmp_path.unlink(missing_ok=True)
+                return
+
+            context.user_data["pending_extraction"] = {
+                "text": text,
+                "temp_path": str(tmp_path),
+                "original_filename": filename,
+                "media_type": "document",
+                "metadata": {},
+            }
+
+            snippet = text[:500]
+            if len(text) > 500:
+                snippet += "..."
+            await msg.reply_text(
+                f"<b>Contenido de {_esc(filename)}:</b>\n\n"
+                f"<i>{_esc(snippet)}</i>\n\n"
+                "Confirmá para clasificar o mandá texto corregido.",
+                reply_markup=build_extraction_keyboard(),
+                parse_mode="HTML",
+            )
+
+        except Exception as e:
+            logger.error("Error leyendo archivo de texto: %s", e)
+            await msg.reply_text(f"Error leyendo archivo: {e}")
+            tmp_path.unlink(missing_ok=True)
+
+    else:
+        # Binario / formato no reconocido: pedir descripción
+        context.user_data["pending_description"] = {
+            "temp_path": str(tmp_path),
+            "original_filename": filename,
+            "media_type": "document",
+        }
+        await msg.reply_text(
+            f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
+            "No puedo leer este formato. Describí el contenido para clasificarlo, "
+            "o cancelá.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
+            ]),
+            parse_mode="HTML",
+        )
+
+
+async def _process_pdf_after_read_status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    read_status: str,
+) -> None:
+    """Procesa un PDF después de que el usuario seleccionó read_status."""
+    pending = context.user_data.pop("pending_read_status", None)
+    if not pending:
+        return
+
+    query = update.callback_query
+    tmp_path = Path(pending["temp_path"])
+    filename = pending["original_filename"]
+
+    await query.edit_message_text("Extrayendo texto del PDF...")
+
+    try:
+        text, pdf_meta = await extract_pdf(tmp_path)
+
+        if not text.strip():
+            # PDF sin texto extraíble — pedir descripción
+            context.user_data["pending_description"] = {
+                "temp_path": str(tmp_path),
+                "original_filename": filename,
+                "media_type": "document",
+                "read_status": read_status,
+                "pdf_metadata": pdf_meta,
+            }
+            await query.edit_message_text(
+                "No pude extraer texto del PDF (puede ser escaneado).\n"
+                "Describí el contenido para clasificarlo.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
+                ]),
+            )
+            return
+
+        context.user_data["pending_extraction"] = {
+            "text": text,
+            "temp_path": str(tmp_path),
+            "original_filename": filename,
+            "media_type": "document",
+            "read_status": read_status,
+            "metadata": pdf_meta,
+        }
+
+        # Mostrar preview del texto extraído
+        snippet = text[:500]
+        if len(text) > 500:
+            snippet += "..."
+        meta_lines = []
+        if pdf_meta.get("title"):
+            meta_lines.append(f"Título: {pdf_meta['title']}")
+        if pdf_meta.get("author"):
+            meta_lines.append(f"Autor: {pdf_meta['author']}")
+        meta_lines.append(f"Páginas: {pdf_meta.get('pages', '?')}")
+        meta_text = "\n".join(meta_lines)
+
+        await query.edit_message_text(
+            f"<b>PDF extraído:</b>\n{_esc(meta_text)}\n\n"
+            f"<i>{_esc(snippet)}</i>\n\n"
+            "Confirmá para clasificar o mandá texto corregido.",
+            reply_markup=build_extraction_keyboard(),
+            parse_mode="HTML",
+        )
+
+    except Exception as e:
+        logger.error("Error extrayendo PDF: %s", e)
+        await query.edit_message_text(f"Error extrayendo PDF: {e}")
+        tmp_path.unlink(missing_ok=True)
+
+
+async def _classify_and_preview(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    media_type: str,
+    resource_file: Optional[dict] = None,
+    extra_fm: Optional[dict] = None,
+) -> None:
+    """Clasifica texto extraído y muestra preview.
+
+    Flujo compartido por audio, PDF y documentos de texto.
+
+    Args:
+        update: Telegram update.
+        context: Bot context.
+        text: Texto a clasificar.
+        media_type: 'audio' o 'document'.
+        resource_file: Info del archivo para guardar en Resources {temp_path, filename}.
+        extra_fm: Campos adicionales para el frontmatter (read_status, etc.).
+    """
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+
+    projects, areas = await _get_existing_items(vault_path)
+
+    async def on_retry(attempt: int, max_attempts: int) -> None:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                f"Servicio caído, reintento {attempt}/{max_attempts}..."
+            )
+
+    result = await classify(
+        content=text,
+        media_type=media_type,
+        existing_projects=projects,
+        existing_areas=areas,
+        disambiguation_threshold=settings.llm.disambiguation_threshold,
+        on_retry=on_retry,
+    )
+
+    mode = result.get("mode", "")
+
+    # Guardar info de recurso para el confirm
+    if resource_file:
+        result["_resource_file"] = resource_file
+
+    # Inyectar campos extra al frontmatter
+    if extra_fm:
+        payload = result.get("payload", {})
+        fm = payload.get("frontmatter", {})
+        fm.update(extra_fm)
+
+    if mode == "degraded":
+        # Modo degradado: guardar en inbox
+        payload = result["payload"]
+        fm = payload["frontmatter"]
+        fm["source"] = "telegram"
+        fm["media_type"] = media_type
+        if extra_fm:
+            fm.update(extra_fm)
+
+        # Agregar embed del archivo si hay recurso
+        body = payload.get("body", text)
+        if resource_file:
+            res_path = await save_resource(
+                Path(resource_file["temp_path"]),
+                resource_file["filename"],
+                vault_path,
+            )
+            body += f"\n\n![[{res_path.name}]]"
+            Path(resource_file["temp_path"]).unlink(missing_ok=True)
+
+        path = await create_note(fm, body, vault_path)
+
+        git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
+        if git_backup:
+            await git_backup.notify(fm.get("title", "Sin título"))
+
+        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
+        await reply_fn(
+            "No pude clasificar — guardado en Inbox. "
+            "Se reintenta automáticamente."
+        )
+        return
+
+    # Captura normal
+    payload = result["payload"]
+    fm = payload["frontmatter"]
+    body = payload.get("body", "")
+    suggested_links = payload.get("suggested_links", [])
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    fm["date_created"] = now
+    fm["date_modified"] = now
+    fm["source"] = "telegram"
+    fm["media_type"] = media_type
+
+    # Buscar links similares
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if embeddings and body:
+        try:
+            similar = await embeddings.query_similar(
+                query_text=body,
+                n_results=settings.links.max_suggestions,
+                threshold=settings.links.similarity_threshold,
+            )
+            if similar:
+                suggested_links = [s.note_id for s in similar]
+        except Exception as e:
+            logger.warning("Error buscando links similares: %s", e)
+
+    context.user_data["pending_note"] = result
+    result["payload"]["suggested_links"] = suggested_links
+
+    has_dest = _has_destination(fm)
+    preview = build_preview(fm, body, suggested_links)
+    keyboard = build_capture_keyboard(fm, has_dest)
+
+    reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
+    await reply_fn(
+        preview,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 async def _handle_capture(
@@ -575,6 +1019,21 @@ async def handle_callback(
     elif data == CB_MANAGE_CANCEL:
         await query.edit_message_text("Operación cancelada.")
         context.user_data.pop("pending_operation", None)
+    # --- Audio / documento callbacks ---
+    elif data == CB_TRANSCRIPT_OK:
+        await _cb_transcript_ok(update, context)
+    elif data == CB_TRANSCRIPT_CANCEL:
+        _cleanup_pending(context, "pending_transcript")
+        await query.edit_message_text("Transcripción cancelada.")
+    elif data == CB_READ_STATUS_READ:
+        await _process_pdf_after_read_status(update, context, "read")
+    elif data == CB_READ_STATUS_UNREAD:
+        await _process_pdf_after_read_status(update, context, "unread")
+    elif data == CB_EXTRACTION_OK:
+        await _cb_extraction_ok(update, context)
+    elif data == CB_EXTRACTION_CANCEL:
+        _cleanup_pending(context, "pending_extraction", "pending_description")
+        await query.edit_message_text("Cancelado.")
 
 
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
@@ -587,6 +1046,21 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     payload = pending["payload"]
     fm = payload["frontmatter"]
     body = payload.get("body", "")
+
+    # Si hay archivo para guardar en Resources (PDF, texto, etc.)
+    resource_file = pending.get("_resource_file")
+    if resource_file:
+        try:
+            res_path = await save_resource(
+                Path(resource_file["temp_path"]),
+                resource_file["filename"],
+                vault_path,
+            )
+            body += f"\n\n![[{res_path.name}]]"
+            fm.setdefault("source_file", res_path.name)
+            Path(resource_file["temp_path"]).unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning("Error guardando recurso: %s", e)
 
     path = await create_note(fm, body, vault_path)
 
@@ -635,11 +1109,91 @@ async def _index_note_safe(
 
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
-    context.user_data.pop("pending_note", None)
-    context.user_data.pop("pending_operation", None)
-    context.user_data.pop("original_content", None)
-    context.user_data.pop("pending_raw_content", None)
+    _cleanup_pending(context)
     await query.edit_message_text("Cancelado.")
+
+
+def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
+    """Limpia estados pendientes del user_data.
+
+    Si no se pasan keys, limpia todos los estados conocidos.
+    Si se pasan keys, limpia solo esos + cleanup de temp files.
+    """
+    if not keys:
+        keys = (
+            "pending_note", "pending_operation", "original_content",
+            "pending_raw_content", "pending_transcript",
+            "pending_extraction", "pending_description",
+            "pending_read_status",
+        )
+
+    for key in keys:
+        data = context.user_data.pop(key, None)
+        # Limpiar archivo temporal si existe
+        if isinstance(data, dict) and "temp_path" in data:
+            Path(data["temp_path"]).unlink(missing_ok=True)
+
+
+async def _cb_transcript_ok(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Confirma transcripción y clasifica el texto."""
+    pt = context.user_data.pop("pending_transcript", None)
+    if not pt:
+        await update.callback_query.edit_message_text("No hay transcripción pendiente.")
+        return
+
+    text = pt["text"]
+    temp_path = pt.get("temp_path")
+
+    # Limpiar archivo temporal de audio
+    if temp_path:
+        Path(temp_path).unlink(missing_ok=True)
+
+    await update.callback_query.edit_message_text("Clasificando...")
+
+    await _classify_and_preview(
+        update, context, text,
+        media_type="audio",
+    )
+
+
+async def _cb_extraction_ok(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Confirma texto extraído y clasifica."""
+    pe = context.user_data.pop("pending_extraction", None)
+    if not pe:
+        await update.callback_query.edit_message_text("No hay extracción pendiente.")
+        return
+
+    text = pe["text"]
+    resource_info = None
+    extra_fm = {}
+
+    if pe.get("original_filename"):
+        resource_info = {
+            "temp_path": pe["temp_path"],
+            "filename": pe["original_filename"],
+        }
+    else:
+        # Audio o similar sin archivo para Resources
+        if pe.get("temp_path"):
+            Path(pe["temp_path"]).unlink(missing_ok=True)
+
+    if pe.get("read_status"):
+        extra_fm["read_status"] = pe["read_status"]
+
+    await update.callback_query.edit_message_text("Clasificando...")
+
+    await _classify_and_preview(
+        update, context, text,
+        media_type=pe.get("media_type", "document"),
+        resource_file=resource_info,
+        extra_fm=extra_fm or None,
+    )
 
 
 async def _cb_correct(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
@@ -903,6 +1457,8 @@ def create_application(settings: Optional[Settings] = None) -> Application:
 
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+    app.add_handler(MessageHandler(filters.DOCUMENT, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 

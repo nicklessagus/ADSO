@@ -5,3 +5,5 @@ python-slugify~=8.0
 pyyaml~=6.0
 gitpython~=3.1
 chromadb~=0.5
+faster-whisper>=1.0
+pymupdf>=1.23

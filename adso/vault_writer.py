@@ -540,6 +540,55 @@ async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Guardar archivos en Resources
+# ---------------------------------------------------------------------------
+
+
+async def save_resource(
+    source_path: Path,
+    original_filename: str,
+    vault_path: Path,
+) -> Path:
+    """Copia un archivo a 03-Resources/ en el vault.
+
+    Si ya existe un archivo con el mismo nombre, agrega sufijo numérico.
+
+    Args:
+        source_path: Path al archivo temporal a copiar.
+        original_filename: Nombre original del archivo.
+        vault_path: Raíz del vault.
+
+    Returns:
+        Path al archivo copiado en el vault.
+
+    Raises:
+        FileNotFoundError: Si source_path no existe.
+    """
+    import shutil
+
+    if not source_path.exists():
+        raise FileNotFoundError(f"Archivo fuente no encontrado: {source_path}")
+
+    resources_dir = vault_path / "03-Resources"
+    resources_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = resources_dir / original_filename
+
+    # Evitar sobreescribir
+    if dest.exists():
+        stem = Path(original_filename).stem
+        suffix = Path(original_filename).suffix
+        counter = 1
+        while dest.exists():
+            dest = resources_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+    await asyncio.to_thread(shutil.copy2, str(source_path), str(dest))
+    logger.info("Recurso guardado: %s", dest.relative_to(vault_path))
+    return dest
+
+
+# ---------------------------------------------------------------------------
 # Git backup
 # ---------------------------------------------------------------------------
 
