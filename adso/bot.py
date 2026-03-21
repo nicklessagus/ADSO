@@ -1647,6 +1647,17 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("Reclasificación: hay %d previews pendientes de confirmación, esperando.", len(pending_map))
         return
 
+    # Si el usuario está en medio de un flujo (nota pendiente, operación, etc.), no interrumpir
+    _PENDING_FLOW_KEYS = {
+        "pending_note", "pending_operation", "pending_raw_content",
+        "pending_extraction", "pending_transcript", "pending_description",
+        "manage_missing_fields",
+    }
+    user_data: dict = context.application.user_data.get(chat_id, {})
+    if any(k in user_data for k in _PENDING_FLOW_KEYS):
+        logger.info("Reclasificación: usuario tiene flujo pendiente, posponiendo.")
+        return
+
     for ref in inbox_notes:
         try:
             note = await read_note(ref.path)
