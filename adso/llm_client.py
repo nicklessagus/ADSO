@@ -54,7 +54,38 @@ INJECTION_PATTERNS = [
 ]
 
 MAX_RETRIES = 3
-RETRY_DELAYS = [1, 2, 4]  # segundos
+RETRY_DELAYS = [1, 2, 4]  # segundos — backoff para errores genéricos
+MAX_RPM_WAIT = 70          # segundos — máximo a esperar en errores de RPM
+
+
+# ---------------------------------------------------------------------------
+# Análisis de errores de rate limit
+# ---------------------------------------------------------------------------
+
+
+def _parse_rate_limit_error(error_str: str) -> tuple[bool, float]:
+    """Analiza un error 429 de Gemini y extrae tipo de cuota y delay sugerido.
+
+    Args:
+        error_str: Representación string del error.
+
+    Returns:
+        (is_daily_quota, retry_delay_seconds)
+        is_daily_quota=True → cuota diaria agotada, no tiene sentido reintentar.
+        retry_delay_seconds → delay sugerido por la API (0.0 si no se pudo parsear).
+    """
+    is_daily = "PerDay" in error_str
+
+    delay = 0.0
+    match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", error_str)
+    if match:
+        delay = float(match.group(1))
+    else:
+        match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_str, re.IGNORECASE)
+        if match:
+            delay = float(match.group(1))
+
+    return is_daily, delay
 
 
 # ---------------------------------------------------------------------------
@@ -322,13 +353,35 @@ async def classify(
             return validated
 
         except Exception as e:
-            logger.warning(
-                "Intento %d/%d falló: %s", attempt, MAX_RETRIES, e
-            )
-            if on_retry and attempt < MAX_RETRIES:
-                await on_retry(attempt + 1, MAX_RETRIES)
-            if attempt < MAX_RETRIES:
-                await asyncio.sleep(RETRY_DELAYS[attempt - 1])
+            error_str = str(e)
+            is_rate_limit = "429" in error_str or "RESOURCE_EXHAUSTED" in error_str
+
+            if is_rate_limit:
+                is_daily, suggested_delay = _parse_rate_limit_error(error_str)
+                if is_daily:
+                    logger.error(
+                        "Cuota diaria de Gemini agotada — modo degradado inmediato"
+                    )
+                    break  # no tiene sentido reintentar
+
+                # Error de RPM: usar el delay sugerido por la API
+                wait = min(suggested_delay, MAX_RPM_WAIT) if suggested_delay else RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    "Intento %d/%d — rate limit RPM, esperando %.0fs",
+                    attempt, MAX_RETRIES, wait,
+                )
+                if on_retry and attempt < MAX_RETRIES:
+                    await on_retry(attempt + 1, MAX_RETRIES)
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(wait)
+            else:
+                logger.warning(
+                    "Intento %d/%d falló: %s", attempt, MAX_RETRIES, e
+                )
+                if on_retry and attempt < MAX_RETRIES:
+                    await on_retry(attempt + 1, MAX_RETRIES)
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAYS[attempt - 1])
 
     # Modo degradado
     logger.error("LLM falló después de %d intentos — modo degradado", MAX_RETRIES)
