@@ -163,7 +163,7 @@ status: active                         # valores dependen del type
 
 Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
-**`read_status`:** campo opcional, valores `unread | reading | read`. Se setea únicamente cuando el usuario elige "guardar para después" — sin importar el tipo de contenido (paper, link, archivo, imagen, texto). No se setea automáticamente por tipo. Las notas con `read_status` incluyen una sección `## Notas personales` vacía en el body. Ver spec completa en `docs/frontmatter-schema.md`.
+**`read_status`:** campo opcional, valores `unread | reading | read`. Aplica solo a PDFs y links — contenido externo que el usuario puede o no haber consumido. Al recibir un PDF o link, el bot pregunta `[Ya lo leí]` → `read_status: read`, `[Lo quiero leer]` → `read_status: unread`. Es siempre decisión explícita del usuario, nunca automática. Las notas con `read_status` incluyen una sección `## Notas personales` vacía en el body. Ver spec completa en `docs/frontmatter-schema.md`.
 
 **`task`:** `priority` (low/medium/high), `project` (opcional — solo metadata, no cambia ubicación), `due_date` (ISO 8601, solo fecha), `scheduled` (ISO 8601, fecha/hora — seteado al agendar), `related`
 
@@ -222,7 +222,7 @@ Nada se escribe al vault sin confirmación explícita del usuario:
    - Sección destino (existente o nueva sugerida)
    - Preview del frontmatter YAML
    - Links sugeridos por similitud (ChromaDB)
-3. Usuario confirma, edita o cancela con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`)
+3. Usuario confirma, corrige o cancela con inline keyboard (`[Confirmar]` `[Corregir]` `[Cancelar]`)
 4. Bot escribe la nota al vault
 5. Bot genera embedding y lo almacena en ChromaDB (async)
 6. Bot hace git commit+push al repo de backup (con debounce)
@@ -266,10 +266,14 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 
 | Momento | Botones |
 |---|---|
-| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
-| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
+| **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
+| **Imagen recibida** | `[Tesseract]` `[Gemini Vision]` `[Sin extracción]` |
+| **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
-| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
+| **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
 
 ### Desambiguación de intención

@@ -114,7 +114,7 @@ status: active     # valores dependen del type — ver docs/frontmatter-schema.m
 Los tipos `project-index` y `area-index` se generan automáticamente al crear proyecto/área (no por clasificación del LLM). Ambos requieren `description` — el bot la pide obligatoriamente en la creación. Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
-Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Editar]` `[Cancelar]`).
+Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Corregir]` `[Cancelar]`).
 
 ### Prioridad inferida
 El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.

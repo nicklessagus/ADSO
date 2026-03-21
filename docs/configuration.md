@@ -25,22 +25,6 @@ Separación de responsabilidades:
 ## `config.yaml` — referencia completa
 
 ```yaml
-# ─── Reporte semanal ────────────────────────────────────────────────────────
-weekly_report:
-  enabled: true
-  day: friday          # lunes=monday ... domingo=sunday
-  time: "18:00"        # hora local del servidor (formato HH:MM)
-  include:
-    - notes_created     # notas creadas en la semana (desglose por tipo)
-    - active_project    # proyecto más activo
-    - new_methods       # métodos que aparecen por primera vez en papers
-    - paper_queue       # papers pendientes ordenados por prioridad
-    - stale_ideas       # ideas en status:raw más de N días (ver stale_idea_days)
-    - tasks_review      # tasks ADSO: completadas vs pendientes de la semana
-    - paper_suggestion  # sugerencia de paper a leer basada en similitud con actividad reciente
-
-  stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
-
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto

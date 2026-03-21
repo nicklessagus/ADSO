@@ -50,14 +50,14 @@ Texto / Link        Audio / Imagen
      ┌────┼────────────────────┐
      │    │                    │
      ▼    ▼                    ▼
-Captura  Agenda              Consulta
-     │   (fecha/hora)        (RAG sobre vault)
-     │        │                    │
-     ▼        ▼               ┌────┴────┐
-Filesystem   Google Calendar  │         │
-Docker vol   + Google Tasks   ▼         ▼
-     │                     ChromaDB   vault_search.py
-     │                     semántica  estructural
+Captura  Gestión             Consulta
+     │   (proyectos,         (RAG sobre vault)
+     │    áreas, tasks)            │
+     ▼        │               ┌────┴────┐
+Filesystem    │               │         │
+Docker vol    ▼               ▼         ▼
+     │   Google Calendar   ChromaDB   vault_search.py
+     │   + Google Tasks    semántica  estructural
      │                     (vectores) (backlinks, tags, properties)
      │
      ├──→ Git backup (GitHub privado)
@@ -213,14 +213,14 @@ El usuario típicamente gestiona sus eventos directo desde Google Calendar — e
 
 ### Imágenes y capturas (Fase 4)
 
-Las imágenes siguen el flujo unificado de archivos adjuntos: el usuario elige `[Describilo vos]` o `[Extraer automáticamente]`. Si elige extracción automática, elige entre dos motores:
+Al recibir una imagen, el bot pregunta con botones `[Tesseract]` `[Gemini Vision]` `[Sin extracción]`. Si elige un motor de extracción:
 
 | Motor | RAM | Calidad | Cuándo usarlo |
 |---|---|---|---|
 | **Tesseract** (via `pytesseract`) | ~50MB | Buena para texto impreso | Capturas de pantalla, documentos escaneados, texto claro |
 | **Gemini Vision** | 0 local | Superior para contenido visual | Fotos, diagramas, manuscritos, imágenes sin texto predominante |
 
-Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
+Si elige `[Sin extracción]`, la imagen se guarda en `03-Resources/` con una nota descriptiva generada por el LLM. Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
 
 ### Links
 
@@ -431,10 +431,14 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 
 | Momento | Botones |
 |---|---|
-| **Captura** (después de clasificar) | `[Confirmar]` `[Editar]` `[Cancelar]` |
-| **Nota sin destino** (sin proyecto ni área) | `[Resources]` `[Elegir área]` `[Inbox]` |
+| **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
+| **Imagen recibida** | `[Tesseract]` `[Gemini Vision]` `[Sin extracción]` |
+| **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
-| **Resultado de consulta** | `[Informe .md]` `[Ampliar búsqueda]` |
+| **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
+| **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
 
 ### Desambiguación de intención

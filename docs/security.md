@@ -195,13 +195,180 @@ El LLM nunca ejecuta acciones directamente. Su output (JSON) se mapea en código
 WRITE_NOTE, EDIT_NOTE, DELETE_NOTE, ARCHIVE_NOTE
 QUERY_VAULT
 CREATE_EVENT, DELETE_EVENT    (solo en calendario ADSO)
-CREATE_TASK, UPDATE_TASK      (solo en lista ADSO)
-CREATE_PROJECT
+CREATE_TASK                   (solo en lista ADSO — no se editan via ADSO)
+CREATE_PROJECT, CREATE_AREA, RENAME_PROJECT, RENAME_AREA, DELETE_PROJECT, DELETE_AREA
 ```
 
 Cualquier output del LLM que no corresponda a una de estas operaciones es rechazado. No importa qué instrucciones contenga el contenido externo — el bot no puede hacer nada fuera de este conjunto.
 
-> **TODO (antes de implementar Fase 1):** definir el schema JSON exacto que el LLM devuelve para cada modo de operación (Captura, Consulta, Gestión, Agenda, Edición), incluyendo el campo de confianza (`confidence`) y el umbral por debajo del cual el bot dispara desambiguación con inline keyboard en lugar de asumir. Este schema es el contrato entre `llm_client.py` y `bot.py` y debe estar especificado antes de escribir código.
+### 9b. Schema JSON del LLM — contrato `llm_client.py` ↔ `bot.py`
+
+El LLM siempre responde con un JSON que tiene un wrapper común y un payload que varía por modo. El bot parsea el JSON y ejecuta la operación correspondiente. Si el JSON no se ajusta al schema, el input va a `00-Inbox/` con `status: pending-classification`.
+
+**Umbral de confianza:** si `confidence < 0.7`, el bot no asume el modo y dispara desambiguación con inline keyboard (`[Guardar como nota]` `[Buscar en vault]`).
+
+#### Wrapper común
+
+```json
+{
+  "mode": "capture | query | edit | manage",
+  "confidence": 0.92,
+  "payload": { ... }
+}
+```
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `mode` | string enum | `capture`, `query`, `edit`, `manage` |
+| `confidence` | float 0-1 | Confianza del LLM en la clasificación de modo. < 0.7 → desambiguación |
+| `payload` | object | Contenido específico del modo — schema abajo |
+
+#### Modo `capture` — Captura de contenido
+
+```json
+{
+  "mode": "capture",
+  "confidence": 0.95,
+  "payload": {
+    "frontmatter": {
+      "title": "Baseline CNN — resultados preliminares",
+      "type": "note",
+      "tags": ["machine-learning", "cnn", "baseline"],
+      "status": "active",
+      "project": "tesis",
+      "section": "experimentos",
+      "area": null,
+      "priority": null,
+      "due_date": null,
+      "scheduled": null,
+      "authors": null,
+      "year": null,
+      "doi": null,
+      "url": null,
+      "relevance": null,
+      "context": null,
+      "contribution": null,
+      "methods": null,
+      "dataset": null,
+      "conclusions": null
+    },
+    "body": "## Contenido\n\nResultados del primer experimento...",
+    "suggested_links": ["[[paper-referencia-metodologia]]", "[[dataset-imagenet]]"],
+    "summary": "Resultados preliminares del baseline CNN con accuracy 0.87"
+  }
+}
+```
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `frontmatter` | object | Todos los campos del schema de frontmatter. Campos no aplicables van en `null`. `date_created`, `date_modified`, `source` y `media_type` los setea el bot, no el LLM |
+| `frontmatter.type` | string enum | `note`, `task`, `idea`, `inbox` — nunca `project-index` ni `area-index` (esos los genera el bot) |
+| `frontmatter.project` | string \| null | Nombre del proyecto destino. Si no existe, el bot pide confirmación para crearlo |
+| `frontmatter.section` | string \| null | Sección dentro del proyecto. Solo si hay proyecto |
+| `frontmatter.area` | string \| null | Área destino. Solo si no hay proyecto |
+| `frontmatter.priority` | string \| null | `low`, `medium`, `high` — solo para `task` e `idea` |
+| `body` | string | Cuerpo de la nota en Markdown (sin frontmatter). El LLM genera wikilinks `[[...]]` donde sea relevante |
+| `suggested_links` | string[] | Wikilinks sugeridos por el LLM al analizar el contenido. Se muestran en el preview |
+| `summary` | string \| null | Resumen de una línea — solo para notas largas |
+
+#### Modo `query` — Consulta sobre el vault
+
+```json
+{
+  "mode": "query",
+  "confidence": 0.88,
+  "payload": {
+    "query_type": "structural",
+    "intent": "Listar tareas pendientes del proyecto tesis",
+    "filters": {
+      "type": "task",
+      "status": "pending",
+      "project": "tesis",
+      "area": null,
+      "tags": [],
+      "read_status": null
+    },
+    "scope": "tesis",
+    "target_note": null
+  }
+}
+```
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `query_type` | string enum | `structural`, `thematic`, `expansion`, `rag`, `mixed` |
+| `intent` | string | Interpretación en lenguaje natural de lo que el usuario quiere — útil para log y para la síntesis RAG |
+| `filters` | object | Filtros estructurales. Campos no aplicables en `null`. El bot los traduce a queries Dataview-like sobre el frontmatter |
+| `filters.type` | string \| null | Filtrar por tipo de nota |
+| `filters.status` | string \| null | Filtrar por status |
+| `filters.project` | string \| null | Filtrar por proyecto |
+| `filters.area` | string \| null | Filtrar por área |
+| `filters.tags` | string[] | Filtrar por tags (AND) |
+| `filters.read_status` | string \| null | `unread`, `reading`, `read` |
+| `scope` | string \| null | Proyecto o área que delimita la búsqueda. `null` → el bot pregunta scope con botones |
+| `target_note` | string \| null | Nota target para `expansion` (título o wikilink). `null` para otros `query_type` |
+
+#### Modo `edit` — Edición de nota existente
+
+```json
+{
+  "mode": "edit",
+  "confidence": 0.90,
+  "payload": {
+    "target": "baseline-cnn-results",
+    "changes": "Agregar los resultados del segundo run con learning rate 0.001",
+    "search_hint": "baseline cnn"
+  }
+}
+```
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `target` | string | Título o fragmento que identifica la nota a editar |
+| `changes` | string | Descripción en lenguaje natural de los cambios pedidos |
+| `search_hint` | string | Términos de búsqueda para encontrar la nota si el target no es un match exacto |
+
+El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra diff para confirmación. Solo aplica a `note` e `idea` — las tasks no se editan via ADSO.
+
+#### Modo `manage` — Gestión de estructura
+
+```json
+{
+  "mode": "manage",
+  "confidence": 0.95,
+  "payload": {
+    "operation": "create_project",
+    "params": {
+      "name": "curso-python",
+      "description": "Curso de Python para estudiantes de ingeniería.",
+      "goal": "Preparar material completo del curso para el cuatrimestre."
+    }
+  }
+}
+```
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `operation` | string enum | `create_project`, `create_area`, `archive_project`, `unarchive_project`, `delete_project`, `delete_area`, `rename_project`, `rename_area`, `create_section`, `convert_idea_to_project`, `reclassify_inbox` |
+| `params` | object | Varían según la operación — ver tabla abajo |
+
+**Params por operación:**
+
+| Operación | Params requeridos | Params opcionales |
+|---|---|---|
+| `create_project` | `name`, `description` | `goal` |
+| `create_area` | `name`, `description` | — |
+| `archive_project` | `name` | — |
+| `unarchive_project` | `name` | — |
+| `delete_project` | `name` | — |
+| `delete_area` | `name` | — |
+| `rename_project` | `old_name`, `new_name` | — |
+| `rename_area` | `old_name`, `new_name` | — |
+| `create_section` | `project`, `name` | — |
+| `convert_idea_to_project` | `idea_title`, `project_name`, `description` | `goal` |
+| `reclassify_inbox` | — | `target_title` (si es específico; `null` = todo el inbox) |
+
+Todas las operaciones de gestión requieren confirmación explícita del usuario antes de ejecutarse. Las destructivas (delete) requieren doble confirmación.
 
 ### 10. Truncado de contenido externo
 

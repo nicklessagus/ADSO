@@ -95,7 +95,7 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ---
 type: note
 tags: [paper, cosmologia, machine-learning]
-read_status: unread                     # unread | reading | read — solo si el usuario eligió "guardar para después"
+read_status: unread                     # unread | reading | read — solo para PDFs y links, seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"

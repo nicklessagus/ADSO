@@ -72,7 +72,7 @@ tests/
 │   ├── test_frontmatter.py        # generación y validación de YAML
 │   ├── test_file_naming.py        # slug, fecha, kebab-case
 │   ├── test_config.py             # carga de config.yaml, defaults, merge con env
-│   ├── test_classification.py     # parsing del modo (captura/consulta/agenda/edición/gestión)
+│   ├── test_classification.py     # parsing del modo (captura/consulta/edición/gestión)
 │   ├── test_knowledge_query.py    # parsing de resultados ChromaDB, threshold, dedup
 │   ├── test_security.py           # auth middleware: allow, reject, edge cases
 │   └── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
@@ -88,7 +88,7 @@ tests/
 ├── e2e/
 │   ├── test_capture_message.py    # Update simulado → respuesta + vault escrito
 │   ├── test_query_message.py      # Update simulado → RAG → respuesta con notas
-│   ├── test_agenda_message.py     # Update simulado → Calendar + Tasks
+│   ├── test_task_creation.py      # Update simulado → task creada → Google Tasks + Calendar si tiene fecha
 │   ├── test_confirmation_flow.py  # Update → preview → confirm/reject → resultado
 └── README.md                      # instrucciones para correr tests (opcional)
 ```
@@ -137,7 +137,7 @@ Qué se testea:
 
 Qué se testea:
 - Parsing de la respuesta JSON del LLM que indica el modo
-- Cada modo reconocido: `captura`, `consulta`, `agenda`, `edición`, `gestión`
+- Cada modo reconocido: `captura`, `consulta`, `edición`, `gestión`
 - JSON malformado del LLM → error manejable, no excepción sin capturar
 - Campos faltantes en la respuesta → defaults razonables o error explícito
 
@@ -308,19 +308,21 @@ Qué se testea:
 - Resultado corto (≤ 3 notas) → respuesta inline con botón `[Informe .md]`
 - Resultado largo → bot envía archivo `.md` con links `obsidian://`
 
-#### `test_agenda_message.py`
+#### `test_task_creation.py`
 
 Qué se testea:
-- Mensaje con fecha/hora → clasificado como agenda → evento en Calendar mock
-- Tarea sin fecha → Google Tasks mock
-- Confirmación antes de crear evento/tarea
+- Mensaje clasificado como task → task creada en vault y Google Tasks mock
+- Task con `scheduled` (fecha/hora) → evento en Calendar ADSO mock
+- Task con `due_date` (solo fecha) → chip de fecha en Google Tasks
+- Campo `notes` de Google Tasks contiene: descripción + subtareas como bullets + links `obsidian://`
+- Confirmación antes de crear task
 
 #### `test_confirmation_flow.py`
 
 Qué se testea:
 - Preview mostrado → usuario toca `[Confirmar]` (inline keyboard callback) → nota escrita
 - Preview mostrado → usuario toca `[Cancelar]` → nota NO escrita
-- Preview mostrado → usuario toca `[Editar]` → nuevo preview → confirma → nota escrita con ediciones
+- Preview mostrado → usuario toca `[Corregir]` → selector de destino → confirma → nota escrita con destino corregido
 - Desambiguación: bot muestra `[Guardar como nota]` / `[Buscar en vault]` → callback procesado correctamente
 - Scope de consulta: bot muestra botones de proyecto → callback filtra resultados
 - **Crítico:** sin confirmación explícita via callback, nunca se escribe al vault
