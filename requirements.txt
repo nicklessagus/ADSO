@@ -1,5 +1,6 @@
 python-telegram-bot[job-queue]~=21.10
 google-genai>=1.0
+groq>=0.9
 python-frontmatter~=1.1
 python-slugify~=8.0
 pyyaml~=6.0

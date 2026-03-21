@@ -359,10 +359,13 @@ async def classify(
             if is_rate_limit:
                 is_daily, suggested_delay = _parse_rate_limit_error(error_str)
                 if is_daily:
-                    logger.error(
-                        "Cuota diaria de Gemini agotada — modo degradado inmediato"
+                    logger.error("Cuota diaria de Gemini agotada — intentando Groq")
+                    groq_result = await _try_groq_fallback(
+                        system_prompt, user_message, disambiguation_threshold
                     )
-                    break  # no tiene sentido reintentar
+                    if groq_result is not None:
+                        return groq_result
+                    break  # Groq también falló o no está configurado
 
                 # Error de RPM: usar el delay sugerido por la API
                 wait = min(suggested_delay, MAX_RPM_WAIT) if suggested_delay else RETRY_DELAYS[attempt - 1]
@@ -401,6 +404,68 @@ async def classify(
             "summary": None,
         },
     }
+
+
+async def _try_groq_fallback(
+    system_prompt: str,
+    user_message: str,
+    disambiguation_threshold: float,
+) -> Optional[dict]:
+    """Intenta clasificar via Groq. Retorna dict validado o None si falla/no disponible."""
+    import os
+    if not os.environ.get("GROQ_API_KEY"):
+        logger.warning("GROQ_API_KEY no configurada — sin fallback disponible")
+        return None
+    try:
+        response_text = await _call_groq(system_prompt, user_message)
+        response_json = _parse_json_response(response_text)
+        validated = validate_llm_response(response_json)
+        confidence = validated.get("confidence", 0.5)
+        validated["needs_disambiguation"] = confidence < disambiguation_threshold
+        logger.info("Clasificado via Groq (fallback)")
+        return validated
+    except Exception as e:
+        logger.error("Groq fallback falló: %s", e)
+        return None
+
+
+async def _call_groq(system_prompt: str, user_message: str) -> str:
+    """Llama a la Groq API (llama-3.1-8b-instant) y retorna el texto de respuesta.
+
+    Args:
+        system_prompt: Instrucciones del sistema.
+        user_message: Mensaje del usuario con <input> tags.
+
+    Returns:
+        Texto de respuesta del modelo (JSON).
+
+    Raises:
+        Exception: Si la API falla o la clave no está configurada.
+    """
+    from groq import Groq
+    import os
+
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY no configurada")
+
+    client = Groq(api_key=api_key)
+
+    response = await asyncio.to_thread(
+        client.chat.completions.create,
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        response_format={"type": "json_object"},
+    )
+
+    text = response.choices[0].message.content
+    if not text:
+        raise RuntimeError("Groq retornó respuesta vacía")
+
+    return text
 
 
 async def _call_gemini(system_prompt: str, user_message: str) -> str:

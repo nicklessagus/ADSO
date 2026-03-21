@@ -118,6 +118,7 @@ class Settings:
     telegram_token: str = ""
     telegram_allowed_user_id: int = 0
     gemini_api_key: str = ""
+    groq_api_key: str = ""
     anthropic_api_key: str = ""
     google_calendar_creds: str = "/credentials/google-oauth.json"
     vault_path: Path = Path("/vault")
@@ -282,6 +283,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         telegram_token=os.environ.get("TELEGRAM_TOKEN", ""),
         telegram_allowed_user_id=int(os.environ.get("TELEGRAM_ALLOWED_USER_ID", "0")),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
+        groq_api_key=os.environ.get("GROQ_API_KEY", ""),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         google_calendar_creds=os.environ.get(
             "GOOGLE_CALENDAR_CREDS", "/credentials/google-oauth.json"
