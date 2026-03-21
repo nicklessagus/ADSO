@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from adso.bot import handle_text, handle_callback, CB_CONFIRM
+from adso.bot import handle_text, handle_callback, CB_CONFIRM, CB_INTENT_SAVE
 from adso.vault_writer import read_note
 
 
@@ -43,19 +43,17 @@ class TestCaptureMessage:
             },
         }
 
-        # Paso 1: enviar texto
+        # Paso 1: enviar texto → muestra teclado guardar/cancelar
         update = make_update(text="Hoy el baseline dio accuracy 0.87")
         await handle_text(update, mock_context)
+        assert "pending_raw_content" in mock_context.user_data
 
-        # Verificar que se mostró preview
-        update.message.reply_text.assert_called_once()
-        call_kwargs = update.message.reply_text.call_args
-        assert "Preview de nota" in call_kwargs[0][0] or "Preview de nota" in str(call_kwargs)
-
-        # Verificar que hay nota pendiente
+        # Paso 2: click "Guardar como nota" → LLM clasifica → preview
+        cb_save = make_callback_query(data=CB_INTENT_SAVE)
+        await handle_callback(cb_save, mock_context)
         assert "pending_note" in mock_context.user_data
 
-        # Paso 2: confirmar
+        # Paso 3: confirmar
         cb_update = make_callback_query(data=CB_CONFIRM)
         await handle_callback(cb_update, mock_context)
 
@@ -73,10 +71,10 @@ class TestCaptureMessage:
     @pytest.mark.asyncio
     @patch("adso.bot.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
-    async def test_degraded_mode_saves_to_inbox(
-        self, mock_classify, make_update, mock_context
+    async def test_degraded_mode_shows_preview(
+        self, mock_classify, make_update, make_callback_query, mock_context
     ) -> None:
-        """LLM falla → nota en Inbox con pending-classification."""
+        """LLM falla → muestra preview de nota inbox para que el usuario confirme."""
         vault_path = mock_context.bot_data["settings"].vault_path
 
         mock_classify.return_value = {
@@ -96,16 +94,25 @@ class TestCaptureMessage:
             },
         }
 
+        # Paso 1: enviar texto → muestra teclado
         update = make_update(text="algo random")
         await handle_text(update, mock_context)
 
-        # Verificar que se guardó en inbox
+        # Paso 2: click "Guardar como nota" → LLM degradado → preview pendiente
+        cb_save = make_callback_query(data=CB_INTENT_SAVE)
+        await handle_callback(cb_save, mock_context)
+
+        # El modo degradado muestra preview (pending_note) en lugar de auto-guardar
+        assert "pending_note" in mock_context.user_data
+        fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
+        assert fm["status"] == "pending-classification"
+        assert fm["type"] == "inbox"
+
+        # Confirmar → escribe al vault
+        cb_confirm = make_callback_query(data=CB_CONFIRM)
+        await handle_callback(cb_confirm, mock_context)
         inbox_files = list((vault_path / "00-Inbox").rglob("*.md"))
         assert len(inbox_files) >= 1
-
-        note = await read_note(inbox_files[0])
-        assert note.frontmatter["status"] == "pending-classification"
-        assert "Contenido que no se pudo clasificar" in note.body
 
     @pytest.mark.asyncio
     @patch("adso.bot.classify")

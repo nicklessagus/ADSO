@@ -161,8 +161,8 @@ def _validate_capture_payload(payload: dict) -> None:
     if not isinstance(fm, dict):
         raise LLMResponseError("capture.payload.frontmatter falta o no es object")
 
-    if "title" not in fm or not fm["title"]:
-        raise LLMResponseError("capture.payload.frontmatter.title es requerido")
+    if not fm.get("title"):
+        fm["title"] = "Sin título"  # modelos pequeños a veces omiten el title
 
     note_type = fm.get("type")
     if note_type not in VALID_TYPES:
@@ -188,7 +188,7 @@ def _validate_capture_payload(payload: dict) -> None:
         raise LLMResponseError(f"priority inválido: {priority!r}")
 
     if "body" not in payload:
-        raise LLMResponseError("capture.payload.body es requerido")
+        payload["body"] = ""  # modelos pequeños a veces omiten el body
 
 
 def _validate_manage_payload(payload: dict) -> None:
@@ -275,13 +275,30 @@ Respondé ÚNICAMENTE con un JSON válido con esta estructura:
   - priority: "low" | "medium" | "high" | null
   - due_date: string ISO 8601 | null
   - scheduled: string ISO 8601 | null
-  - Campos académicos (solo si el contenido es un paper/artículo científico, todos null si no aplica):
+  - Campos académicos (solo si el input contiene secciones ABSTRACT/KEYWORDS/MÉTODOS/CONCLUSIONES, todos null si no aplica):
     - authors: list de strings | null  (SIEMPRE lista, nunca string)
     - year: integer | null
     - journal: string | null
     - doi: string | null
+    - keywords: list de strings | null  (palabras clave del paper, en el idioma original)
     - read_status: "read" | "unread" | null
-- body: string con el cuerpo en Markdown, siempre en español
+- body: string con el cuerpo en Markdown. Formato según tipo de contenido:
+  - Para papers (input con secciones ABSTRACT/KEYWORDS/MÉTODOS/CONCLUSIONES): usar EXACTAMENTE esta estructura:
+    ## Resumen IA
+    [síntesis propia en español — más amplia que el abstract, incluye métodos y conclusiones]
+
+    ## Abstract
+    [texto del ABSTRACT del input, en su idioma original]
+
+    ## Métodos
+    [texto de MÉTODOS del input, en su idioma original — vacío si no se extrajo]
+
+    ## Conclusiones
+    [texto de CONCLUSIONES del input, en su idioma original — vacío si no se extrajo]
+
+    ## Notas personales
+
+  - Para cualquier otro contenido: Markdown libre en español
 - suggested_links: list de strings
 - summary: string | null
 

@@ -67,7 +67,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
 | Extracción web | Gemini nativo (producción) / `trafilatura` (desarrollo) |
-| Extracción PDF | `pymupdf` (texto + metadata) |
+| Extracción PDF | `pymupdf` (texto + metadata) — detección heurística de papers + extracción local de secciones (abstract, keywords, métodos, conclusiones) |
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
 | Tasks | Google Tasks API — lista `ADSO` dedicada (escritura/borrado) + lectura de listas externas |
 | Vault | Markdown + YAML Frontmatter en filesystem |

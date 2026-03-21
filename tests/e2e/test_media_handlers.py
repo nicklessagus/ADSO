@@ -573,7 +573,7 @@ class TestSaveResource:
     async def test_avoids_overwrite(self, vault_path: Path, tmp_path: Path) -> None:
         from adso.vault_writer import save_resource
 
-        (vault_path / "03-Resources" / "paper.pdf").write_bytes(b"old")
+        (vault_path / "03-Resources" / "paper.pdf").write_bytes(b"old content")
 
         src = tmp_path / "paper.pdf"
         src.write_bytes(b"new")

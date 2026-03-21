@@ -13,10 +13,11 @@ from adso.bot import (
     CB_CANCEL,
     CB_CORRECT,
     CB_DEST_INBOX,
-    CB_DEST_RESOURCES,
     CB_DISAMBIG_CAPTURE,
     CB_MANAGE_CONFIRM,
     CB_MANAGE_CANCEL,
+    CB_INTENT_SAVE,
+    CB_INTENT_CREATE_PROJECT,
 )
 
 
@@ -197,12 +198,17 @@ class TestManageFlow:
             },
         }
 
-        # Paso 1: enviar mensaje de gestión
+        # Paso 1: enviar texto → keyword 'proyecto' detectado → intent keyboard
         update = make_update(text="crear proyecto nuevo-proyecto")
         await handle_text(update, mock_context)
+        assert "pending_raw_content" in mock_context.user_data
+
+        # Paso 2: click "Crear proyecto" → LLM infiere nombre → pending_operation
+        cb_create = make_callback_query(data=CB_INTENT_CREATE_PROJECT)
+        await handle_callback(cb_create, mock_context)
         assert "pending_operation" in mock_context.user_data
 
-        # Paso 2: confirmar
+        # Paso 3: confirmar
         cb_update = make_callback_query(data=CB_MANAGE_CONFIRM)
         await handle_callback(cb_update, mock_context)
 

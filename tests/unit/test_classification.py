@@ -100,8 +100,9 @@ class TestInvalidResponse:
                 "body": "test",
             },
         }
-        with pytest.raises(LLMResponseError, match="title"):
-            validate_llm_response(data)
+        result = validate_llm_response(data)
+        assert result["payload"]["frontmatter"]["title"] == "Sin título"
+
 
     def test_capture_invalid_type(self) -> None:
         data = {
@@ -143,8 +144,8 @@ class TestInvalidResponse:
                 "frontmatter": {"title": "Test", "type": "note"},
             },
         }
-        with pytest.raises(LLMResponseError, match="body"):
-            validate_llm_response(data)
+        result = validate_llm_response(data)
+        assert result["payload"]["body"] == ""
 
     def test_manage_invalid_operation(self) -> None:
         data = {

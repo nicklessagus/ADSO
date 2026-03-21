@@ -41,7 +41,10 @@ from adso.vault_writer import (
 from adso.embeddings import EmbeddingsClient
 from adso.vault_search import find_by_property, get_note_index
 from adso.transcriber import transcribe_audio
-from adso.document_extractor import extract_pdf, extract_text_file, is_text_file, is_pdf
+from adso.document_extractor import (
+    extract_pdf, extract_text_file, is_text_file, is_pdf,
+    detect_paper, build_classify_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,9 @@ CB_DISAMBIG_CAPTURE = "disambig:capture"
 CB_DISAMBIG_QUERY = "disambig:query"
 CB_MANAGE_CONFIRM = "manage:confirm"
 CB_MANAGE_CANCEL = "manage:cancel"
+CB_INTENT_SAVE = "intent:save"
+CB_INTENT_CREATE_PROJECT = "intent:project"
+CB_INTENT_CREATE_AREA = "intent:area"
 
 # Audio / documento
 CB_TRANSCRIPT_OK = "transcript:ok"
@@ -312,6 +318,56 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
 
 
 # ---------------------------------------------------------------------------
+# Detección local de intención (sin LLM)
+# ---------------------------------------------------------------------------
+
+_MANAGE_KEYWORDS: dict[str, set[str]] = {
+    "project": {"proyecto", "project"},
+    "area":    {"área", "area"},
+    "archive": {"archivar", "archive"},
+    "delete":  {"borrar", "eliminar", "delete"},
+    "rename":  {"renombrar", "rename"},
+}
+
+
+def _detect_manage_keywords(text: str) -> list[str]:
+    """Detecta intenciones de gestión en el texto por keywords.
+
+    Args:
+        text: Texto del usuario.
+
+    Returns:
+        Lista de intenciones detectadas: 'project', 'area', 'archive', 'delete', 'rename'.
+    """
+    lower = text.lower()
+    return [intent for intent, kws in _MANAGE_KEYWORDS.items() if any(kw in lower for kw in kws)]
+
+
+def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
+    """Teclado de intención cuando se detectan keywords de gestión."""
+    manage_buttons = []
+    if "project" in intents:
+        manage_buttons.append(InlineKeyboardButton("Crear proyecto", callback_data=CB_INTENT_CREATE_PROJECT))
+    if "area" in intents:
+        manage_buttons.append(InlineKeyboardButton("Crear área", callback_data=CB_INTENT_CREATE_AREA))
+
+    rows = [manage_buttons[i:i+2] for i in range(0, len(manage_buttons), 2)] if manage_buttons else []
+    rows.append([
+        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
+        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_save_keyboard() -> InlineKeyboardMarkup:
+    """Teclado mínimo: guardar como nota o cancelar."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
+        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+    ]])
+
+
+# ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
 
@@ -341,6 +397,7 @@ async def handle_text(
     if context.user_data.get("pending_extraction"):
         pe = context.user_data["pending_extraction"]
         pe["text"] = text
+        pe.pop("classify_content", None)  # usar el texto corregido directamente
         await update.message.reply_text(
             f"<b>Texto corregido.</b>\n\n<i>{_esc(text[:500])}</i>",
             reply_markup=build_extraction_keyboard(),
@@ -377,66 +434,34 @@ async def handle_text(
         await _handle_text_correction(update, context, text, pending)
         return
 
-    # Clasificar con LLM
-    projects, areas = await _get_existing_items(vault_path)
+    # Guardar texto para procesarlo después (según la elección del usuario)
+    context.user_data["pending_raw_content"] = text
 
-    # Check de inyección
+    # Check de inyección antes de mostrar opciones
     if check_injection_risk(text):
         logger.warning("Patrón de inyección detectado en mensaje")
         await update.message.reply_text(
             "Detecté un patrón sospechoso en el contenido. "
             "¿Querés procesarlo de todas formas?",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("Sí, procesar", callback_data=CB_DISAMBIG_CAPTURE),
-                    InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-                ]
-            ]),
-        )
-        context.user_data["pending_raw_content"] = text
-        return
-
-    async def on_retry(attempt: int, max_attempts: int) -> None:
-        await update.message.reply_text(
-            f"Servicio caído, reintento {attempt}/{max_attempts}..."
-        )
-
-    result = await classify(
-        content=text,
-        media_type="text",
-        existing_projects=projects,
-        existing_areas=areas,
-        disambiguation_threshold=settings.llm.disambiguation_threshold,
-        on_retry=on_retry,
-    )
-
-    mode = result.get("mode", "")
-
-    # Modo degradado
-    if mode == "degraded":
-        await _handle_degraded(update, context, text, result)
-        return
-
-    # Desambiguación
-    if result.get("needs_disambiguation"):
-        context.user_data["pending_note"] = result
-        context.user_data["original_content"] = text
-        await update.message.reply_text(
-            "No estoy seguro si querés guardar esto o buscar en el vault.",
-            reply_markup=build_disambiguation_keyboard(),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Sí, procesar", callback_data=CB_INTENT_SAVE),
+                InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+            ]]),
         )
         return
 
-    if mode == "capture":
-        await _handle_capture(update, context, result)
-    elif mode == "manage":
-        await _handle_manage(update, context, result)
-    elif mode in ("query", "edit"):
+    # Detección local de intención — sin LLM
+    intents = _detect_manage_keywords(text)
+    if intents:
         await update.message.reply_text(
-            f"Modo {mode} disponible en próxima versión."
+            "¿Qué querés hacer?",
+            reply_markup=build_intent_keyboard(intents),
         )
     else:
-        await update.message.reply_text("No pude interpretar el mensaje.")
+        await update.message.reply_text(
+            "¿Guardás esto como nota?",
+            reply_markup=build_save_keyboard(),
+        )
 
 
 @authorized
@@ -640,8 +665,13 @@ async def _process_pdf_after_read_status(
             )
             return
 
+        is_paper = detect_paper(text, pdf_meta)
+        classify_content = build_classify_content(text, pdf_meta, is_paper)
+
         context.user_data["pending_extraction"] = {
             "text": text,
+            "classify_content": classify_content,
+            "is_paper": is_paper,
             "temp_path": str(tmp_path),
             "original_filename": filename,
             "media_type": "document",
@@ -728,43 +758,45 @@ async def _classify_and_preview(
         fm.update(extra_fm)
 
     if mode == "degraded":
-        # Modo degradado: guardar en inbox
+        # Modo degradado: mostrar preview de nota inbox para que el usuario confirme.
+        # No se guarda nada sin confirmación explícita.
         payload = result["payload"]
         fm = payload["frontmatter"]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        fm["date_created"] = now
+        fm["date_modified"] = now
         fm["source"] = "telegram"
         fm["media_type"] = media_type
         if extra_fm:
             fm.update(extra_fm)
 
-        # Agregar embed del archivo si hay recurso
-        body = payload.get("body", text)
-        if resource_file:
-            res_path = await save_resource(
-                Path(resource_file["temp_path"]),
-                resource_file["filename"],
-                vault_path,
-            )
-            body += f"\n\n![[{res_path.name}]]"
-            Path(resource_file["temp_path"]).unlink(missing_ok=True)
+        context.user_data["pending_note"] = result
+        result["payload"]["suggested_links"] = []
 
-        path = await create_note(fm, body, vault_path)
-
-        git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
-        if git_backup:
-            await git_backup.notify(fm.get("title", "Sin título"))
+        preview = build_preview(fm, payload.get("body", text), [])
+        keyboard = build_capture_keyboard(fm, False)
 
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn(
-            "No pude clasificar — guardado en Inbox. "
-            "Se reintenta automáticamente."
+            "⚠️ No pude clasificar bien — guardado en Inbox como borrador. "
+            "Podés confirmar, corregir o cancelar.\n\n" + preview,
+            reply_markup=keyboard,
+            parse_mode="HTML",
         )
         return
 
     # Captura normal
     payload = result["payload"]
     fm = payload["frontmatter"]
-    body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])
+
+    # Para texto libre el body es siempre el texto original del usuario,
+    # no la reformulación del LLM. Para PDFs/audio el LLM genera el body.
+    if media_type == "text":
+        body = text
+        payload["body"] = text
+    else:
+        body = payload.get("body", "")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fm["date_created"] = now
@@ -874,10 +906,13 @@ async def _handle_manage_missing_fields(
         name = text.strip()
         description = ""
 
-    if not params.get("name") or params.get("name") in (None, "None", ""):
+    # Siempre actualizar — permite corrección tanto de campos vacíos como de valores inferidos
+    if name:
         params["name"] = name
-    if not params.get("description") or params.get("description") in (None, "None", ""):
-        params["description"] = description or name
+    if description:
+        params["description"] = description
+    elif not params.get("description"):
+        params["description"] = name  # fallback: usar nombre como descripción
 
     context.user_data.pop("manage_missing_fields", None)
     await _handle_manage(update, context, pending)
@@ -1027,6 +1062,93 @@ async def _handle_text_correction(
 
 
 # ---------------------------------------------------------------------------
+# Callbacks de intención (nuevo flujo de texto)
+# ---------------------------------------------------------------------------
+
+
+async def _cb_intent_save(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """El usuario eligió guardar como nota — clasifica con LLM y muestra preview."""
+    text = context.user_data.pop("pending_raw_content", None)
+    query = update.callback_query
+    if not text:
+        await query.edit_message_text("No hay contenido pendiente.")
+        return
+    await query.edit_message_text("Clasificando...")
+    await _classify_and_preview(update, context, text, media_type="text")
+
+
+async def _cb_intent_create(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    operation: str,
+) -> None:
+    """El usuario eligió crear proyecto o área.
+
+    Llama al LLM para inferir nombre y descripción del texto original,
+    muestra preview con opción de corregir por texto libre.
+
+    Args:
+        operation: 'create_project' o 'create_area'.
+    """
+    text = context.user_data.pop("pending_raw_content", None)
+    query = update.callback_query
+    type_label = "proyecto" if operation == "create_project" else "área"
+
+    if not text:
+        await query.edit_message_text("No hay contenido pendiente.")
+        return
+
+    await query.edit_message_text(f"Infiriendo nombre del {type_label}...")
+
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+    projects, areas = await _get_existing_items(vault_path)
+
+    result = await classify(
+        content=text,
+        media_type="text",
+        existing_projects=projects,
+        existing_areas=areas,
+        disambiguation_threshold=0.5,
+    )
+
+    # Extraer nombre y descripción si el LLM devolvió manage
+    name = ""
+    description = ""
+    if result.get("mode") == "manage":
+        params = result.get("payload", {}).get("params", {})
+        name = (params.get("name") or "").strip()
+        description = (params.get("description") or "").strip()
+
+    # Fallback si el LLM no extrajo nombre
+    if not name:
+        name = text[:60].strip()
+
+    # Construir pending_operation con los parámetros inferidos
+    pending_op = {
+        "mode": "manage",
+        "payload": {
+            "operation": operation,
+            "params": {"name": name, "description": description},
+        },
+    }
+    context.user_data["pending_operation"] = pending_op
+    # Habilitar corrección por texto libre
+    context.user_data["manage_missing_fields"] = ["correction"]
+
+    desc_line = f"\n<b>Descripción:</b> {_esc(description)}" if description else ""
+    await query.edit_message_text(
+        f"<b>Crear {type_label}:</b> {_esc(name)}{desc_line}\n\n"
+        f"Corregí por texto libre (<i>Nombre — Descripción</i>) o confirmá.",
+        reply_markup=build_manage_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Callback handler
 # ---------------------------------------------------------------------------
 
@@ -1064,8 +1186,14 @@ async def handle_callback(
     elif data == CB_CHOOSE_PROJECT:
         keyboard = await build_project_selector(vault_path)
         await query.edit_message_reply_markup(reply_markup=keyboard)
+    elif data == CB_INTENT_SAVE:
+        await _cb_intent_save(update, context)
+    elif data == CB_INTENT_CREATE_PROJECT:
+        await _cb_intent_create(update, context, "create_project")
+    elif data == CB_INTENT_CREATE_AREA:
+        await _cb_intent_create(update, context, "create_area")
     elif data == CB_DISAMBIG_CAPTURE:
-        # Tratar como captura
+        # Mantener para el flujo de inyección y desambiguación legacy
         pending = context.user_data.get("pending_note")
         if pending:
             pending["needs_disambiguation"] = False
@@ -1254,7 +1382,10 @@ async def _cb_extraction_ok(
         await update.callback_query.edit_message_text("No hay extracción pendiente.")
         return
 
-    text = pe["text"]
+    # classify_content es el extracto compacto para el LLM (papers: secciones clave;
+    # genéricos: truncado). Si el usuario corrigió el texto manualmente, no hay
+    # classify_content y se usa el texto corregido directamente.
+    classify_text = pe.get("classify_content") or pe["text"]
     resource_info = None
     extra_fm = {}
 
@@ -1274,7 +1405,7 @@ async def _cb_extraction_ok(
     await update.callback_query.edit_message_text("Clasificando...")
 
     await _classify_and_preview(
-        update, context, text,
+        update, context, classify_text,
         media_type=pe.get("media_type", "document"),
         resource_file=resource_info,
         extra_fm=extra_fm or None,
@@ -1344,8 +1475,31 @@ async def _handle_capture_from_callback(
     context: ContextTypes.DEFAULT_TYPE,
     result: dict,
 ) -> None:
-    """Procesa captura desde un callback (ej: desambiguación)."""
+    """Procesa captura desde un callback (ej: desambiguación).
+
+    Si el resultado del LLM no es capture (ej: fue clasificado como query),
+    construye una nota inbox mínima con el texto original para que el usuario
+    pueda corregirla antes de confirmar.
+    """
     payload = result["payload"]
+
+    if "frontmatter" not in payload:
+        # El LLM clasificó como query/manage pero el usuario eligió guardar.
+        # Construir nota inbox con el texto original.
+        original_text = context.user_data.get("original_content", "")
+        payload = {
+            "frontmatter": {
+                "title": original_text[:80].strip(),
+                "type": "inbox",
+                "tags": [],
+                "status": "pending-classification",
+            },
+            "body": original_text,
+            "suggested_links": [],
+        }
+        result["payload"] = payload
+        result["mode"] = "capture"
+
     fm = payload["frontmatter"]
     body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])

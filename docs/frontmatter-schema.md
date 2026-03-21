@@ -94,23 +94,44 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ```yaml
 ---
 type: note
-tags: [paper, cosmologia, machine-learning]
-read_status: unread                     # unread | reading | read — solo para PDFs y links, seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
+tags: [paper, cosmologia, machine-learning]       # generados por LLM, kebab-case, en el idioma del contenido
+read_status: unread                               # unread | reading | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
 url: "https://arxiv.org/abs/XXXX.XXXXX"
-doi: "10.XXXX/..."                      # opcional
-relevance: "Para qué sirve este paper" # provisto por el usuario o inferido por LLM
-context: "Contexto adicional de uso"   # opcional, ej: "comparar con modelo actual"
-priority: medium                        # low | medium | high — inferido o explícito
-# Extraídos por Gemini del PDF completo:
+doi: "10.XXXX/..."                                # extraído localmente del PDF
+keywords: ["time-series", "transformer", "self-supervised"]  # palabras clave del paper, idioma original
+relevance: "Para qué sirve este paper"            # provisto por el usuario o inferido por LLM
+context: "Contexto adicional de uso"              # opcional, ej: "comparar con modelo actual"
+priority: medium                                  # low | medium | high — inferido o explícito
+# Extraídos localmente del PDF + estructurados por LLM:
 contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
-methods: ["transformer", "contrastive-learning"]   # métodos/técnicas usadas
-dataset: ["ImageNet", "COCO"]                      # opcional
+methods: ["transformer", "contrastive-learning"]  # métodos/técnicas usadas
+dataset: ["ImageNet", "COCO"]                     # opcional
 conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
-related: ["[[otra-nota]]", "[[paper-similar]]"]    # sugeridos por ChromaDB, elegidos por el usuario
+related: ["[[otra-nota]]", "[[paper-similar]]"]   # sugeridos por ChromaDB, elegidos por el usuario
 ---
 ```
+
+**Body de una nota de paper** — estructura fija generada por el LLM:
+
+```markdown
+## Resumen IA
+Síntesis en español más amplia que el abstract: qué hace el paper, cómo y qué concluye.
+
+## Abstract
+[Texto original del abstract, en el idioma del paper]
+
+## Métodos
+[Sección de métodos extraída del paper, en el idioma original]
+
+## Conclusiones
+[Sección de conclusiones extraída del paper, en el idioma original]
+
+## Notas personales
+```
+
+El `## Resumen IA` es generado por el LLM en español. Las secciones restantes preservan el idioma original del paper para no perder precisión técnica ni introducir ruido en los embeddings multilingüe de ChromaDB.
 
 ### `task`
 ```yaml
@@ -254,6 +275,8 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 - El bot actualiza `date_modified` al editar notas existentes
 - `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
 - **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar. Solo aplica a tipos accionables: `task`, `idea`.
+- **Extracción de papers:** `document_extractor.py` detecta heurísticamente si un PDF es un paper académico (≥ 2 señales: abstract, DOI, references, etc.) y extrae localmente las secciones clave (abstract, keywords, métodos, conclusiones). Solo ese extracto compacto (~3000 chars) se envía al LLM — no el texto completo. `tags` y `keywords` son distintos: `keywords` son las palabras clave del paper (idioma original); `tags` son las etiquetas ADSO generadas por el LLM.
+- **Embeddings de papers:** ChromaDB indexa el `## Resumen IA` + el `## Abstract`. El Resumen IA en español mejora el retrieval de queries en castellano; el Abstract en idioma original preserva los términos técnicos para queries exactas. Gemini Embedding API es multilingüe y maneja búsqueda cross-lingual.
 
 ---
 
