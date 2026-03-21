@@ -275,6 +275,9 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+| **Fallback OCR falla** | `[Gemini Vision]` `[Describí vos]` `[Cancelar]` |
+| **Fallback Gemini Vision falla** | `[OCR]` `[Describí vos]` `[Cancelar]` |
+| **Fallback extracción web falla** | `[Describí vos]` `[Cancelar]` |
 
 ### Desambiguación de intención
 

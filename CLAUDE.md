@@ -147,6 +147,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+| **Fallback extracción falla** | `[OCR]`/`[Gemini Vision]`/`[Describí vos]` `[Cancelar]` — según qué falló |
 
 ### Desambiguación de intención
 Si el LLM no tiene confianza alta en el modo (captura vs consulta vs otro), el bot pregunta con botones en vez de asumir.
