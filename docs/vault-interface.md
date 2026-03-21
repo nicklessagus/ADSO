@@ -538,3 +538,237 @@ else:
 Todas las operaciones de búsqueda son `async` con `asyncio.to_thread()` para el I/O de disco — no bloquean el event loop del bot mientras escanean.
 
 Si el vault crece y los tiempos se vuelven perceptibles, el siguiente paso es un índice JSON en memoria (`{stem → {path, frontmatter}}`) mantenido por `watchdog`, sin cambiar las firmas públicas.
+
+---
+
+## `embeddings.py`
+
+Responsabilidad única: **gestión de embeddings y ChromaDB**. No escribe archivos al vault ni llama a LLMs de clasificación — solo calcula embeddings (via Gemini Embedding API) y opera sobre la colección de ChromaDB.
+
+### Dependencias
+
+```
+chromadb              # vector store embebido (PersistentClient, sin servidor separado)
+google-generativeai   # Gemini Embedding API
+```
+
+### Inicialización
+
+```python
+import chromadb
+
+client = chromadb.PersistentClient(path="/app/data/chroma")
+collection = client.get_or_create_collection(
+    name="vault_notes",
+    metadata={"hnsw:space": "cosine"},   # distancia coseno — estándar para embeddings de texto
+)
+```
+
+La colección se crea una vez. El espacio de distancia (`cosine`) no se puede cambiar después de creada — requiere recrear la colección.
+
+### Schema de metadata en ChromaDB
+
+Cada documento en la colección tiene:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `id` | string | Stem del archivo (sin `.md`, sin path). Clave primaria. Ej: `2025-01-15-baseline-cnn` |
+| `document` | string | Texto completo usado para generar el embedding (contenido extraído, no el YAML) |
+| `metadata.path` | string | Path relativo al vault. Ej: `01-Projects/tesis/experimentos/2025-01-15-baseline-cnn.md` |
+| `metadata.type` | string | `note`, `task`, `idea`, `inbox`, `project-index`, `area-index` |
+| `metadata.status` | string | Status actual de la nota |
+| `metadata.project` | string | Proyecto (vacío si no tiene) |
+| `metadata.area` | string | Área (vacío si no tiene) |
+| `metadata.tags` | string | Tags separados por coma — ChromaDB no soporta listas, se serializa como `"paper,ml,cnn"` |
+| `metadata.media_type` | string | `text`, `audio`, `image`, `link`, `document` |
+
+> **Nota:** ChromaDB no soporta valores `None` ni listas heterogéneas en metadata. Los campos nulos se almacenan como string vacío `""`. Los tags se serializan como string separado por comas.
+
+---
+
+### `index_note()`
+
+```python
+async def index_note(
+    note_id: str,
+    content: str,
+    metadata: dict,
+) -> None:
+```
+
+**Comportamiento:**
+
+1. Calcula el embedding de `content` via Gemini Embedding API (`models/text-embedding-004`).
+2. Serializa `metadata` al formato ChromaDB (nulos → `""`, tags list → string separado por comas).
+3. Ejecuta `collection.upsert(ids=[note_id], embeddings=[embedding], documents=[content], metadatas=[metadata])`.
+
+`upsert` inserta si no existe, actualiza si ya existe — idempotente.
+
+**Errores:**
+- API de Gemini no responde → loguear, no propagar (el embedding se genera en el re-index nocturno).
+- Rate limit 429 → cola interna con exponential backoff (3 reintentos: 1s, 2s, 4s; luego desiste y loguea).
+
+---
+
+### `remove_note()`
+
+```python
+async def remove_note(note_id: str) -> None:
+```
+
+**Comportamiento:**
+
+1. Ejecuta `collection.delete(ids=[note_id])`.
+2. Si el `id` no existe, ChromaDB no falla — es un no-op silencioso.
+
+---
+
+### `update_metadata()`
+
+```python
+async def update_metadata(
+    note_id: str,
+    metadata: dict,
+) -> None:
+```
+
+**Comportamiento:**
+
+1. Serializa metadata al formato ChromaDB.
+2. Ejecuta `collection.update(ids=[note_id], metadatas=[metadata])`.
+3. No recalcula el embedding — solo actualiza metadata (para cambios de path, status, project, etc.).
+
+---
+
+### `query_similar()`
+
+```python
+async def query_similar(
+    query_text: str,
+    n_results: int = 10,
+    threshold: float | None = None,
+    where: dict | None = None,
+) -> list[SimilarNote]:
+```
+
+**Tipos de retorno:**
+
+```python
+@dataclass
+class SimilarNote:
+    note_id: str         # stem del archivo
+    path: str            # path relativo al vault
+    distance: float      # distancia coseno (0 = idéntico, 2 = opuesto)
+    metadata: dict       # metadata completa de ChromaDB
+    snippet: str | None  # fragmento del document almacenado
+```
+
+**Comportamiento:**
+
+1. Calcula el embedding de `query_text` via Gemini Embedding API.
+2. Ejecuta `collection.query(query_embeddings=[embedding], n_results=n_results, where=where, include=["documents", "metadatas", "distances"])`.
+3. Filtra resultados con `distance > threshold` (si `threshold` provisto). La distancia coseno va de 0 (idéntico) a 2 (opuesto). Para la conversión a similitud: `similitud = 1 - (distance / 2)`.
+4. Excluye notas archivadas por default: inyecta `{"status": {"$ne": "archived"}}` en el filtro `where` salvo que el caller pida explícitamente incluirlas.
+5. Retorna lista de `SimilarNote` ordenada por distancia ascendente (más similar primero).
+
+**Uso para sugerir links (Fase 2):**
+```python
+candidates = await query_similar(
+    query_text=note_content,
+    n_results=config.links.max_suggestions,
+    threshold=config.links.similarity_threshold,
+)
+suggested_links = [f"[[{c.note_id}]]" for c in candidates]
+```
+
+**Uso para consultas RAG (Fase 7):**
+```python
+context_notes = await query_similar(
+    query_text=user_query,
+    n_results=config.rag.max_results,
+    threshold=config.rag.similarity_threshold,
+    where={"project": "tesis"},  # scope del usuario
+)
+```
+
+---
+
+### `reindex_vault()`
+
+```python
+async def reindex_vault(
+    vault_path: Path,
+    exclude_dirs: list[str],
+) -> dict:
+```
+
+**Comportamiento:**
+
+1. Recorre todos los `.md` del vault (excluyendo `exclude_dirs`).
+2. Para cada nota: calcula embedding y upsert en ChromaDB.
+3. Detecta notas en ChromaDB que ya no existen en el vault → las elimina.
+4. Retorna estadísticas: `{"indexed": N, "removed": M, "errors": K}`.
+
+**Uso:** cron nocturno (`reindex.time` en `config.yaml`). Reconcilia ChromaDB con el vault ante cualquier drift.
+
+**Rate limiting:** procesa notas en batches con delay entre llamadas a la Embedding API para respetar los límites del free tier de Gemini. El batch size y delay se ajustan dinámicamente ante respuestas 429.
+
+---
+
+## Compatibilidad con Obsidian — reglas para el writer
+
+### YAML frontmatter
+
+El writer usa `python-frontmatter` que a su vez usa PyYAML. Reglas críticas:
+
+| Situación | Qué hacer |
+|---|---|
+| Strings con `:` | PyYAML los quotea automáticamente: `title: "Part 1: Introduction"` |
+| Strings que parecen booleans (`yes`, `no`, `true`, `on`) | Forzar quotes. No usar como valores de campos — ADSO usa `active/pending/done` que no tienen este problema |
+| Tags en frontmatter | Sin `#`: `tags: [paper, ml]`, **no** `tags: [#paper, #ml]`. Obsidian agrega `#` al renderizar |
+| Wikilinks en valores YAML | Requieren quotes: `related: ["[[nota-a]]", "[[nota-b]]"]` |
+| Listas | Ambas formas válidas: `tags: [a, b]` (inline) y bloque con `- a` |
+| Campos nulos | Omitir del frontmatter en vez de escribir `campo: null` |
+| `---` delimitadores | Deben ser la primera y última línea del bloque. Primera línea del archivo debe ser `---` |
+| Propiedades anidadas | No usar — Obsidian no las soporta en su UI de Properties |
+
+### Nombres de archivo
+
+Caracteres prohibidos en todas las plataformas (Obsidian cross-platform):
+
+```
+# | ^ [ ] \ / : * ? " < >
+```
+
+El patrón `YYYY-MM-DD-{slug}.md` con `python-slugify` (kebab-case, max 60 chars) evita todos estos caracteres. El slug solo produce `[a-z0-9-]`.
+
+### Wikilinks
+
+| Forma | Ejemplo | Cuándo usar |
+|---|---|---|
+| Link simple | `[[baseline-cnn]]` | Siempre — Obsidian resuelve por filename unique |
+| Link con alias | `[[baseline-cnn\|Resultados CNN]]` | Cuando el slug es poco legible |
+| Link a heading | `[[baseline-cnn#Métodos]]` | Para apuntar a una sección específica |
+| Embed de archivo | `![[martinez_2024.pdf]]` | Para archivos en `03-Resources/` |
+| Embed con página | `![[martinez_2024.pdf#page=3]]` | Para PDFs en una página específica |
+
+El writer genera links en forma simple (`[[stem]]`) porque el patrón `YYYY-MM-DD-slug` garantiza unicidad. Los alias se agregan solo si el LLM los sugiere.
+
+### URI scheme `obsidian://`
+
+Para construir links clicables en Google Tasks y en informes `.md`:
+
+```python
+from urllib.parse import quote
+
+def obsidian_uri(vault_name: str, file_path: str) -> str:
+    """Construye un URI obsidian:// para abrir una nota.
+
+    Args:
+        vault_name: Nombre del vault en Obsidian.
+        file_path: Path relativo al vault, sin extensión .md.
+    """
+    return f"obsidian://open?vault={quote(vault_name, safe='')}&file={quote(file_path, safe='')}"
+```
+
+Caracteres que requieren encoding: `/` → `%2F`, `#` → `%23`, `^` → `%5E`, espacios → `%20`.

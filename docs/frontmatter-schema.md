@@ -152,7 +152,6 @@ title: "Tesis doctoral"
 date_created: "2025-01-01"
 date_modified: "2025-01-15"
 status: active                          # active | on-hold | completed
-goal: "Investigar X para lograr Y"     # objetivo concreto, una línea
 description: "Papers de doctorado, experimentos de ML, escritura académica."  # scope de clasificación — requerido
 sections: [introduccion, experimentos, trabajos-futuros, papers]
 tags: [tesis, doctorado]
@@ -165,8 +164,8 @@ El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 ```markdown
 # {title}
 
-## Objetivo
-{goal expandido — 1-2 párrafos generados por el LLM a partir del input del usuario}
+## Descripción
+{descripción provista al crear el proyecto}
 
 ## Secciones
 - [[introduccion/]] — {descripción breve}
@@ -178,7 +177,7 @@ El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 - Notas: {count} (actualizado por el reporte semanal)
 ```
 
-El usuario puede agregar lo que quiera al body. ADSO solo modifica el frontmatter (`date_modified`, `status`, `sections` si se agregan nuevas).
+El usuario puede agregar lo que quiera al body (objetivos, notas, links, etc.). ADSO solo modifica el frontmatter (`date_modified`, `status`, `sections` si se agregan nuevas).
 
 ---
 
@@ -197,7 +196,7 @@ source: system
 ---
 ```
 
-> `goal` no aplica a áreas — las áreas no tienen un objetivo puntual, tienen un scope continuo. Solo `description`.
+> Las áreas usan el mismo campo `description` — no hay diferencia estructural entre el `_index.md` de proyecto y de área, excepto que los proyectos tienen `status` y `sections`.
 
 ---
 

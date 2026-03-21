@@ -169,9 +169,9 @@ Campos opcionales para contenido académico (populados por el pipeline cuando de
 
 **`idea`:** `priority` (low/medium/high), `related`
 
-**`project-index`:** `goal`, `description` (requerida), `sections`, `source: system`
+**`project-index`:** `description` (requerida), `sections`, `source: system`
 
-**`area-index`:** `description` (requerida), `source: system`. Sin `goal` — las áreas tienen scope continuo, no objetivo puntual.
+**`area-index`:** `description` (requerida), `source: system`
 
 ### Prioridad inferida
 
@@ -267,7 +267,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | Momento | Botones |
 |---|---|
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
-| **Imagen recibida** | `[Tesseract]` `[Gemini Vision]` `[Sin extracción]` |
+| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
 | **Corregir destino** | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |

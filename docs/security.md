@@ -205,7 +205,7 @@ Cualquier output del LLM que no corresponda a una de estas operaciones es rechaz
 
 El LLM siempre responde con un JSON que tiene un wrapper común y un payload que varía por modo. El bot parsea el JSON y ejecuta la operación correspondiente. Si el JSON no se ajusta al schema, el input va a `00-Inbox/` con `status: pending-classification`.
 
-**Umbral de confianza:** si `confidence < 0.7`, el bot no asume el modo y dispara desambiguación con inline keyboard (`[Guardar como nota]` `[Buscar en vault]`).
+**Umbral de confianza:** si `confidence < llm.disambiguation_threshold` (default `0.7`, configurable en `config.yaml`), el bot no asume el modo y dispara desambiguación con inline keyboard (`[Guardar como nota]` `[Buscar en vault]`).
 
 #### Wrapper común
 
@@ -220,7 +220,7 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | Campo | Tipo | Descripción |
 |---|---|---|
 | `mode` | string enum | `capture`, `query`, `edit`, `manage` |
-| `confidence` | float 0-1 | Confianza del LLM en la clasificación de modo. < 0.7 → desambiguación |
+| `confidence` | float 0-1 | Confianza del LLM en la clasificación de modo. Por debajo de `llm.disambiguation_threshold` → desambiguación |
 | `payload` | object | Contenido específico del modo — schema abajo |
 
 #### Modo `capture` — Captura de contenido
@@ -281,8 +281,8 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
     "query_type": "structural",
     "intent": "Listar tareas pendientes del proyecto tesis",
     "filters": {
-      "type": "task",
-      "status": "pending",
+      "type": ["task"],
+      "status": ["pending"],
       "project": "tesis",
       "area": null,
       "tags": [],
@@ -299,8 +299,8 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | `query_type` | string enum | `structural`, `thematic`, `expansion`, `rag`, `mixed` |
 | `intent` | string | Interpretación en lenguaje natural de lo que el usuario quiere — útil para log y para la síntesis RAG |
 | `filters` | object | Filtros estructurales. Campos no aplicables en `null`. El bot los traduce a queries Dataview-like sobre el frontmatter |
-| `filters.type` | string \| null | Filtrar por tipo de nota |
-| `filters.status` | string \| null | Filtrar por status |
+| `filters.type` | string[] | Filtrar por tipos de nota (OR). Ej: `["task"]` o `["task", "idea"]`. Lista vacía = sin filtro de tipo |
+| `filters.status` | string[] | Filtrar por status (OR). Ej: `["pending"]` o `["pending", "raw"]` para "todo lo pendiente". Lista vacía = sin filtro |
 | `filters.project` | string \| null | Filtrar por proyecto |
 | `filters.area` | string \| null | Filtrar por área |
 | `filters.tags` | string[] | Filtrar por tags (AND) |
@@ -340,8 +340,7 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
     "operation": "create_project",
     "params": {
       "name": "curso-python",
-      "description": "Curso de Python para estudiantes de ingeniería.",
-      "goal": "Preparar material completo del curso para el cuatrimestre."
+      "description": "Curso de Python para estudiantes de ingeniería."
     }
   }
 }
@@ -356,7 +355,7 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 
 | Operación | Params requeridos | Params opcionales |
 |---|---|---|
-| `create_project` | `name`, `description` | `goal` |
+| `create_project` | `name`, `description` | — |
 | `create_area` | `name`, `description` | — |
 | `archive_project` | `name` | — |
 | `unarchive_project` | `name` | — |
@@ -365,7 +364,7 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 | `rename_project` | `old_name`, `new_name` | — |
 | `rename_area` | `old_name`, `new_name` | — |
 | `create_section` | `project`, `name` | — |
-| `convert_idea_to_project` | `idea_title`, `project_name`, `description` | `goal` |
+| `convert_idea_to_project` | `idea_title`, `project_name`, `description` | — |
 | `reclassify_inbox` | — | `target_title` (si es específico; `null` = todo el inbox) |
 
 Todas las operaciones de gestión requieren confirmación explícita del usuario antes de ejecutarse. Las destructivas (delete) requieren doble confirmación.

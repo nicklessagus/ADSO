@@ -29,6 +29,7 @@ Separación de responsabilidades:
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto
   max_results: 10             # máximo de notas a pasar al LLM como contexto
+  max_expansion_depth: 2      # profundidad máxima en expansión desde nodo (1 = solo directas, 2 = un grado más, etc.)
 
 # ─── Links automáticos ──────────────────────────────────────────────────────
 links:
@@ -91,6 +92,7 @@ llm:
   max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
   max_paper_tokens: 128000    # truncado de PDFs académicos
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
+  disambiguation_threshold: 0.7  # confidence del LLM por debajo de este valor → bot pregunta con botones en vez de asumir
 
 # ─── Reporte semanal ─────────────────────────────────────────────────────────
 weekly_report:
@@ -103,8 +105,9 @@ weekly_report:
     papers_queue: true         # papers con read_status: unread, ordenados por prioridad
     inbox_suggestion: true     # ítem del inbox más relevante según actividad reciente de la semana
     tasks_summary: true        # tasks ADSO completadas vs pendientes de la semana
-    stale_ideas: true          # ideas con status: raw hace más de 60 días
+    stale_ideas: true          # ideas con status: raw hace más de stale_idea_days
     paper_suggestion: true     # sugerencia de paper a leer basada en similitud con actividad reciente
+  stale_idea_days: 60          # días sin actividad para considerar una idea estancada
 ```
 
 ---
