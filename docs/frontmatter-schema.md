@@ -253,7 +253,7 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 - Los `tags` se generan en kebab-case, en el idioma del contenido
 - El bot actualiza `date_modified` al editar notas existentes
 - `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
-- **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. La prioridad explícita del usuario siempre gana sobre la inferida. Si no hay señal clara, sugiere `medium` y pregunta. Solo aplica a tipos accionables: `task`, `idea`.
+- **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar. Solo aplica a tipos accionables: `task`, `idea`.
 
 ---
 

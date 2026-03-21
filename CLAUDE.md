@@ -119,7 +119,7 @@ Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bo
 `[Corregir]` cambia únicamente el destino (`[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
 
 ### Prioridad inferida
-El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
+El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar, como cualquier otro campo.
 
 ---
 
@@ -207,8 +207,8 @@ Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el 
 |---|---|
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
-| 3 | Audio (faster-whisper) |
-| 4 | Imágenes y capturas |
+| 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto |
+| 4 | Imágenes y capturas (OCR + Gemini Vision) |
 | 5 | Integraciones externas (arXiv, NASA ADS) |
 | 6 | Google Calendar + Google Tasks |
 | 7 | Consultas RAG en lenguaje natural |

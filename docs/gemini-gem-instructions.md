@@ -175,7 +175,7 @@ Campos opcionales para contenido académico (populados por el pipeline cuando de
 
 ### Prioridad inferida
 
-El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (`task`, `idea`). La prioridad explícita del usuario siempre gana. Si no hay señal clara, sugiere `medium` y pregunta.
+El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (`task`, `idea`). Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar.
 
 ---
 
@@ -388,16 +388,16 @@ Al crear una nota nueva, el bot busca en ChromaDB las notas más similares y sug
 ```yaml
 weekly_report:
   enabled: true
-  day: friday                    # lunes=monday ... domingo=sunday
-  time: "18:00"                  # hora local (HH:MM)
-  include:
-    - notes_created              # notas creadas en la semana (desglose por tipo)
-    - active_project             # proyecto más activo
-    - new_methods                # métodos nuevos en papers
-    - paper_queue                # papers pendientes por prioridad
-    - stale_ideas                # ideas en status:raw más de N días
-    - tasks_review               # tasks ADSO: completadas vs pendientes
-    - paper_suggestion           # sugerencia de paper basada en similitud con actividad reciente
+  day: friday                    # monday | tuesday | ... | sunday
+  time: "12:00"                  # hora local (HH:MM)
+  sections:
+    notes_summary: true          # notas creadas durante la semana, desglose por tipo
+    most_active_project: true    # proyecto con más actividad
+    papers_queue: true           # papers con read_status: unread, ordenados por prioridad
+    inbox_suggestion: true       # ítem del inbox más relevante según actividad reciente
+    tasks_summary: true          # tasks ADSO completadas vs pendientes
+    stale_ideas: true            # ideas con status: raw hace más de stale_idea_days
+    paper_suggestion: true       # sugerencia de paper basada en similitud con actividad reciente
   stale_idea_days: 60
 
 rag:

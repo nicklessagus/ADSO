@@ -19,11 +19,11 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Captura** texto, links, imágenes y audios enviados via Telegram
 - **Procesa** el contenido con Gemini API (y opcionalmente Claude), usando [Obsidian Skills](https://github.com/kepano/obsidian-skills) como referencia para generar Markdown compatible
 - **Transcribe** audios localmente con `faster-whisper`
-- **Extrae texto** de imágenes con Tesseract (o Gemini Vision, configurable)
+- **Extrae texto** de imágenes con OCR local o Gemini Vision (el usuario elige en el momento)
 - **Genera** archivos Markdown con Frontmatter YAML clasificados
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
 - **Busca** en el vault con dos motores complementarios: semántico (ChromaDB) y estructural (backlinks, tags, frontmatter)
-- **Agenda** con Google Calendar y Google Tasks
+- **Gestiona** proyectos, áreas y tasks con Google Calendar y Google Tasks
 - **Consulta** la base de conocimiento via RAG
 
 ## Stack
@@ -34,7 +34,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | LLM primario | Gemini API (Google AI Studio) |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Transcripción | `faster-whisper` (local) |
-| OCR / Visión | Tesseract (local) o Gemini Vision (remoto) — el usuario elige en el momento |
+| OCR / Visión | OCR local (Tesseract) o Gemini Vision (remoto) — el usuario elige en el momento |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Búsqueda semántica | ChromaDB (local) + Gemini Embedding API (remoto) |
 | Búsqueda estructural | Parser propio de wikilinks, tags y frontmatter (`vault_search.py`) |
@@ -50,7 +50,9 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - [`docs/frontmatter-schema.md`](docs/frontmatter-schema.md) — Schema YAML por tipo de nota y queries Dataview
 - [`docs/configuration.md`](docs/configuration.md) — Referencia de configuración (`config.yaml`)
 - [`docs/testing.md`](docs/testing.md) — Estrategia de testing: niveles, cobertura y fixtures
-- [`docs/security.md`](docs/security.md) — Modelo de amenaza, mitigaciones y checklist de deploy
+- [`docs/security.md`](docs/security.md) — Modelo de amenaza, mitigaciones, JSON schema del LLM y checklist de deploy
+- [`docs/vault-interface.md`](docs/vault-interface.md) — Firmas de funciones de vault_writer, vault_search y embeddings
+- [`docs/gemini-gem-instructions.md`](docs/gemini-gem-instructions.md) — Instrucciones de referencia para el LLM (Gemini)
 
 ## Estado
 

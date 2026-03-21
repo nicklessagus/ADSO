@@ -67,7 +67,9 @@ tests/
 │       ├── note_academic.md          # note con campos académicos (authors, doi, etc.)
 │       ├── task.md
 │       ├── idea.md
-│       └── inbox_pending.md
+│       ├── inbox_pending.md
+│       ├── project_index.md          # _index.md de proyecto con description y sections
+│       └── area_index.md             # _index.md de área con description
 ├── unit/
 │   ├── test_frontmatter.py        # generación y validación de YAML
 │   ├── test_file_naming.py        # slug, fecha, kebab-case

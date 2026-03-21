@@ -831,12 +831,42 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 |---|---|
 | 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) |
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
-| 3 | Audio (faster-whisper) |
-| 4 | Imágenes y capturas |
+| 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto |
+| 4 | Imágenes y capturas (OCR + Gemini Vision) |
 | 5 | Integraciones externas (arXiv, NASA ADS) |
 | 6 | Google Calendar + Google Tasks |
 | 7 | Consultas RAG en lenguaje natural |
 | 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
+
+### Fase 1 — scope detallado
+
+**Incluido:**
+- `config.py`: carga de `config.yaml` + `.env`, validación, constantes
+- `security.py`: middleware de autenticación por `TELEGRAM_ALLOWED_USER_ID`
+- `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Resources]` `[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
+- `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos con backoff (3 intentos, feedback visible), modo degradado (inbox + `pending-classification`)
+- `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()`, `update_wikilinks()` — routing por tipo/proyecto/área/sección
+- `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`
+- Gestión básica: crear proyecto, crear área, crear sección (modo `manage` del JSON schema)
+- Git backup con debounce configurable
+- Validación del vault al startup (estructura de carpetas)
+- Seed inicial de proyectos/áreas desde `config.yaml` (`vault_seed`)
+
+**Excluido (fases posteriores):**
+- Audio, PDFs, documentos adjuntos, imágenes → Fase 3-4
+- `read_status` y botones `[Ya lo leí]` `[Lo quiero leer]` → Fase 3 (requiere archivos adjuntos)
+- Embeddings, ChromaDB, links automáticos → Fase 2
+- `knowledge_query.py`, consultas RAG → Fase 7
+- Google Calendar, Google Tasks, `calendar_client.py`, `tasks_client.py` → Fase 6
+- arXiv, NASA ADS → Fase 5
+- Reporte semanal → Fase 8
+- `transcriber.py` → Fase 3
+
+**Orden de implementación sugerido dentro de Fase 1:**
+1. `config.py` + `security.py` (base, sin dependencias)
+2. `vault_writer.py` + `vault_search.py` (filesystem puro, testeable sin LLM)
+3. `llm_client.py` (requiere Gemini API key, pero mockeable para tests)
+4. `bot.py` (orquesta todo, requiere los 3 anteriores)
 
 ---
 
