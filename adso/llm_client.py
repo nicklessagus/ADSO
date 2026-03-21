@@ -324,21 +324,23 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
     Raises:
         Exception: Si la API falla.
     """
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     import os
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        "gemini-2.0-flash",
-        system_instruction=system_prompt,
-    )
+    client = genai.Client(api_key=api_key)
 
     response = await asyncio.to_thread(
-        model.generate_content, user_message
+        client.models.generate_content,
+        model="gemini-2.0-flash",
+        contents=user_message,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+        ),
     )
 
     if not response.text:

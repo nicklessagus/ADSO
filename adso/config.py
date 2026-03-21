@@ -121,6 +121,7 @@ class Settings:
     anthropic_api_key: str = ""
     google_calendar_creds: str = "/credentials/google-oauth.json"
     vault_path: Path = Path("/vault")
+    chroma_data_dir: Path = Path("/app/data/chroma")
 
     # Secciones de config.yaml
     rag: RagConfig = field(default_factory=RagConfig)
@@ -286,6 +287,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "GOOGLE_CALENDAR_CREDS", "/credentials/google-oauth.json"
         ),
         vault_path=Path(os.environ.get("VAULT_PATH", "/vault")),
+        chroma_data_dir=Path(os.environ.get("CHROMA_DATA_DIR", "/app/data/chroma")),
         # Secciones de config.yaml
         rag=_build_section(RagConfig, raw.get("rag")),
         links=_build_section(LinksConfig, raw.get("links")),

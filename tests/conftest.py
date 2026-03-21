@@ -155,6 +155,7 @@ def mock_context(vault_path: Path, sample_config: Path):
     context.bot_data = {
         "settings": settings,
         "git_backup": None,
+        "embeddings": None,
     }
     context.user_data = {}
     return context

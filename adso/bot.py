@@ -37,6 +37,7 @@ from adso.vault_writer import (
     read_note,
     seed_vault,
 )
+from adso.embeddings import EmbeddingsClient
 from adso.vault_search import find_by_property, get_note_index
 
 logger = logging.getLogger(__name__)
@@ -372,8 +373,25 @@ async def _handle_capture(
     fm["source"] = "telegram"
     fm["media_type"] = "text"
 
+    # Buscar links sugeridos via embeddings (si disponible)
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if embeddings and body:
+        try:
+            settings: Settings = context.bot_data["settings"]
+            similar = await embeddings.query_similar(
+                query_text=body,
+                n_results=settings.links.max_suggestions,
+                threshold=settings.links.similarity_threshold,
+            )
+            if similar:
+                suggested_links = [s.note_id for s in similar]
+        except Exception as e:
+            logger.warning("Error buscando links similares: %s", e)
+
     # Guardar en contexto del usuario
     context.user_data["pending_note"] = result
+    # Guardar links sugeridos en el resultado para que se muestren en preview
+    result["payload"]["suggested_links"] = suggested_links
     context.user_data["original_content"] = update.message.text
 
     has_dest = _has_destination(fm)
@@ -577,9 +595,42 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     if git_backup:
         await git_backup.notify(fm.get("title", "Sin título"))
 
+    # Fire-and-forget: indexar embedding
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if embeddings and body:
+        asyncio.create_task(
+            _index_note_safe(embeddings, path, body, fm, vault_path)
+        )
+
     rel_path = path.relative_to(vault_path)
     await query.edit_message_text(f"Nota guardada en {rel_path}")
     context.user_data.pop("original_content", None)
+
+
+async def _index_note_safe(
+    embeddings: EmbeddingsClient,
+    note_path: Path,
+    body: str,
+    fm: dict,
+    vault_path: Path,
+) -> None:
+    """Indexa embedding de forma segura (no propaga errores)."""
+    try:
+        note_id = note_path.stem
+        rel_path = str(note_path.relative_to(vault_path))
+        metadata = {
+            "path": rel_path,
+            "type": fm.get("type", ""),
+            "status": fm.get("status", ""),
+            "project": fm.get("project", ""),
+            "area": fm.get("area", ""),
+            "tags": fm.get("tags", []),
+            "media_type": fm.get("media_type", ""),
+            "title": fm.get("title", ""),
+        }
+        await embeddings.index_note(note_id, body, metadata)
+    except Exception as e:
+        logger.warning("Error indexando embedding para %s: %s", note_path, e)
 
 
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -844,6 +895,12 @@ def create_application(settings: Optional[Settings] = None) -> Application:
         settings.vault_path, settings.backup.debounce_seconds
     )
 
+    # Inicializar embeddings client
+    app.bot_data["embeddings"] = EmbeddingsClient(
+        chroma_data_dir=settings.chroma_data_dir,
+        gemini_api_key=settings.gemini_api_key,
+    )
+
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
@@ -857,7 +914,34 @@ def create_application(settings: Optional[Settings] = None) -> Application:
             first=60,  # Esperar 1 min después del startup
         )
 
+    # Reindex nocturno de embeddings
+    if settings.reindex.enabled:
+        reindex_time = datetime.strptime(settings.reindex.time, "%H:%M").time()
+        app.job_queue.run_daily(
+            reindex_job,
+            time=reindex_time,
+        )
+
     return app
+
+
+async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job nocturno: reindexar vault completo en ChromaDB."""
+    settings: Settings = context.bot_data["settings"]
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+
+    if not embeddings:
+        return
+
+    logger.info("Reindex nocturno iniciando...")
+    try:
+        stats = await embeddings.reindex_vault(
+            vault_path=settings.vault_path,
+            exclude_dirs=settings.vault.exclude_dirs,
+        )
+        logger.info("Reindex completo: %s", stats)
+    except Exception as e:
+        logger.error("Error en reindex nocturno: %s", e)
 
 
 async def run_bot() -> None:
