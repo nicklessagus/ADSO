@@ -811,14 +811,18 @@ Funcionalidades que el bot genera activamente a partir de los datos ya indexados
 
 ### Reporte semanal automático
 
-ADSO envía por Telegram un resumen periódico:
-- Notas creadas (desglose por tipo)
-- Proyecto más activo
-- Métodos nuevos encontrados (aparecen en papers pero no estaban antes)
-- Papers en cola por prioridad
-- Ideas en `status: raw` más de 60 días
-- Tasks ADSO: completadas vs pendientes de la semana
-- Sugerencia de paper a leer basada en similitud con actividad reciente
+ADSO envía el reporte por Telegram como archivo `.md` con el header estándar (logo + versión + fecha). Default: viernes al mediodía.
+
+Todo es configurable en `config.yaml` via `weekly_report`: se puede deshabilitar el reporte completo (`enabled: false`) o activar/desactivar secciones individuales.
+
+**Secciones:**
+- `notes_summary` — notas creadas durante la semana, desglose por tipo
+- `most_active_project` — proyecto con más actividad
+- `papers_queue` — papers con `read_status: unread`, ordenados por prioridad
+- `inbox_suggestion` — ítem del inbox más relevante según la actividad reciente de la semana
+- `tasks_summary` — tasks ADSO completadas vs pendientes de la semana
+- `stale_ideas` — ideas con `status: raw` hace más de 60 días
+- `paper_suggestion` — sugerencia de paper a leer basada en similitud con actividad reciente
 
 ### Scoring compuesto de papers
 

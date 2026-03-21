@@ -107,6 +107,20 @@ llm:
   max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
   max_paper_tokens: 128000    # truncado de PDFs académicos
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
+
+# ─── Reporte semanal ─────────────────────────────────────────────────────────
+weekly_report:
+  enabled: true
+  day: friday                  # monday | tuesday | wednesday | thursday | friday | saturday | sunday
+  time: "12:00"                # hora local del servidor (formato HH:MM)
+  sections:
+    notes_summary: true        # notas creadas durante la semana, desglose por tipo
+    most_active_project: true  # proyecto con más actividad
+    papers_queue: true         # papers con read_status: unread, ordenados por prioridad
+    inbox_suggestion: true     # ítem del inbox más relevante según actividad reciente de la semana
+    tasks_summary: true        # tasks ADSO completadas vs pendientes de la semana
+    stale_ideas: true          # ideas con status: raw hace más de 60 días
+    paper_suggestion: true     # sugerencia de paper a leer basada en similitud con actividad reciente
 ```
 
 ---
