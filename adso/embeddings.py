@@ -264,6 +264,12 @@ class EmbeddingsClient:
         """
         self._ensure_initialized()
 
+        # ChromaDB falla si n_results > número de documentos indexados
+        count = await asyncio.to_thread(self._collection.count)
+        if count == 0:
+            return []
+        n_results = min(n_results, count)
+
         # Calcular embedding de la consulta
         query_embedding = await self._compute_embedding(query_text)
 

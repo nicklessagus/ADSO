@@ -12,7 +12,6 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote
 
 from telegram import (
     InlineKeyboardButton,
@@ -1348,11 +1347,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             logger.warning("No se pudo borrar nota de inbox: %s", e)
 
     rel_path = path.relative_to(vault_path)
-    vault_name = vault_path.name
-    obs_uri = f"obsidian://open?vault={quote(vault_name)}&file={quote(str(rel_path))}"
-    await query.edit_message_text(
-        f"Nota guardada en: {rel_path}\n{obs_uri}",
-    )
+    await query.edit_message_text(f"Nota guardada en: {rel_path}")
     context.user_data.pop("original_content", None)
 
 
