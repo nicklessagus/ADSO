@@ -1601,6 +1601,8 @@ async def _handle_capture_from_callback(
                 logger.warning("Error buscando links similares en callback: %s", e)
         payload["suggested_links"] = suggested_links
 
+    context.user_data["pending_note"] = result
+
     has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
     keyboard = build_capture_keyboard(fm, has_dest)
