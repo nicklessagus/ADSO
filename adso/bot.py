@@ -707,9 +707,7 @@ async def _process_pdf_after_read_status(
                 abstract_snippet = sections["abstract"][:400]
                 if len(sections["abstract"]) > 400:
                     abstract_snippet += "..."
-                preview_parts.append(f"\n<b>Abstract:</b>\n<i>{_esc(abstract_snippet)}</i>")
-            if sections["keywords"]:
-                preview_parts.append(f"\n<b>Keywords:</b> <i>{_esc(sections['keywords'][:200])}</i>")
+                preview_parts.append(f"\n<i>{_esc(abstract_snippet)}</i>")
             preview_text = "\n".join(preview_parts) or "<i>(sin secciones detectadas)</i>"
         else:
             snippet = text[:500]

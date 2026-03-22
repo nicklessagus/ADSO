@@ -40,50 +40,141 @@ _PAPER_SIGNALS = [
 
 _DOI_RE = re.compile(r"10\.\d{4,9}/[^\s,;]+")
 
-# Detección de líneas que son fragmentos de fórmulas matemáticas
-# (muy cortas con operadores, o solo símbolos/dígitos sin contexto léxico)
-_FORMULA_LINE_RE = re.compile(
-    r"^(?:"
-    r"[\d\s\+\-\=\*\/\(\)\[\]\{\}\^\|⊤√∑∫∂∇·×≈≤≥≠αβγδεζηθλμνξπρστφψω]+"  # solo símbolos
-    r"|[A-Za-z]{1,3}[\s_^]*[\d]*\s*[=+\-/⊤√].*"                             # var = expr
-    r"|\([0-9]+\)"                                                             # (1), (2)...
-    r")$"
+# Símbolos matemáticos Unicode frecuentes en papers
+_MATH_SYMBOL_RE = re.compile(r"[⊤⊥√∑∫∂∇·×≈≤≥≠±∞αβγδεζηθλμνξπρστφψωΩΓΔΛΞΠΣΦΨ]")
+# Número de ecuación al final o solo en la línea: (1), (2), (A.3), etc.
+_EQ_NUMBER_RE = re.compile(r"^\s*\(\d+[\.\d]*\)\s*$")
+
+# Patrones para saltar al buscar el título en las primeras líneas del PDF
+_TITLE_SKIP_RE = re.compile(
+    r"(?:university|universit|institute|department|©|arxiv|preprint|submitted|"
+    r"manuscript|vol\.|issue|astronomy|astrophysics|monthly notices|physical review|"
+    r"nature|science|journal|received|accepted|published|\beso\b|\bmnras\b|\baas\b)",
+    re.IGNORECASE,
 )
+_DATE_RE = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\b.{0,20}\d{4}",
+    re.IGNORECASE,
+)
+
+
+def _extract_title_from_text(lines: list[str], max_lines: int = 50) -> str:
+    """Extrae el título del paper de las primeras líneas del texto extraído.
+
+    Fallback para cuando el metadata del PDF no trae título (común en arXiv).
+    Salta headers de journals, fechas y afiliaciones; toma las primeras
+    líneas sustanciales como candidatos al título.
+
+    Args:
+        lines: Líneas del texto completo del PDF.
+        max_lines: Cuántas líneas iniciales considerar.
+
+    Returns:
+        Título inferido, o string vacío si no se encontró.
+    """
+    candidates: list[str] = []
+    for line in lines[:max_lines]:
+        s = line.strip()
+        if not s or len(s) < 8 or len(s) > 250:
+            continue
+        if _TITLE_SKIP_RE.search(s):
+            continue
+        if _DATE_RE.search(s):
+            continue
+        if re.match(r"^[\d©\-\*†‡]", s):
+            continue
+        # Líneas con año de 4 dígitos son headers de journal o fechas
+        if re.search(r"\b\d{4}\b", s):
+            continue
+        # Líneas que parecen affiliaciones: contienen dígitos superíndices y comas
+        if re.search(r"[A-Z][a-z]+\d,", s):
+            continue
+        candidates.append(s)
+        if len(candidates) >= 4:
+            break
+
+    if not candidates:
+        return ""
+
+    title = candidates[0]
+    # Si el primer candidato es muy corto (acrónimo como "ASTROMER"), unir con el siguiente
+    if len(title) < 30 and len(candidates) > 1:
+        title = f"{title}: {candidates[1]}"
+    return title
 
 
 def _clean_formula_blocks(text: str) -> str:
     """Reemplaza bloques de fórmulas rotas por un placeholder legible.
 
-    pymupdf extrae fórmulas matemáticas como fragmentos de texto ilegibles.
-    Detecta runs de 3+ líneas que parecen fórmulas y los sustituye por
-    '> [mathematical content — see PDF]'.
+    pymupdf extrae ecuaciones como fragmentos de texto ilegibles. Usa los
+    números de ecuación '(1)', '(2)' como anclas: expande una ventana
+    alrededor de cada uno y marca las líneas cortas/simbólicas como fórmula.
+    Sin anclas, recurre a detectar runs de líneas con símbolos matemáticos.
 
     Args:
         text: Texto extraído de una sección del paper.
 
     Returns:
-        Texto con bloques de fórmulas reemplazados.
+        Texto con bloques de fórmulas reemplazados por '> [mathematical content — see PDF]'.
     """
     lines = text.splitlines()
+    n = len(lines)
+
+    # Paso 1: marcar líneas candidatas a fórmula
+    def _is_formula_line(line: str) -> bool:
+        s = line.strip()
+        if not s:
+            return False
+        if _EQ_NUMBER_RE.match(s):
+            return True
+        if len(s) > 60:
+            return False
+        if _MATH_SYMBOL_RE.search(s):
+            return True
+        # Línea muy corta sin palabras completas (fragmento de ecuación)
+        if len(s) <= 8 and not re.match(r"^[A-Za-z]{3,}\.?$", s):
+            return True
+        # Línea corta con = que parece asignación de variable: "Zi = softmax", "Qi = XWq"
+        if len(s) <= 25 and re.match(r"^[A-Za-z]{1,4}[\d_]*\s*=\s*\S", s):
+            return True
+        return False
+
+    # Paso 2: expandir ventana alrededor de anclas (números de ecuación)
+    formula_set: set[int] = set()
+    eq_anchors = [i for i, l in enumerate(lines) if _EQ_NUMBER_RE.match(l.strip())]
+
+    for anchor in eq_anchors:
+        for k in range(max(0, anchor - 10), min(n, anchor + 3)):
+            if _is_formula_line(lines[k]) or not lines[k].strip():
+                formula_set.add(k)
+        formula_set.add(anchor)
+
+    # Paso 3: sin anclas, buscar runs de 3+ líneas con símbolos
+    if not eq_anchors:
+        run: list[int] = []
+        for i, line in enumerate(lines):
+            if _is_formula_line(line):
+                run.append(i)
+            else:
+                if len(run) >= 3:
+                    formula_set.update(run)
+                run = []
+        if len(run) >= 3:
+            formula_set.update(run)
+
+    # Paso 4: reconstruir texto reemplazando bloques contiguos
     result: list[str] = []
-    formula_run: list[str] = []
-
-    def _flush_run() -> None:
-        if len(formula_run) >= 3:
-            result.append("> [mathematical content — see PDF]")
+    in_formula = False
+    for i, line in enumerate(lines):
+        if i in formula_set:
+            if not in_formula:
+                result.append("> [mathematical content — see PDF]")
+                in_formula = True
         else:
-            result.extend(formula_run)
-        formula_run.clear()
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped and _FORMULA_LINE_RE.match(stripped) and len(stripped) < 60:
-            formula_run.append(line)
-        else:
-            _flush_run()
+            in_formula = False
             result.append(line)
 
-    _flush_run()
     return "\n".join(result)
 
 # Headers de sección (match sobre la línea completa, stripped)
@@ -245,8 +336,13 @@ def extract_paper_sections(text: str, metadata: dict) -> dict:
         if m:
             doi = m.group(0).rstrip(".,;)")
 
+    # Título: metadata del PDF primero; fallback a extracción del texto
+    title = metadata.get("title", "").strip()
+    if not title:
+        title = _extract_title_from_text(lines)
+
     return {
-        "title":       metadata.get("title", "").strip(),
+        "title":       title,
         "authors":     metadata.get("author", "").strip(),
         "doi":         doi,
         "abstract":    abstract,
