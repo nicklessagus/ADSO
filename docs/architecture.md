@@ -481,6 +481,13 @@ Ya documentado: `pymupdf` no extrae texto → bot pide descripción manual al us
 
 El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
 
+### Comandos slash
+
+| Comando | Descripción |
+|---|---|
+| `/start` | Confirma que el bot está activo |
+| `/status` | Estado del sistema: modelo LLM activo, embeddings, git backup, conteo de notas en vault e inbox (con pendientes de clasificar), path del vault. TODOs: último push git, conteo por área/proyecto, uso de tokens del día. |
+
 ### Dos estados
 
 **Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto/área y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards. Si el LLM no puede asignar proyecto ni área a una nota, el bot pregunta destino con botones (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Los binarios (PDFs, imágenes) siempre van a `03-Resources/` independientemente del destino de la nota.

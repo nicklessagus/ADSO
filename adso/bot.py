@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 from telegram import (
     InlineKeyboardButton,
@@ -504,7 +505,7 @@ async def handle_text(
         )
     else:
         await update.message.reply_text(
-            "¿Guardás esto como nota?",
+            "¿Guardar como nota?",
             reply_markup=build_save_keyboard(),
         )
 
@@ -1347,7 +1348,12 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             logger.warning("No se pudo borrar nota de inbox: %s", e)
 
     rel_path = path.relative_to(vault_path)
-    await query.edit_message_text(f"Nota guardada en {rel_path}")
+    vault_name = vault_path.name
+    obs_uri = f"obsidian://open?vault={quote(vault_name)}&file={quote(str(rel_path))}"
+    await query.edit_message_text(
+        f'Nota guardada en: <a href="{obs_uri}">{_esc(str(rel_path))}</a>',
+        parse_mode="HTML",
+    )
     context.user_data.pop("original_content", None)
 
 
@@ -1511,10 +1517,18 @@ async def _cb_dest(
         fm["project"] = None
         fm["section"] = None
         fm["area"] = dest_name
+        if fm.get("type") == "inbox":
+            fm["type"] = "note"
+        if fm.get("status") == "pending-classification":
+            fm["status"] = "active"
     elif dest_type == "project":
         fm["project"] = dest_name
         fm["section"] = None
         fm["area"] = None
+        if fm.get("type") == "inbox":
+            fm["type"] = "note"
+        if fm.get("status") == "pending-classification":
+            fm["status"] = "active"
 
     # Regenerar preview
     body = pending["payload"].get("body", "")
@@ -1565,13 +1579,30 @@ async def _handle_capture_from_callback(
 
     fm = payload["frontmatter"]
     body = payload.get("body", "")
-    suggested_links = payload.get("suggested_links", [])
+    suggested_links: list[str] = payload.get("suggested_links", [])
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fm.setdefault("date_created", now)
     fm.setdefault("date_modified", now)
     fm.setdefault("source", "telegram")
     fm.setdefault("media_type", "text")
+
+    # Buscar notas similares si aún no se hizo (ej: flujo de desambiguación)
+    if not suggested_links and body:
+        settings: Settings = context.bot_data["settings"]
+        embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+        if embeddings:
+            try:
+                similar = await embeddings.query_similar(
+                    query_text=body,
+                    n_results=settings.links.max_suggestions,
+                    threshold=settings.links.similarity_threshold,
+                )
+                if similar:
+                    suggested_links = [s.note_id for s in similar]
+            except Exception as e:
+                logger.warning("Error buscando links similares en callback: %s", e)
+        payload["suggested_links"] = suggested_links
 
     has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
@@ -1677,6 +1708,50 @@ async def handle_start(
     await update.message.reply_text(
         "ADSO activo. Mandame texto y lo clasifico para tu vault."
     )
+
+
+@authorized
+async def handle_status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /status — muestra estado del sistema."""
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+
+    # --- Vault stats ---
+    inbox_notes = list((vault_path / "00-Inbox").glob("*.md")) if (vault_path / "00-Inbox").exists() else []
+    pending = [f for f in inbox_notes if "pending-classification" in f.read_text(errors="ignore")]
+    total_notes = len(list(vault_path.rglob("*.md")))
+
+    # --- LLM ---
+    llm_model = "gemini-2.5-flash-lite"  # TODO: leer de settings cuando se exponga
+
+    # --- Embeddings ---
+    embeddings = context.bot_data.get("embeddings")
+    embeddings_status = "activo" if embeddings else "no iniciado"
+
+    # --- Git backup ---
+    git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
+    backup_status = "activo" if git_backup else "no configurado"
+
+    lines = [
+        "<b>ADSO — Estado</b>",
+        "",
+        f"<b>Modelo LLM:</b> {llm_model}",
+        f"<b>Embeddings:</b> {embeddings_status}",
+        f"<b>Git backup:</b> {backup_status}",
+        "",
+        f"<b>Notas en vault:</b> {total_notes}",
+        f"<b>En inbox:</b> {len(inbox_notes)} ({len(pending)} pendientes de clasificar)",
+        "",
+        f"<b>Vault:</b> <code>{vault_path}</code>",
+        # TODO: última sincronización Syncthing
+        # TODO: último push git backup
+        # TODO: conteo por área/proyecto
+        # TODO: uso de tokens / llamadas API del día
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------------------
@@ -1834,6 +1909,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
 
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))
+    app.add_handler(CommandHandler("status", handle_status))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
