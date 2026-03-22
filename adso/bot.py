@@ -1351,8 +1351,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     vault_name = vault_path.name
     obs_uri = f"obsidian://open?vault={quote(vault_name)}&file={quote(str(rel_path))}"
     await query.edit_message_text(
-        f'Nota guardada en: <a href="{obs_uri}">{_esc(str(rel_path))}</a>',
-        parse_mode="HTML",
+        f"Nota guardada en: {rel_path}\n{obs_uri}",
     )
     context.user_data.pop("original_content", None)
 
