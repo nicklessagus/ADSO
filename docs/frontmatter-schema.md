@@ -94,7 +94,7 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ```yaml
 ---
 type: note
-tags: [paper, cosmologia, machine-learning]       # generados por LLM, kebab-case, en el idioma del contenido
+tags: [paper, cosmology, machine-learning]        # generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 read_status: unread                               # unread | reading | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
@@ -116,22 +116,22 @@ related: ["[[otra-nota]]", "[[paper-similar]]"]   # sugeridos por ChromaDB, eleg
 **Body de una nota de paper** — estructura fija generada por el LLM:
 
 ```markdown
-## Resumen IA
+## AI Summary
 Síntesis en español más amplia que el abstract: qué hace el paper, cómo y qué concluye.
 
 ## Abstract
 [Texto original del abstract, en el idioma del paper]
 
-## Métodos
-[Sección de métodos extraída del paper, en el idioma original]
+## Methods
+[Sección de métodos extraída del paper, en el idioma original. Bloques de fórmulas ilegibles reemplazados por `> [mathematical content — see PDF]`]
 
-## Conclusiones
+## Conclusions
 [Sección de conclusiones extraída del paper, en el idioma original]
 
-## Notas personales
+## Personal Notes
 ```
 
-El `## Resumen IA` es generado por el LLM en español. Las secciones restantes preservan el idioma original del paper para no perder precisión técnica ni introducir ruido en los embeddings multilingüe de ChromaDB.
+El `## AI Summary` es generado por el LLM en español. Las secciones restantes preservan el idioma original del paper para no perder precisión técnica ni introducir ruido en los embeddings multilingüe de ChromaDB.
 
 ### `task`
 ```yaml
@@ -246,12 +246,12 @@ No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como
 
 ---
 
-## `## Notas personales` — sección en el body
+## `## Personal Notes` — sección en el body
 
-Toda nota con `read_status` incluye en su body una sección vacía al crear:
+Toda nota de paper incluye en su body una sección vacía al crear:
 
 ```markdown
-## Notas personales
+## Personal Notes
 
 ```
 
@@ -261,7 +261,7 @@ El usuario la completa después de leer/revisar el contenido — es su interpret
 |---|---|---|
 | `contribution`, `methods`, `conclusions` | LLM (del paper) | Lo que dice el autor |
 | `relevance`, `context` | Usuario/LLM al guardar | Por qué lo guardaste |
-| `## Notas personales` | Usuario después de leer | Tu interpretación — cómo te sirve, con qué linkear, qué aplicar |
+| `## Personal Notes` | Usuario después de leer | Tu interpretación — cómo te sirve, con qué linkear, qué aplicar |
 
 El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me sirve para el capítulo 3, linkear con [[baseline-cnn]]", el bot formatea y escribe en esa sección.
 
@@ -271,12 +271,12 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 
 - El LLM recibe el contenido crudo y devuelve el frontmatter completo + cuerpo de la nota en JSON estructurado
 - El bot parsea el JSON y escribe el archivo `.md` con el YAML correspondiente
-- Los `tags` se generan en kebab-case, en el idioma del contenido
+- Los `tags` se generan en kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox, top 100 por frecuencia) antes de crear nuevos
 - El bot actualiza `date_modified` al editar notas existentes
 - `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
 - **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar. Solo aplica a tipos accionables: `task`, `idea`.
-- **Extracción de papers:** `document_extractor.py` detecta heurísticamente si un PDF es un paper académico (≥ 2 señales: abstract, DOI, references, etc.) y extrae localmente las secciones clave (abstract, keywords, métodos, conclusiones). Solo ese extracto compacto (~3000 chars) se envía al LLM — no el texto completo. `tags` y `keywords` son distintos: `keywords` son las palabras clave del paper (idioma original); `tags` son las etiquetas ADSO generadas por el LLM.
-- **Embeddings de papers:** ChromaDB indexa el `## Resumen IA` + el `## Abstract`. El Resumen IA en español mejora el retrieval de queries en castellano; el Abstract en idioma original preserva los términos técnicos para queries exactas. Gemini Embedding API es multilingüe y maneja búsqueda cross-lingual.
+- **Extracción de papers:** `document_extractor.py` detecta heurísticamente si un PDF es un paper académico (≥ 2 señales: abstract, DOI, references, etc.) y extrae localmente secciones clave (abstract, keywords, methods, conclusions). Solo ese extracto compacto (~3000 chars) se envía al LLM. El título se extrae del metadata del PDF; si está vacío (común en arXiv), se infiere de las primeras líneas del texto. Fórmulas matemáticas: bloques detectados por número de ecuación `(1)`, `(2)` y reemplazados por `> [mathematical content — see PDF]`. `tags` y `keywords` son distintos: `keywords` = palabras clave del paper en idioma original; `tags` = etiquetas ADSO en inglés.
+- **Embeddings de papers:** ChromaDB indexa el body completo generado por el LLM (AI Summary + Abstract + Methods + Conclusions). Gemini Embedding API es multilingüe y maneja búsqueda cross-lingual.
 
 ---
 
