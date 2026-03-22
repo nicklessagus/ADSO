@@ -1,6 +1,6 @@
 {
   "mode": "capture",
-  "confidence": 0.60,
+  "confidence": 0.6,
   "payload": {
     "frontmatter": {
       "title": "Nota sin clasificar",
@@ -25,7 +25,6 @@
       "conclusions": null
     },
     "body": "algo que no se bien donde va",
-    "suggested_links": [],
     "summary": null
   }
 }

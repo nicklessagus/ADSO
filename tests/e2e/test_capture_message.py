@@ -38,7 +38,6 @@ class TestCaptureMessage:
                     "priority": None,
                 },
                 "body": "Accuracy 0.87 en el baseline.",
-                "suggested_links": [],
                 "summary": None,
             },
         }
@@ -89,7 +88,6 @@ class TestCaptureMessage:
                     "status": "pending-classification",
                 },
                 "body": "Contenido que no se pudo clasificar.",
-                "suggested_links": [],
                 "summary": None,
             },
         }
@@ -135,7 +133,6 @@ class TestCaptureMessage:
                     "area": None,
                 },
                 "body": "contenido ambiguo",
-                "suggested_links": [],
                 "summary": None,
             },
         }

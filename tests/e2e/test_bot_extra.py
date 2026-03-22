@@ -52,7 +52,6 @@ def _setup_pending_note(context, title="Test", note_type="note", project="tesis"
                 "date_modified": "2025-01-15T00:00:00",
             },
             "body": "Cuerpo.",
-            "suggested_links": [],
             "summary": None,
         },
     }

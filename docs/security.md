@@ -253,7 +253,6 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
       "conclusions": null
     },
     "body": "## Contenido\n\nResultados del primer experimento...",
-    "suggested_links": ["[[paper-referencia-metodologia]]", "[[dataset-imagenet]]"],
     "summary": "Resultados preliminares del baseline CNN con accuracy 0.87"
   }
 }
@@ -268,7 +267,6 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | `frontmatter.area` | string \| null | Área destino. Solo si no hay proyecto |
 | `frontmatter.priority` | string \| null | `low`, `medium`, `high` — solo para `task` e `idea` |
 | `body` | string | Cuerpo de la nota en Markdown (sin frontmatter). El LLM genera wikilinks `[[...]]` donde sea relevante |
-| `suggested_links` | string[] | Wikilinks sugeridos por el LLM al analizar el contenido. Se muestran en el preview |
 | `summary` | string \| null | Resumen de una línea — solo para notas largas |
 
 #### Modo `query` — Consulta sobre el vault

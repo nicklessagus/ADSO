@@ -788,7 +788,7 @@ async def _classify_and_preview(
     # Captura normal
     payload = result["payload"]
     fm = payload["frontmatter"]
-    suggested_links = payload.get("suggested_links", [])
+    suggested_links: list[str] = []
 
     # Para texto libre el body es siempre el texto original del usuario,
     # no la reformulación del LLM. Para PDFs/audio el LLM genera el body.
@@ -842,7 +842,7 @@ async def _handle_capture(
     payload = result["payload"]
     fm = payload["frontmatter"]
     body = payload.get("body", "")
-    suggested_links = payload.get("suggested_links", [])
+    suggested_links: list[str] = []
 
     # Setear campos automáticos
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -1696,7 +1696,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
             body = payload.get("body", note.body)
 
             # Mandar preview al usuario — de a uno por cron
-            preview_text = build_preview(fm, body, payload.get("suggested_links", []))
+            preview_text = build_preview(fm, body, [])
             preview_text = "♻️ <b>Nota reclasificada del Inbox</b>\n\n" + preview_text
             has_dest = bool(fm.get("project") or fm.get("area"))
             keyboard = build_capture_keyboard(fm, has_dest)

@@ -79,7 +79,7 @@ class TestInvalidResponse:
 
     def test_invalid_mode(self) -> None:
         data = {"mode": "unknown", "payload": {}}
-        with pytest.raises(LLMResponseError, match="mode inválido"):
+        with pytest.raises(LLMResponseError, match="Invalid mode"):
             validate_llm_response(data)
 
     def test_missing_payload(self) -> None:
@@ -112,7 +112,7 @@ class TestInvalidResponse:
                 "body": "test",
             },
         }
-        with pytest.raises(LLMResponseError, match="type inválido"):
+        with pytest.raises(LLMResponseError, match="Invalid type"):
             validate_llm_response(data)
 
     def test_capture_invalid_status_for_type(self) -> None:
@@ -123,7 +123,7 @@ class TestInvalidResponse:
                 "body": "test",
             },
         }
-        with pytest.raises(LLMResponseError, match="status.*inválido"):
+        with pytest.raises(LLMResponseError, match="Invalid status"):
             validate_llm_response(data)
 
     def test_capture_invalid_priority(self) -> None:
@@ -134,7 +134,7 @@ class TestInvalidResponse:
                 "body": "test",
             },
         }
-        with pytest.raises(LLMResponseError, match="priority inválido"):
+        with pytest.raises(LLMResponseError, match="Invalid priority"):
             validate_llm_response(data)
 
     def test_capture_missing_body(self) -> None:
@@ -152,7 +152,7 @@ class TestInvalidResponse:
             "mode": "manage", "confidence": 0.9,
             "payload": {"operation": "destroy_everything", "params": {}},
         }
-        with pytest.raises(LLMResponseError, match="operation inválida"):
+        with pytest.raises(LLMResponseError, match="Invalid operation"):
             validate_llm_response(data)
 
     def test_manage_missing_params(self) -> None:
@@ -247,7 +247,7 @@ class TestParseJsonResponse:
         assert result["mode"] == "capture"
 
     def test_invalid_json(self) -> None:
-        with pytest.raises(LLMResponseError, match="JSON válido"):
+        with pytest.raises(LLMResponseError, match="valid JSON"):
             _parse_json_response("not json at all")
 
 
@@ -270,4 +270,4 @@ class TestBuildSystemPrompt:
 
     def test_empty_lists(self) -> None:
         prompt = build_system_prompt([], [])
-        assert "ninguno" in prompt.lower() or "ninguna" in prompt.lower()
+        assert "(none)" in prompt.lower()

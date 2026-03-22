@@ -5,7 +5,10 @@
     "frontmatter": {
       "title": "Transformers en astronomía",
       "type": "note",
-      "tags": ["transformers", "astronomia"],
+      "tags": [
+        "transformers",
+        "astronomia"
+      ],
       "status": "active",
       "project": null,
       "section": null,
@@ -25,7 +28,6 @@
       "conclusions": null
     },
     "body": "transformers en astronomía",
-    "suggested_links": [],
     "summary": null
   }
 }
