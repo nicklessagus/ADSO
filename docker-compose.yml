@@ -3,6 +3,7 @@ services:
     build: .
     container_name: adso-bot
     restart: unless-stopped
+    user: "${ADSO_UID:-1000}:${ADSO_GID:-1000}"
     env_file:
       - .env
     volumes:
