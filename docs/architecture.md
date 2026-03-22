@@ -906,10 +906,16 @@ Los vectores se guardan en **ChromaDB embebido** en el filesystem de la RPi4:
 ```
 /app/data/chroma/
 ├── index/       ← vectores (768 floats por nota)
-└── metadata/    ← path al .md, título, proyecto, sección, fecha
+└── metadata/    ← path al .md, título, tipo, proyecto, área, tags, media_type
 ```
 
 Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servidor separado.
+
+**Distinción importante — embedding vs metadata:**
+- **Texto embebido:** solo el body de la nota (`.content` del frontmatter parseado). Es lo que determina la similitud semántica entre notas.
+- **Metadata estructurada:** campos del frontmatter (`type`, `status`, `project`, `area`, `tags`, `media_type`, `title`, `path`). No influyen en el vector. Se usan exclusivamente para filtros `where` en consultas estructuradas (Fase 7).
+
+**Idioma de los tags:** siempre en inglés, independientemente del idioma de la nota. Los tags son metadata estructurada para filtros — necesitan consistencia. La búsqueda semántica en el body es multilingüe (el modelo de embeddings lo resuelve), pero los filtros por tag son comparaciones exactas de strings.
 
 ### Cuándo se indexa
 

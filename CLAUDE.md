@@ -137,7 +137,7 @@ title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
 type: ""           # note | task | idea | inbox | project-index | area-index
-tags: []
+tags: []           # siempre en inglés, kebab-case
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
 status: active     # valores dependen del type — ver docs/frontmatter-schema.md
