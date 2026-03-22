@@ -1347,7 +1347,10 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             logger.warning("No se pudo borrar nota de inbox: %s", e)
 
     rel_path = path.relative_to(vault_path)
-    await query.edit_message_text(f"Nota guardada en: {rel_path}")
+    await query.edit_message_text(
+        f"Nota guardada en: <code>{rel_path}</code>",
+        parse_mode="HTML",
+    )
     context.user_data.pop("original_content", None)
 
 
