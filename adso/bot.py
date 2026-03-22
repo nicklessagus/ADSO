@@ -306,14 +306,14 @@ def _extract_name_from_command(text: str, operation: str) -> str:
     keyword = r"proyecto" if operation == "create_project" else r"[aá]rea"
     # Con comillas simples o dobles
     m = re.search(
-        rf'(?:crear?|nuevo?|agrega[r]?|add)\s+{keyword}\s+["\u201c]([^"\u201d]+)["\u201d]',
+        rf'(?:crear?|nuev[ao]?|agrega[r]?|add)\s+{keyword}\s+["\u201c]([^"\u201d]+)["\u201d]',
         text, re.IGNORECASE,
     )
     if m:
         return m.group(1).strip()
     # Sin comillas: todo lo que viene después de la keyword
     m = re.search(
-        rf'(?:crear?|nuevo?|agrega[r]?|add)\s+{keyword}\s+(.+)',
+        rf'(?:crear?|nuev[ao]?|agrega[r]?|add)\s+{keyword}\s+(.+)',
         text, re.IGNORECASE,
     )
     if m:
