@@ -356,19 +356,19 @@ Markdown string written in Spanish.
 
 For papers (input containing ABSTRACT/KEYWORDS/METHODS/CONCLUSIONS sections), use EXACTLY this structure:
 
-## Resumen IA
+## AI Summary
 [your own synthesis in Spanish — broader than the abstract, includes methods and conclusions]
 
 ## Abstract
 [ABSTRACT text from the input, in its original language]
 
-## Métodos
+## Methods
 [METHODS text from the input, in its original language — empty if not present]
 
-## Conclusiones
+## Conclusions
 [CONCLUSIONS text from the input, in its original language — empty if not present]
 
-## Notas personales
+## Personal Notes
 
 For any other content: free-form Markdown in Spanish.
 

@@ -679,10 +679,17 @@ async def _process_pdf_after_read_status(
         is_paper = detect_paper(text, pdf_meta)
         classify_content = build_classify_content(text, pdf_meta, is_paper)
 
+        # Para papers: capturar título exacto del PDF antes de que el LLM lo reescriba
+        paper_title: Optional[str] = None
+        if is_paper:
+            sections = extract_paper_sections(text, pdf_meta)
+            paper_title = sections["title"] or pdf_meta.get("title") or None
+
         context.user_data["pending_extraction"] = {
             "text": text,
             "classify_content": classify_content,
             "is_paper": is_paper,
+            "paper_title": paper_title,
             "temp_path": str(tmp_path),
             "original_filename": filename,
             "media_type": "document",
@@ -692,9 +699,8 @@ async def _process_pdf_after_read_status(
 
         # Armar preview según tipo de documento
         if is_paper:
-            sections = extract_paper_sections(text, pdf_meta)
             preview_parts = []
-            title = sections["title"] or pdf_meta.get("title", "")
+            title = paper_title or ""
             if title:
                 preview_parts.append(f"<b>{_esc(title)}</b>")
             if sections["abstract"]:
@@ -1423,6 +1429,9 @@ async def _cb_extraction_ok(
 
     if pe.get("read_status"):
         extra_fm["read_status"] = pe["read_status"]
+    # Título exacto del PDF: override del LLM para no perder el título original
+    if pe.get("paper_title"):
+        extra_fm["title"] = pe["paper_title"]
 
     await update.callback_query.edit_message_text("Clasificando...")
 

@@ -40,6 +40,52 @@ _PAPER_SIGNALS = [
 
 _DOI_RE = re.compile(r"10\.\d{4,9}/[^\s,;]+")
 
+# Detección de líneas que son fragmentos de fórmulas matemáticas
+# (muy cortas con operadores, o solo símbolos/dígitos sin contexto léxico)
+_FORMULA_LINE_RE = re.compile(
+    r"^(?:"
+    r"[\d\s\+\-\=\*\/\(\)\[\]\{\}\^\|⊤√∑∫∂∇·×≈≤≥≠αβγδεζηθλμνξπρστφψω]+"  # solo símbolos
+    r"|[A-Za-z]{1,3}[\s_^]*[\d]*\s*[=+\-/⊤√].*"                             # var = expr
+    r"|\([0-9]+\)"                                                             # (1), (2)...
+    r")$"
+)
+
+
+def _clean_formula_blocks(text: str) -> str:
+    """Reemplaza bloques de fórmulas rotas por un placeholder legible.
+
+    pymupdf extrae fórmulas matemáticas como fragmentos de texto ilegibles.
+    Detecta runs de 3+ líneas que parecen fórmulas y los sustituye por
+    '> [mathematical content — see PDF]'.
+
+    Args:
+        text: Texto extraído de una sección del paper.
+
+    Returns:
+        Texto con bloques de fórmulas reemplazados.
+    """
+    lines = text.splitlines()
+    result: list[str] = []
+    formula_run: list[str] = []
+
+    def _flush_run() -> None:
+        if len(formula_run) >= 3:
+            result.append("> [mathematical content — see PDF]")
+        else:
+            result.extend(formula_run)
+        formula_run.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and _FORMULA_LINE_RE.match(stripped) and len(stripped) < 60:
+            formula_run.append(line)
+        else:
+            _flush_run()
+            result.append(line)
+
+    _flush_run()
+    return "\n".join(result)
+
 # Headers de sección (match sobre la línea completa, stripped)
 # Soporta headers numerados tipo "2. Methods", "II. Methods", etc.
 _SECTION_PATTERNS: dict[str, re.Pattern] = {
@@ -236,13 +282,13 @@ def build_classify_content(text: str, metadata: dict, is_paper: bool) -> str:
         if sections["doi"]:
             parts.append(f"DOI: {sections['doi']}")
         if sections["abstract"]:
-            parts.append(f"\nABSTRACT:\n{sections['abstract']}")
+            parts.append(f"\nABSTRACT:\n{_clean_formula_blocks(sections['abstract'])}")
         if sections["keywords"]:
             parts.append(f"\nKEYWORDS: {sections['keywords']}")
         if sections["methods"]:
-            parts.append(f"\nMÉTODOS:\n{sections['methods']}")
+            parts.append(f"\nMETHODS:\n{_clean_formula_blocks(sections['methods'])}")
         if sections["conclusions"]:
-            parts.append(f"\nCONCLUSIONES:\n{sections['conclusions']}")
+            parts.append(f"\nCONCLUSIONS:\n{_clean_formula_blocks(sections['conclusions'])}")
 
         result = "\n".join(parts)
         logger.info(
