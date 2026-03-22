@@ -134,7 +134,7 @@ title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
 type: note                             # note | task | idea | inbox | project-index | area-index
-tags: [tag1, tag2]                     # Generados por LLM, kebab-case, idioma del contenido
+tags: [tag1, tag2]                     # Generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: text                       # text | audio | image | link | document
 status: active                         # valores dependen del type
@@ -163,7 +163,14 @@ status: active                         # valores dependen del type
 
 Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
-**`read_status`:** campo opcional, valores `unread | reading | read`. Aplica solo a PDFs y links — contenido externo que el usuario puede o no haber consumido. Al recibir un PDF o link, el bot pregunta `[Ya lo leí]` → `read_status: read`, `[Lo quiero leer]` → `read_status: unread`. Es siempre decisión explícita del usuario, nunca automática. Las notas con `read_status` incluyen una sección `## Notas personales` vacía en el body. Ver spec completa en `docs/frontmatter-schema.md`.
+**`read_status`:** campo opcional, valores `unread | reading | read`. Aplica a cualquier PDF/documento recibido. Al recibirlo, el bot pregunta `[Ya lo leí]` → `read_status: read`, `[Lo quiero leer]` → `read_status: unread`. Es siempre decisión explícita del usuario, nunca automática. Ver spec completa en `docs/frontmatter-schema.md`.
+
+**Papers académicos (PDFs detectados como papers):**
+- Título extraído del texto del PDF (heurística que salta headers de journal, fechas, afiliaciones). Si el metadata del PDF trae título, ese tiene prioridad. El LLM no puede traducirlo ni parafrasearlo.
+- Body estructurado: `## AI Summary` (síntesis LLM en español) + `## Abstract` / `## Methods` / `## Conclusions` (texto original del paper) + `## Personal Notes` (vacío).
+- Fórmulas matemáticas: bloques detectados por número de ecuación `(1)`, `(2)` y sustituidos por `> [mathematical content — see PDF]`.
+- Preview inicial al recibir el PDF: solo título + abstract (sin keywords).
+- El PDF completo siempre se guarda en `03-Resources/` con embed `![[archivo.pdf]]` en la nota.
 
 **`task`:** `priority` (low/medium/high), `project` (opcional — solo metadata, no cambia ubicación), `due_date` (ISO 8601, solo fecha), `scheduled` (ISO 8601, fecha/hora — seteado al agendar), `related`
 
