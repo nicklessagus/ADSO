@@ -711,19 +711,27 @@ async def _process_pdf_after_read_status(
             return
 
         is_paper = detect_paper(text, pdf_meta)
-        classify_content = build_classify_content(text, pdf_meta, is_paper)
 
-        # Para papers: capturar título exacto del PDF antes de que el LLM lo reescriba
+        # Para papers: extraer metadata estructurada antes del LLM
+        # — título, autores y DOI van directo al frontmatter sin pasar por el LLM
         paper_title: Optional[str] = None
+        paper_authors: Optional[str] = None
+        paper_doi: Optional[str] = None
         if is_paper:
             sections = extract_paper_sections(text, pdf_meta)
             paper_title = sections["title"] or pdf_meta.get("title") or None
+            paper_authors = sections["authors"] or None
+            paper_doi = sections["doi"] or pdf_meta.get("doi") or None
+
+        classify_content = build_classify_content(text, pdf_meta, is_paper)
 
         context.user_data["pending_extraction"] = {
             "text": text,
             "classify_content": classify_content,
             "is_paper": is_paper,
             "paper_title": paper_title,
+            "paper_authors": paper_authors,
+            "paper_doi": paper_doi,
             "temp_path": str(tmp_path),
             "original_filename": filename,
             "media_type": "document",
@@ -1468,9 +1476,13 @@ async def _cb_extraction_ok(
 
     if pe.get("read_status"):
         extra_fm["read_status"] = pe["read_status"]
-    # Título exacto del PDF: override del LLM para no perder el título original
+    # Metadata estructurada del paper: va directo al frontmatter sin pasar por el LLM
     if pe.get("paper_title"):
         extra_fm["title"] = pe["paper_title"]
+    if pe.get("paper_authors"):
+        extra_fm["authors"] = pe["paper_authors"]
+    if pe.get("paper_doi"):
+        extra_fm["doi"] = pe["paper_doi"]
 
     await update.callback_query.edit_message_text("Clasificando...")
 

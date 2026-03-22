@@ -373,10 +373,6 @@ def build_classify_content(text: str, metadata: dict, is_paper: bool) -> str:
 
         if sections["title"]:
             parts.append(f"TÍTULO: {sections['title']}")
-        if sections["authors"]:
-            parts.append(f"AUTORES: {sections['authors']}")
-        if sections["doi"]:
-            parts.append(f"DOI: {sections['doi']}")
         if sections["abstract"]:
             parts.append(f"\nABSTRACT:\n{_clean_formula_blocks(sections['abstract'])}")
         if sections["keywords"]:
