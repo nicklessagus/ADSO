@@ -1760,6 +1760,12 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
             fm["media_type"] = note.frontmatter.get("media_type", "text")
             body = payload.get("body", note.body)
 
+            # Re-verificar flujo activo justo antes de enviar (classify() tarda segundos)
+            user_data_now: dict = context.application.user_data.get(chat_id, {})
+            if any(k in user_data_now for k in _PENDING_FLOW_KEYS):
+                logger.info("Reclasificación: flujo iniciado durante classify(), posponiendo.")
+                return
+
             # Mandar preview al usuario — de a uno por cron
             preview_text = build_preview(fm, body, [])
             preview_text = "♻️ <b>Nota reclasificada del Inbox</b>\n\n" + preview_text
