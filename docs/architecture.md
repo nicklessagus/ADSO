@@ -272,8 +272,14 @@ Usuario manda PDF
   [Ya lo leí]  [Lo quiero leer]   ← setea read_status
   │
   pymupdf extrae texto + metadata
-  → bot muestra texto extraído → usuario confirma o corrige
-  → LLM clasifica → flujo de confirmación → vault
+  │
+  ├─ paper detectado → extract_paper_sections()
+  │     título, autores, DOI → extra_fm (bypass LLM)
+  │     abstract + keywords + methods + conclusions → prompt LLM (~3000 chars)
+  └─ genérico → primeros 2500 + últimos 1000 chars → prompt LLM
+  │
+  → bot muestra preview extraído → usuario confirma o corrige
+  → LLM clasifica (área, proyecto, tags, prioridad) → flujo de confirmación → vault
 ```
 
 **Imagen:**
@@ -325,7 +331,7 @@ Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda po
 | | Link arXiv/ADS | PDF adjunto | Búsqueda por nombre |
 |---|---|---|---|
 | **Obtener contenido** | API arXiv/ADS | `pymupdf` extrae texto | Bot busca en arXiv/ADS, usuario confirma |
-| **Metadata** | Estructurada desde la API | Extraída del PDF por LLM | Estructurada desde la API |
+| **Metadata** | Estructurada desde la API | Extraída localmente (título, autores, DOI) — bypass LLM | Estructurada desde la API |
 | **Clasificar** | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos |
 | **Campo origen** | `source_url` | `source_file` | `source_url` |
 | **Archivo físico** | No | Sí (PDF en `03-Resources/`) | No |
