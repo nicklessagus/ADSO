@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -285,6 +286,39 @@ def _has_destination(fm: dict) -> bool:
     if fm.get("project") or fm.get("area"):
         return True
     return False
+
+
+def _extract_name_from_command(text: str, operation: str) -> str:
+    """Extrae el nombre de proyecto/área de un comando de creación.
+
+    Maneja patrones como:
+      - crear proyecto "Introducción a la ciencia de datos"
+      - nuevo proyecto Tesis
+      - crear área investigacion
+
+    Args:
+        text: Texto original del usuario.
+        operation: 'create_project' o 'create_area'.
+
+    Returns:
+        Nombre extraído, o string vacío si no se pudo parsear.
+    """
+    keyword = r"proyecto" if operation == "create_project" else r"[aá]rea"
+    # Con comillas simples o dobles
+    m = re.search(
+        rf'(?:crear?|nuevo?|agrega[r]?|add)\s+{keyword}\s+["\u201c]([^"\u201d]+)["\u201d]',
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    # Sin comillas: todo lo que viene después de la keyword
+    m = re.search(
+        rf'(?:crear?|nuevo?|agrega[r]?|add)\s+{keyword}\s+(.+)',
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]:
@@ -1127,29 +1161,30 @@ async def _cb_intent_create(
         await query.edit_message_text("No hay contenido pendiente.")
         return
 
-    await query.edit_message_text(f"Infiriendo nombre del {type_label}...")
-
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
-    projects, areas = await _get_existing_items(vault_path)
 
-    result = await classify(
-        content=text,
-        media_type="text",
-        existing_projects=projects,
-        existing_areas=areas,
-        disambiguation_threshold=0.5,
-    )
-
-    # Extraer nombre y descripción si el LLM devolvió manage
-    name = ""
+    # Intentar extracción directa del texto antes de llamar al LLM
+    name = _extract_name_from_command(text, operation)
     description = ""
-    if result.get("mode") == "manage":
-        params = result.get("payload", {}).get("params", {})
-        name = (params.get("name") or "").strip()
-        description = (params.get("description") or "").strip()
 
-    # Fallback si el LLM no extrajo nombre
+    if not name:
+        # Caso complejo (ej: "quiero un proyecto para mi tesis") → llamar al LLM
+        await query.edit_message_text(f"Infiriendo nombre del {type_label}...")
+        projects, areas = await _get_existing_items(vault_path)
+        result = await classify(
+            content=text,
+            media_type="text",
+            existing_projects=projects,
+            existing_areas=areas,
+            disambiguation_threshold=0.5,
+        )
+        if result.get("mode") == "manage":
+            params = result.get("payload", {}).get("params", {})
+            name = (params.get("name") or "").strip()
+            description = (params.get("description") or "").strip()
+
+    # Último fallback
     if not name:
         name = text[:60].strip()
 
