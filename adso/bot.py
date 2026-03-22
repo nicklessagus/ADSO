@@ -1293,7 +1293,6 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     msg_id = query.message.message_id
     reclassify_map: dict = context.bot_data.get("reclassify_pending", {})
     inbox_path_str: Optional[str] = None
-    logger.info("_cb_confirm: msg_id=%s user_data_keys=%s", msg_id, list(context.user_data.keys()))
     if msg_id in reclassify_map:
         entry = reclassify_map.pop(msg_id)
         pending = entry["result"]
@@ -1302,7 +1301,6 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         pending = context.user_data.pop("pending_note", None)
 
     if not pending:
-        logger.warning("_cb_confirm: pending_note no encontrado — user_data=%s", dict(context.user_data))
         await query.edit_message_text("No hay nota pendiente.")
         return
 
