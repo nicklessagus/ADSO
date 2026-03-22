@@ -39,11 +39,11 @@ from adso.vault_writer import (
     seed_vault,
 )
 from adso.embeddings import EmbeddingsClient
-from adso.vault_search import find_by_property, get_note_index
+from adso.vault_search import find_by_property, get_note_index, get_all_tags
 from adso.transcriber import transcribe_audio
 from adso.document_extractor import (
     extract_pdf, extract_text_file, is_text_file, is_pdf,
-    detect_paper, build_classify_content,
+    detect_paper, build_classify_content, extract_paper_sections,
 )
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,17 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
             pass
 
     return projects, areas
+
+
+async def _get_existing_tags(vault_path: Path, limit: int = 100) -> list[str]:
+    """Retorna los tags confirmados del vault (sin Inbox), ordenados por frecuencia.
+
+    Excluye 00-Inbox para que solo se propaguen tags de notas ya confirmadas por
+    el usuario. Limita a `limit` tags para no inflar el system prompt.
+    """
+    exclude = ["05-Archive", ".obsidian", ".trash", "00-Inbox"]
+    tag_counts = await get_all_tags(vault_path, exclude_dirs=exclude)
+    return list(tag_counts.keys())[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -679,21 +690,30 @@ async def _process_pdf_after_read_status(
             "metadata": pdf_meta,
         }
 
-        # Mostrar preview del texto extraído
-        snippet = text[:500]
-        if len(text) > 500:
-            snippet += "..."
-        meta_lines = []
-        if pdf_meta.get("title"):
-            meta_lines.append(f"Título: {pdf_meta['title']}")
-        if pdf_meta.get("author"):
-            meta_lines.append(f"Autor: {pdf_meta['author']}")
-        meta_lines.append(f"Páginas: {pdf_meta.get('pages', '?')}")
-        meta_text = "\n".join(meta_lines)
+        # Armar preview según tipo de documento
+        if is_paper:
+            sections = extract_paper_sections(text, pdf_meta)
+            preview_parts = []
+            title = sections["title"] or pdf_meta.get("title", "")
+            if title:
+                preview_parts.append(f"<b>{_esc(title)}</b>")
+            if sections["abstract"]:
+                abstract_snippet = sections["abstract"][:400]
+                if len(sections["abstract"]) > 400:
+                    abstract_snippet += "..."
+                preview_parts.append(f"\n<b>Abstract:</b>\n<i>{_esc(abstract_snippet)}</i>")
+            if sections["keywords"]:
+                preview_parts.append(f"\n<b>Keywords:</b> <i>{_esc(sections['keywords'][:200])}</i>")
+            preview_text = "\n".join(preview_parts) or "<i>(sin secciones detectadas)</i>"
+        else:
+            snippet = text[:500]
+            if len(text) > 500:
+                snippet += "..."
+            pages = pdf_meta.get("pages", "?")
+            preview_text = f"Páginas: {pages}\n\n<i>{_esc(snippet)}</i>"
 
         await query.edit_message_text(
-            f"<b>PDF extraído:</b>\n{_esc(meta_text)}\n\n"
-            f"<i>{_esc(snippet)}</i>\n\n"
+            f"<b>PDF extraído:</b>\n\n{preview_text}\n\n"
             "Confirmá para clasificar o mandá texto corregido.",
             reply_markup=build_extraction_keyboard(),
             parse_mode="HTML",
@@ -729,6 +749,7 @@ async def _classify_and_preview(
     vault_path = settings.vault_path
 
     projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
 
     async def on_retry(attempt: int, max_attempts: int) -> None:
         if update.callback_query:
@@ -741,6 +762,7 @@ async def _classify_and_preview(
         media_type=media_type,
         existing_projects=projects,
         existing_areas=areas,
+        existing_tags=existing_tags,
         disambiguation_threshold=settings.llm.disambiguation_threshold,
         on_retry=on_retry,
     )
@@ -1640,6 +1662,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
 
     # Si ya hay una reclasificación pendiente de confirmación, no mandar más
     pending_map: dict = context.bot_data.get("reclassify_pending", {})
@@ -1672,6 +1695,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
                 media_type=note.frontmatter.get("media_type", "text"),
                 existing_projects=projects,
                 existing_areas=areas,
+                existing_tags=existing_tags,
                 disambiguation_threshold=settings.llm.disambiguation_threshold,
             )
 

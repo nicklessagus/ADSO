@@ -438,6 +438,12 @@ async def get_all_tags(
 3. Acumula frecuencias.
 4. Retorna `{tag: count}` ordenado por frecuencia descendente.
 
+**Uso en clasificación LLM:**
+
+Al clasificar nuevo contenido, `bot.py` llama a `get_all_tags()` excluyendo `00-Inbox` (además de los directorios excluidos por defecto) y pasa la lista al system prompt de Gemini. El LLM debe preferir tags de esa lista antes de inventar nuevos. Solo se incluyen los primeros 100 tags (por frecuencia) para no inflar el prompt.
+
+La exclusión de `00-Inbox` es intencional: los tags de notas pendientes de clasificación son tentativas y no deben propagarse como vocabulario canónico.
+
 ---
 
 ### `find_tasks()`

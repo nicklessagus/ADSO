@@ -67,7 +67,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
 | Extracción web | Gemini nativo (producción) / `trafilatura` (desarrollo) |
-| Extracción PDF | `pymupdf` (texto + metadata) — detección heurística de papers + extracción local de secciones (abstract, keywords, métodos, conclusiones) |
+| Extracción PDF | `pymupdf` (texto + metadata) — detección heurística de papers + extracción local de secciones (abstract, keywords, métodos, conclusiones); preview muestra título + abstract + keywords para papers, texto crudo para genéricos |
 | Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
 | Tasks | Google Tasks API — lista `ADSO` dedicada (escritura/borrado) + lectura de listas externas |
 | Vault | Markdown + YAML Frontmatter en filesystem |
@@ -137,7 +137,7 @@ title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
 type: ""           # note | task | idea | inbox | project-index | area-index
-tags: []           # siempre en inglés, kebab-case
+tags: []           # siempre en inglés, kebab-case; el LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
 status: active     # valores dependen del type — ver docs/frontmatter-schema.md
@@ -171,7 +171,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 
 | Momento | Botones |
 |---|---|
-| **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
+| **PDF recibido** | `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter; aplica a cualquier PDF/documento |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
 | **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
