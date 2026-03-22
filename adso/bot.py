@@ -955,10 +955,12 @@ async def _handle_manage_missing_fields(
     pending = context.user_data["pending_operation"]
     params = pending["payload"]["params"]
 
-    # Intentar parsear "nombre — descripción" o "nombre: descripción"
-    if " — " in text:
-        parts = text.split(" — ", 1)
-        name, description = parts[0].strip(), parts[1].strip()
+    # Intentar parsear "nombre — descripción" (em dash, en dash o guión simple)
+    _SEP = re.compile(r"\s+[—–\-]\s+")
+    m = _SEP.search(text)
+    if m:
+        name = text[:m.start()].strip()
+        description = text[m.end():].strip()
     elif ": " in text and not params.get("name"):
         parts = text.split(": ", 1)
         name, description = parts[0].strip(), parts[1].strip()
@@ -966,13 +968,10 @@ async def _handle_manage_missing_fields(
         name = text.strip()
         description = ""
 
-    # Siempre actualizar — permite corrección tanto de campos vacíos como de valores inferidos
     if name:
         params["name"] = name
     if description:
         params["description"] = description
-    elif not params.get("description"):
-        params["description"] = name  # fallback: usar nombre como descripción
 
     context.user_data.pop("manage_missing_fields", None)
     await _handle_manage(update, context, pending)
