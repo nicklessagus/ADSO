@@ -23,20 +23,54 @@ Define la estructura de metadatos que el bot genera automáticamente para cada n
 ```yaml
 ---
 title: "Título descriptivo de la nota"
-date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
-date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
+date_created: 2025-01-15T14:30:00     # ISO 8601, generado por el bot — sin comillas para tipo Date & time en Obsidian
+date_modified: 2025-01-15T14:30:00    # ISO 8601, actualizado en cada edición — sin comillas
 type: note                              # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
 media_type: text                       # text | audio | image | link | document — origen del contenido, seteado automáticamente
-status: active                         # valores dependen del type — ver tabla abajo
-source_file: "archivo.pdf"            # opcional — nombre del archivo original cuando el input es un documento adjunto
+status: active                         # Text enum — valores dependen del type — ver tabla abajo
+source_file: "[[archivo.pdf]]"        # opcional — wikilink al archivo en 03-Resources/, clickeable en Properties de Obsidian
 source_url: "https://..."             # opcional — URL original cuando el input es un link
-read_status: unread                    # opcional — unread | reading | read (ver sección read_status abajo)
+read_status: unread                    # Text enum — unread | reading | read (ver sección read_status abajo)
 ---
 ```
 
 `source_file` y `source_url` son mutuamente opcionales y pueden coexistir (ej: un paper del que se tiene el PDF y el link).
+
+---
+
+## Tipado nativo de Obsidian Properties
+
+Reglas de serialización para máxima compatibilidad con la UI de Properties de Obsidian.
+
+- **Fechas sin comillas (`Date & time` / `Date`):** Los campos `date_created`, `date_modified`, `due_date` y `scheduled` se escriben **sin comillas** en el YAML. Sin comillas, Obsidian los reconoce como tipo `Date & time` o `Date` y habilita el widget de calendario. Con comillas los trata como `Text` plano. Esto es **crítico** — el bot siempre genera estos campos sin comillas.
+  ```yaml
+  # Correcto — Obsidian reconoce como Date & time / Date
+  date_created: 2025-01-15T14:30:00
+  due_date: 2025-02-01
+
+  # Incorrecto — Obsidian lo trata como Text
+  date_created: "2025-01-15T14:30:00"
+  ```
+
+- **`source_file` como wikilink:** El valor usa formato `"[[nombre.pdf]]"` (con comillas dobles porque contiene `[[`). Esto permite que Obsidian lo muestre como link clickeable en Properties, apuntando al archivo en `03-Resources/`.
+  ```yaml
+  source_file: "[[paper.pdf]]"
+  ```
+
+- **Links en listas — siempre entre comillas dobles:** En campos `related`, los wikilinks dentro de arrays YAML **deben ir entre comillas dobles**. Sin ellas, el `[[` rompe el parseo de YAML y Obsidian muestra error en el frontmatter.
+  ```yaml
+  # Correcto
+  related: ["[[otra-nota]]", "[[paper-similar]]"]
+
+  # Incorrecto — error de parseo YAML
+  related: [[[otra-nota]], [[paper-similar]]]
+  ```
+
+- **`project` y `area` como `Text` plano:** Contienen el nombre de la carpeta (ej: `tesis`, `investigacion`) y deben mantenerse como texto plano, **no** como wikilinks. Esto permite consultas y agrupaciones limpias en Dataview (`WHERE project = "tesis"`, `GROUP BY area`).
+
+- **`read_status`, `priority` y `status` como `Text` (enum):** Mapean al tipo `Text` nativo de Obsidian, no a `Checkbox`. Son enums de múltiples estados y Obsidian ofrece autocompletado para sus valores en la UI de Properties cuando el tipo es `Text`.
 
 ---
 
@@ -76,11 +110,11 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 ```yaml
 ---
 type: note
-project: "tesis"                        # nombre del proyecto (carpeta) — opcional
-section: "experimentos"                 # sección dentro del proyecto — opcional, solo si tiene proyecto
-area: "docencia"                        # opcional — solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
+project: tesis                          # Text plano — nombre del proyecto (carpeta) — opcional
+section: experimentos                   # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
+area: docencia                          # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
 summary: "Resumen generado por LLM"    # para notas largas
-related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
+related: ["[[otra-nota]]"]             # links siempre entre comillas dobles dentro del array
 ---
 ```
 > Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el bot pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
@@ -103,21 +137,22 @@ doi: "10.XXXX/..."                                # extraído localmente del PDF
 keywords: ["time-series", "transformer", "self-supervised"]  # palabras clave del paper, idioma original
 relevance: "Para qué sirve este paper"            # provisto por el usuario o inferido por LLM
 context: "Contexto adicional de uso"              # opcional, ej: "comparar con modelo actual"
-priority: medium                                  # low | medium | high — inferido o explícito
+priority: medium                                  # Text enum — low | medium | high — inferido o explícito
 # Extraídos localmente del PDF + estructurados por LLM:
 contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
 methods: ["transformer", "contrastive-learning"]  # métodos/técnicas usadas
 dataset: ["ImageNet", "COCO"]                     # opcional
 conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
-related: ["[[otra-nota]]", "[[paper-similar]]"]   # sugeridos por ChromaDB, elegidos por el usuario
+related: ["[[otra-nota]]", "[[paper-similar]]"]   # links siempre entre comillas dobles dentro del array
 ---
 ```
 
 **Body de una nota de paper** — estructura fija generada por el LLM:
 
 ```markdown
-## AI Summary
-Síntesis en español más amplia que el abstract: qué hace el paper, cómo y qué concluye.
+> [!summary] AI Summary
+> Síntesis en español más amplia que el abstract: qué hace el paper, cómo y qué concluye.
+> Cada línea del summary generado por la IA empieza con "> ".
 
 ## Abstract
 [Texto original del abstract, en el idioma del paper]
@@ -131,19 +166,29 @@ Síntesis en español más amplia que el abstract: qué hace el paper, cómo y q
 ## Personal Notes
 ```
 
-El `## AI Summary` es generado por el LLM en español. Las secciones restantes preservan el idioma original del paper para no perder precisión técnica ni introducir ruido en los embeddings multilingüe de ChromaDB.
+**Regla de dos voces:** el callout `[!summary]` marca la voz del bot (contenido generado o sintetizado por la IA). Abstract, Methods y Conclusions van en Markdown estándar para preservar la voz del autor y diferenciarla visualmente. Las secciones en idioma original no se traducen para no introducir ruido en los embeddings multilingüe de ChromaDB.
+
+**Modo degradado:** si el LLM no responde, el contenido crudo queda en `00-Inbox/` envuelto en un callout colapsable:
+
+```markdown
+> [!warning]- Modo degradado: Clasificación pendiente
+> El LLM no respondió. Contenido original sin procesar:
+> {texto original del usuario}
+```
+
+El cron de reclasificación extrae el contenido original del callout antes de enviarlo al LLM.
 
 ### `task`
 ```yaml
 ---
 type: task
-status: pending                         # pending | in-progress | done
-priority: medium                        # low | medium | high — inferido o explícito
-area: "investigacion"                   # determina la carpeta destino (02-Areas/{area}/) — inferido por LLM
-project: "tesis"                        # opcional, máximo un proyecto (string, no lista). Solo metadata — no cambia la ubicación ni la lista destino
-due_date: "2025-02-01"                  # opcional — fecha límite, ISO 8601 (solo fecha)
-scheduled: "2025-01-28T10:00:00"        # opcional — fecha/hora agendada en Calendar, seteado automáticamente al agendar
-related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el usuario
+status: pending                         # Text enum — pending | in-progress | done
+priority: medium                        # Text enum — low | medium | high — inferido o explícito
+area: investigacion                     # Text plano — determina la carpeta destino (02-Areas/{area}/) — inferido por LLM
+project: tesis                          # Text plano — opcional, máximo un proyecto. Solo metadata — no cambia ubicación ni lista destino
+due_date: 2025-02-01                    # Date — sin comillas, ISO 8601 (solo fecha)
+scheduled: 2025-01-28T10:00:00         # Date & time — sin comillas, ISO 8601
+related: ["[[otra-nota]]"]             # links siempre entre comillas dobles dentro del array
 ---
 ```
 > Las tasks se ubican en `02-Areas/{area}/`. El campo `project` es metadata, no determina la carpeta destino.
@@ -155,10 +200,10 @@ related: ["[[otra-nota]]"]             # sugeridos por ChromaDB, elegidos por el
 ```yaml
 ---
 type: idea
-status: raw                             # raw | developing | mature
-area: "investigacion"                   # opcional — determina la carpeta destino (02-Areas/{area}/). Si no hay área clara → 00-Inbox/
-priority: low                           # low | medium | high — inferido o explícito
-related: ["[[nota-relacionada]]"]       # opcional
+status: raw                             # Text enum — raw | developing | mature
+area: investigacion                     # Text plano — opcional, determina la carpeta destino (02-Areas/{area}/). Si no hay área clara → 00-Inbox/
+priority: low                           # Text enum — low | medium | high — inferido o explícito
+related: ["[[nota-relacionada]]"]       # links siempre entre comillas dobles dentro del array
 ---
 ```
 
@@ -170,9 +215,9 @@ Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea
 ---
 type: project-index
 title: "Tesis doctoral"
-date_created: "2025-01-01"
-date_modified: "2025-01-15"
-status: active                          # active | on-hold | completed
+date_created: 2025-01-01               # Date — sin comillas
+date_modified: 2025-01-15              # Date — sin comillas
+status: active                          # Text enum — active | on-hold | completed
 description: "Papers de doctorado, experimentos de ML, escritura académica."  # scope de clasificación — requerido
 sections: [introduccion, experimentos, trabajos-futuros, papers]
 tags: [tesis, doctorado]
@@ -210,8 +255,8 @@ Cada área tiene un `_index.md` en su raíz. Se genera automáticamente al crear
 ---
 type: area-index
 title: "Docencia"
-date_created: "2025-01-01"
-date_modified: "2025-01-15"
+date_created: 2025-01-01               # Date — sin comillas
+date_modified: 2025-01-15              # Date — sin comillas
 description: "Preparación de clases, guías de ejercicios, consultas de alumnos, material didáctico."  # requerido — usado por el LLM para clasificar
 source: system
 ---

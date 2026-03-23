@@ -10,7 +10,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -48,6 +48,14 @@ class NoteData:
 # Constantes de validación
 # ---------------------------------------------------------------------------
 
+# Campos de fecha que deben serializarse como tipo nativo YAML (sin comillas)
+# para que Obsidian los reconozca como Date & time / Date en Properties.
+DATE_FIELDS = {"date_created", "date_modified", "due_date", "scheduled"}
+
+# Patrones para detectar strings ISO 8601
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
 VALID_TYPES = {"note", "task", "idea", "inbox", "project-index", "area-index"}
 
 VALID_STATUS: dict[str, set[str]] = {
@@ -78,18 +86,36 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _make_filename(title: str, date: Optional[str] = None) -> str:
+def _parse_date_value(value: str) -> "date | datetime | str":
+    """Convierte un string ISO 8601 a objeto date/datetime para serialización YAML sin comillas.
+
+    Devuelve date para fechas sin hora (YYYY-MM-DD) y datetime para fechas con hora.
+    Los objetos nativos son serializados por PyYAML como timestamps YAML sin comillas,
+    lo que permite que Obsidian los reconozca como tipo Date & time en Properties.
+    Devuelve el valor original si no coincide con ningún patrón.
+    """
+    if _DATE_ONLY_RE.match(value):
+        return date.fromisoformat(value)
+    if _DATETIME_RE.match(value):
+        return datetime.fromisoformat(value)
+    return value
+
+
+def _make_filename(title: str, date_val: "Optional[str | date | datetime]" = None) -> str:
     """Genera nombre de archivo: YYYY-MM-DD-slug.md.
 
     Args:
         title: Título de la nota.
-        date: Fecha ISO 8601 para el prefijo. Si None, usa hoy.
+        date_val: Fecha ISO 8601 (str) o date/datetime para el prefijo. Si None, usa hoy.
 
     Returns:
         Nombre de archivo como string.
     """
-    if date:
-        prefix = date[:10]  # YYYY-MM-DD
+    if date_val:
+        if isinstance(date_val, (datetime, date)):
+            prefix = date_val.strftime("%Y-%m-%d")
+        else:
+            prefix = str(date_val)[:10]  # YYYY-MM-DD desde string ISO
     else:
         prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -166,8 +192,21 @@ def _unique_path(dest_dir: Path, filename: str) -> Path:
 
 
 def _clean_frontmatter(fm: dict) -> dict:
-    """Limpia el frontmatter: remueve campos None para compatibilidad con Obsidian."""
-    return {k: v for k, v in fm.items() if v is not None}
+    """Limpia el frontmatter: remueve None y convierte fechas a objetos nativos.
+
+    Los campos de DATE_FIELDS se convierten de strings ISO 8601 a objetos date/datetime
+    para que PyYAML los serialice como timestamps YAML sin comillas, habilitando el
+    tipo Date & time en la UI de Properties de Obsidian.
+    """
+    result = {}
+    for k, v in fm.items():
+        if v is None:
+            continue
+        if k in DATE_FIELDS and isinstance(v, str):
+            result[k] = _parse_date_value(v)
+        else:
+            result[k] = v
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -465,8 +504,9 @@ async def update_wikilinks(
     if new_content != raw:
         # Actualizar date_modified en frontmatter
         post = frontmatter.loads(new_content)
-        post.metadata["date_modified"] = _now_iso()
-        output = frontmatter.dumps(post)
+        clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": _now_iso()})
+        final_post = frontmatter.Post(post.content, **clean_meta)
+        output = frontmatter.dumps(final_post)
         await asyncio.to_thread(note_path.write_text, output, "utf-8")
         logger.info("Wikilinks actualizados en: %s", note_path)
 

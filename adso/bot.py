@@ -28,7 +28,7 @@ from telegram.ext import (
 )
 
 from adso.config import Settings, load_settings
-from adso.llm_client import classify, check_injection_risk, LLMResponseError
+from adso.llm_client import classify, check_injection_risk, extract_original_from_degraded, LLMResponseError
 from adso.security import authorized
 from adso.vault_writer import (
     GitBackup,
@@ -1332,7 +1332,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
                 vault_path,
             )
             body += f"\n\n![[{res_path.name}]]"
-            fm.setdefault("source_file", res_path.name)
+            fm.setdefault("source_file", f"[[{res_path.name}]]")
             Path(resource_file["temp_path"]).unlink(missing_ok=True)
         except Exception as e:
             logger.warning("Error guardando recurso: %s", e)
@@ -1822,7 +1822,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
 
             result = await classify(
-                content=note.body,
+                content=extract_original_from_degraded(note.body),
                 media_type=note.frontmatter.get("media_type", "text"),
                 existing_projects=projects,
                 existing_areas=areas,
@@ -1848,7 +1848,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
             fm["date_created"] = note.frontmatter.get("date_created", "")
             fm["source"] = "telegram"
             fm["media_type"] = note.frontmatter.get("media_type", "text")
-            body = payload.get("body", note.body)
+            body = payload.get("body", extract_original_from_degraded(note.body))
 
             # Re-verificar flujo activo justo antes de enviar (classify() tarda segundos)
             user_data_now: dict = context.application.user_data.get(chat_id, {})

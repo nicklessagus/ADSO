@@ -758,11 +758,24 @@ El writer usa `python-frontmatter` que a su vez usa PyYAML. Reglas críticas:
 | Strings con `:` | PyYAML los quotea automáticamente: `title: "Part 1: Introduction"` |
 | Strings que parecen booleans (`yes`, `no`, `true`, `on`) | Forzar quotes. No usar como valores de campos — ADSO usa `active/pending/done` que no tienen este problema |
 | Tags en frontmatter | Sin `#`: `tags: [paper, ml]`, **no** `tags: [#paper, #ml]`. Obsidian agrega `#` al renderizar |
-| Wikilinks en valores YAML | Requieren quotes: `related: ["[[nota-a]]", "[[nota-b]]"]` |
+| Wikilinks en valores YAML | Requieren quotes: `related: ["[[nota-a]]", "[[nota-b]]"]` — sin quotes el `[[` rompe el parseo |
 | Listas | Ambas formas válidas: `tags: [a, b]` (inline) y bloque con `- a` |
 | Campos nulos | Omitir del frontmatter en vez de escribir `campo: null` |
 | `---` delimitadores | Deben ser la primera y última línea del bloque. Primera línea del archivo debe ser `---` |
 | Propiedades anidadas | No usar — Obsidian no las soporta en su UI de Properties |
+
+**Tipado nativo de Obsidian Properties — reglas críticas:**
+
+| Campo | Tipo Obsidian | Regla |
+|---|---|---|
+| `date_created`, `date_modified`, `scheduled` | `Date & time` | **Sin comillas.** `_clean_frontmatter()` convierte el string ISO a objeto `datetime` antes del dump — PyYAML lo serializa como timestamp YAML sin comillas. Con comillas, Obsidian lo trata como Text y no muestra el widget de calendario. |
+| `due_date` | `Date` | **Sin comillas.** `_clean_frontmatter()` convierte a objeto `date` (solo fecha). |
+| `source_file` | `List of links` | Valor como wikilink: `"[[archivo.pdf]]"`. Permite navegación directa desde Properties. |
+| `related` | `List of links` | Links siempre entre comillas dobles dentro del array: `["[[nota]]"]`. |
+| `project`, `area` | `Text` | Texto plano (nombre de carpeta). **No** wikilinks — facilita `WHERE project = "x"` en Dataview. |
+| `read_status`, `priority`, `status` | `Text` (enum) | Valores de texto, no Checkbox. Obsidian ofrece autocompletado en la UI de Properties. |
+
+La conversión de fechas ocurre en `_clean_frontmatter()` en `vault_writer.py` y aplica a todos los paths de escritura (`create_note`, `append_to_note`, `set_property`, `update_wikilinks`).
 
 ### Nombres de archivo
 
