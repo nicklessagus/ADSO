@@ -34,6 +34,28 @@ Una nota degradada necesita dos cosas para estar completa:
 
 Estas dos cosas son independientes y pueden resolverse en distinto orden.
 
+### Pérdida de contexto del usuario en modo degradado
+
+Cuando el usuario manda un documento (PDF, link) acompañado de texto
+("quiero leer esto esta semana", "esto es urgente"), ese texto es la señal
+que el LLM usa para inferir `priority`, `relevance` y `context`. En modo
+degradado, ese mensaje se pierde — solo se guarda el contenido extraído del
+documento.
+
+**Solución:** guardar el mensaje del usuario en el campo `user_context` del
+frontmatter al caer en modo degradado. Cuando el LLM reclasifique, ese campo
+se incluye en el prompt junto con el contenido del documento.
+
+```yaml
+user_context: "quiero leer esto esta semana"  # opcional — mensaje original del usuario
+```
+
+- Solo se guarda si el usuario mandó texto junto con el archivo
+- Se incluye en el prompt de reclasificación como contexto adicional
+- No se muestra en el preview al usuario (es metadata interna)
+- Se elimina del frontmatter una vez que la nota es clasificada (los campos
+  inferidos de él — `priority`, `relevance` — quedan en el frontmatter final)
+
 ---
 
 ## Estados posibles de una nota degradada
@@ -76,12 +98,14 @@ silenciosamente cuando el LLM vuelve a estar disponible.
 Condición: `status: pending-classification` AND (`project` OR `area`) seteado.
 
 1. Extrae el contenido original del callout de warning con `extract_original_from_degraded()`
-2. Llama al LLM para clasificar
-3. Si el LLM responde:
+2. Si existe `user_context` en el frontmatter, lo agrega al prompt de clasificación
+3. Llama al LLM para clasificar
+4. Si el LLM responde:
    - Preserva el `project`/`area` que el usuario asignó — no lo sobreescribe
-   - Toma del resultado del LLM: `tags`, `summary`, `title` (si está vacío), campos académicos si aplica
+   - Toma del resultado del LLM: `tags`, `summary`, `title` (si está vacío), `priority`, `relevance`, campos académicos si aplica
    - Genera el body limpio (con `[!summary]` callout para papers, Markdown libre para el resto)
    - Actualiza el frontmatter: setea `status` al valor correcto para el tipo (`active`, `pending`, `raw`)
+   - Elimina `user_context` del frontmatter (ya fue consumido por el LLM)
    - Mueve la nota al destino (`01-Projects/{project}/` o `02-Areas/{area}/`)
    - Envía notificación breve al usuario: `"✓ Nota clasificada: {título} → {destino}"`
 4. Si el LLM falla de nuevo: deja la nota como está, reintenta en el próximo ciclo
@@ -143,8 +167,8 @@ Si `inbox_pendiente == 0`: no muestra la sección de inbox.
 
 | Archivo | Cambio |
 |---|---|
-| `adso/bot.py` | Refactorizar `reclassify_inbox` según Caso A/B; agregar comando `/clasificar`; actualizar `_handle_status` con desglose de inbox |
-| `adso/llm_client.py` | Sin cambios estructurales — `extract_original_from_degraded` ya existe |
+| `adso/bot.py` | Refactorizar `reclassify_inbox` según Caso A/B; guardar `user_context` en modo degradado; agregar comando `/clasificar`; actualizar `_handle_status` con desglose de inbox |
+| `adso/llm_client.py` | `build_system_prompt` acepta `user_context` opcional e lo inyecta en el prompt; `classify()` acepta parámetro `user_context` |
 | `adso/vault_writer.py` | Sin cambios — `set_property`, `move_note` y `create_note` ya cubren todo |
 
 ---
