@@ -16,6 +16,7 @@ from adso.constants import (
     CB_CHOOSE_PROJECT,
     CB_CONFIRM,
     CB_CORRECT,
+    CB_DESCRIBE,
     CB_DEST_AREA_PREFIX,
     CB_DEST_INBOX,
     CB_DEST_PROJECT_PREFIX,
@@ -28,11 +29,13 @@ from adso.constants import (
     CB_INTENT_SAVE,
     CB_MANAGE_CANCEL,
     CB_MANAGE_CONFIRM,
+    CB_OCR,
     CB_READ_STATUS_READ,
     CB_READ_STATUS_UNREAD,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
+    CB_VISION,
 )
 from adso.vault_search import find_by_property
 
@@ -262,3 +265,20 @@ def build_save_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
         InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
     ]])
+
+
+def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para PDF escaneado sin texto extraíble.
+
+    OCR y Gemini Vision son placeholders (Fase 4). Describir está implementado.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("OCR", callback_data=CB_OCR),
+            InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION),
+        ],
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
+            InlineKeyboardButton("Describir", callback_data=CB_DESCRIBE),
+        ],
+    ])

@@ -20,6 +20,7 @@ from adso.constants import (
     CB_CLASIFICAR_INBOX,
     CB_CONFIRM,
     CB_CORRECT,
+    CB_DESCRIBE,
     CB_DEST_AREA_PREFIX,
     CB_DEST_INBOX,
     CB_DEST_PROJECT_PREFIX,
@@ -32,11 +33,13 @@ from adso.constants import (
     CB_INTENT_SAVE,
     CB_MANAGE_CANCEL,
     CB_MANAGE_CONFIRM,
+    CB_OCR,
     CB_READ_STATUS_READ,
     CB_READ_STATUS_UNREAD,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
+    CB_VISION,
 )
 from adso.handlers.capture import (
     _cb_cancel,
@@ -176,8 +179,22 @@ async def handle_callback(
         await _cb_extraction_ok(update, context)
 
     elif data == CB_EXTRACTION_CANCEL:
-        _cleanup_pending(context, "pending_extraction", "pending_description")
+        _cleanup_pending(context, "pending_extraction", "pending_description", "pending_fallback_pdf")
         await query.edit_message_text("Cancelado.")
+
+    elif data == CB_DESCRIBE:
+        pdf_info = context.user_data.pop("pending_fallback_pdf", None)
+        if pdf_info:
+            context.user_data["pending_description"] = pdf_info
+            await query.edit_message_text(
+                "Describí el contenido del PDF para clasificarlo:"
+            )
+
+    elif data == CB_OCR:
+        await query.answer("OCR disponible en próxima versión.", show_alert=True)
+
+    elif data == CB_VISION:
+        await query.answer("Gemini Vision disponible en próxima versión.", show_alert=True)
 
     elif data == CB_CLASIFICAR_INBOX:
         await handle_clasificar(update, context)

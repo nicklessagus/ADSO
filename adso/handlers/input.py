@@ -27,6 +27,7 @@ from adso.document_extractor import (
 from adso.keyboards import (
     _esc,
     build_extraction_keyboard,
+    build_fallback_pdf_keyboard,
     build_intent_keyboard,
     build_read_status_keyboard,
     build_save_keyboard,
@@ -341,7 +342,7 @@ async def _process_pdf_after_read_status(
         text, pdf_meta = await extract_pdf(tmp_path)
 
         if not text.strip():
-            context.user_data["pending_description"] = {
+            context.user_data["pending_fallback_pdf"] = {
                 "temp_path": str(tmp_path),
                 "original_filename": filename,
                 "media_type": "document",
@@ -349,11 +350,8 @@ async def _process_pdf_after_read_status(
                 "pdf_metadata": pdf_meta,
             }
             await query.edit_message_text(
-                "No pude extraer texto del PDF (puede ser escaneado).\n"
-                "Describí el contenido para clasificarlo.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
-                ]),
+                "No pude extraer texto del PDF (puede ser escaneado).",
+                reply_markup=build_fallback_pdf_keyboard(),
             )
             return
 

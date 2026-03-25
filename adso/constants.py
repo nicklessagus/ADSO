@@ -29,6 +29,8 @@ CB_READ_STATUS_UNREAD = "read:unread"
 CB_EXTRACTION_OK = "extraction:ok"
 CB_EXTRACTION_CANCEL = "extraction:cancel"
 CB_DESCRIBE = "describe"
+CB_OCR = "ocr"
+CB_VISION = "vision"
 
 # Prefijos
 CB_DEST_AREA_PREFIX = "dest:area:"
