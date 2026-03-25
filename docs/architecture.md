@@ -531,7 +531,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 
 **Convención de orden:** en teclados con `[Cancelar]` y `[Confirmar]` en la misma fila, `[Cancelar]` siempre va a la izquierda (más alejado del pulgar) y `[Confirmar]` a la derecha. Las acciones intermedias (Reubicar, Corregir) van en el centro.
 
-**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución (`pending_note`, `pending_raw_content`, `pending_transcript` sin `awaiting_correction`, `pending_extraction`), el bot rechaza cualquier nuevo mensaje (texto, audio, documento) con un aviso. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat.
+**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución (`pending_note`, `pending_raw_content`, `pending_transcript` sin `awaiting_correction`, `pending_extraction`), el bot rechaza cualquier nuevo mensaje (texto, audio, documento) y comandos que arranquen flujos nuevos (`/clasificar`) con un aviso. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat. Comandos de solo lectura (`/status`) no se bloquean.
 
 ### Desambiguación de intención
 
