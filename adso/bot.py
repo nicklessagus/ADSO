@@ -250,13 +250,15 @@ def build_extraction_keyboard() -> InlineKeyboardMarkup:
 
 
 async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
-    """Construye teclado con áreas existentes."""
+    """Construye teclado con áreas existentes. Si no hay áreas, solo muestra Volver."""
     areas = await find_by_property("type", "area-index", vault_path)
     buttons = [
         InlineKeyboardButton(area.path.parent.name, callback_data=f"{CB_DEST_AREA_PREFIX}{area.path.parent.name}")
         for area in areas
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    if not buttons:
+        rows.append([InlineKeyboardButton("(sin áreas — creá una con 'nueva área X')", callback_data=CB_BACK)])
     rows.append([
         InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
@@ -265,13 +267,15 @@ async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
 
 
 async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
-    """Construye teclado con proyectos existentes."""
+    """Construye teclado con proyectos existentes. Si no hay proyectos, solo muestra Volver."""
     projects = await find_by_property("type", "project-index", vault_path)
     buttons = [
         InlineKeyboardButton(proj.path.parent.name, callback_data=f"{CB_DEST_PROJECT_PREFIX}{proj.path.parent.name}")
         for proj in projects
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    if not buttons:
+        rows.append([InlineKeyboardButton("(sin proyectos — creá uno con 'nuevo proyecto X')", callback_data=CB_BACK)])
     rows.append([
         InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
@@ -868,9 +872,19 @@ async def _classify_and_preview(
         )
         return
 
+    # Solo procesamos modo captura — query/manage no tienen frontmatter
+    if mode != "capture":
+        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
+        await reply_fn("No entendí el mensaje como una nota para guardar. Intentá de nuevo.")
+        return
+
     # Captura normal
     payload = result["payload"]
-    fm = payload["frontmatter"]
+    fm = payload.get("frontmatter")
+    if not isinstance(fm, dict):
+        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
+        await reply_fn("Respuesta inesperada del LLM. Intentá de nuevo.")
+        return
     suggested_links: list[str] = []
 
     # Para texto libre el body es siempre el texto original del usuario,
@@ -1268,19 +1282,11 @@ async def handle_callback(
         project = data[len(CB_DEST_PROJECT_PREFIX):]
         await _cb_dest(query, context, dest_type="project", dest_name=project)
     elif data == CB_CHOOSE_AREA:
-        areas = await find_by_property("type", "area-index", vault_path)
-        if not areas:
-            await query.answer("No hay áreas creadas. Creá una primero.", show_alert=True)
-        else:
-            keyboard = await build_area_selector(vault_path)
-            await query.edit_message_reply_markup(reply_markup=keyboard)
+        keyboard = await build_area_selector(vault_path)
+        await query.edit_message_reply_markup(reply_markup=keyboard)
     elif data == CB_CHOOSE_PROJECT:
-        projects = await find_by_property("type", "project-index", vault_path)
-        if not projects:
-            await query.answer("No hay proyectos creados. Creá uno primero.", show_alert=True)
-        else:
-            keyboard = await build_project_selector(vault_path)
-            await query.edit_message_reply_markup(reply_markup=keyboard)
+        keyboard = await build_project_selector(vault_path)
+        await query.edit_message_reply_markup(reply_markup=keyboard)
     elif data == CB_BACK:
         pending = context.user_data.get("pending_note")
         if pending:
