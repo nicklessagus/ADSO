@@ -70,6 +70,7 @@ CB_CLASIFICAR_INBOX = "clasificar:inbox"
 # Audio / documento
 CB_TRANSCRIPT_OK = "transcript:ok"
 CB_TRANSCRIPT_CANCEL = "transcript:cancel"
+CB_TRANSCRIPT_CORRECT = "transcript:correct"
 CB_READ_STATUS_READ = "read:read"
 CB_READ_STATUS_UNREAD = "read:unread"
 CB_EXTRACTION_OK = "extraction:ok"
@@ -136,7 +137,7 @@ def build_preview(
     snippet = body[:200].strip()
     if len(body) > 200:
         snippet += "..."
-    lines.append(f"\n<i>{_esc(snippet)}</i>")
+    lines.append(f"\n<code>{_esc(snippet)}</code>")
 
     return "\n".join(lines)
 
@@ -167,7 +168,7 @@ def build_capture_keyboard(
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
-                InlineKeyboardButton("Corregir", callback_data=CB_CORRECT),
+                InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
                 InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
             ]
         ])
@@ -220,10 +221,11 @@ def build_manage_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_transcript_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para confirmar/cancelar transcripción de audio."""
+    """Teclado para confirmar/corregir/cancelar transcripción de audio."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Confirmar transcripción", callback_data=CB_TRANSCRIPT_OK),
+            InlineKeyboardButton("Confirmar", callback_data=CB_TRANSCRIPT_OK),
+            InlineKeyboardButton("Corregir", callback_data=CB_TRANSCRIPT_CORRECT),
             InlineKeyboardButton("Cancelar", callback_data=CB_TRANSCRIPT_CANCEL),
         ]
     ])
@@ -257,8 +259,6 @@ async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
         for area in areas
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    if not buttons:
-        rows.append([InlineKeyboardButton("(sin áreas — creá una con 'nueva área X')", callback_data=CB_BACK)])
     rows.append([
         InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
@@ -274,8 +274,6 @@ async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
         for proj in projects
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    if not buttons:
-        rows.append([InlineKeyboardButton("(sin proyectos — creá uno con 'nuevo proyecto X')", callback_data=CB_BACK)])
     rows.append([
         InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
@@ -436,15 +434,25 @@ async def handle_text(
     vault_path = settings.vault_path
     text = update.message.text
 
-    # Si hay transcripción pendiente, tratar como corrección del transcript
-    if context.user_data.get("pending_transcript"):
+    # Si hay transcripción pendiente esperando corrección, editar el mensaje original
+    if context.user_data.get("pending_transcript", {}).get("awaiting_correction"):
         pt = context.user_data["pending_transcript"]
         pt["text"] = text
-        await update.message.reply_text(
-            f"<b>Transcripción corregida.</b>\n\n<i>{_esc(text[:500])}</i>",
-            reply_markup=build_transcript_keyboard(),
-            parse_mode="HTML",
-        )
+        pt["awaiting_correction"] = False
+        snippet = text[:500] + ("..." if len(text) > 500 else "")
+        msg_id = pt.get("msg_id")
+        if msg_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.message.chat_id,
+                    message_id=msg_id,
+                    text=f"<b>Transcripción corregida:</b>\n\n<code>{_esc(snippet)}</code>",
+                    reply_markup=build_transcript_keyboard(),
+                    parse_mode="HTML",
+                )
+                await update.message.delete()
+            except Exception:
+                pass
         return
 
     # Si hay extracción pendiente, tratar como corrección del texto extraído
@@ -568,15 +576,13 @@ async def handle_audio(
         }
 
         # Mostrar transcripción para confirmación
-        snippet = text[:500]
-        if len(text) > 500:
-            snippet += "..."
-        await msg.reply_text(
-            f"<b>Transcripción:</b>\n\n<i>{_esc(snippet)}</i>\n\n"
-            "Si es correcto, confirmá. Si no, mandá el texto corregido.",
+        snippet = text[:500] + ("..." if len(text) > 500 else "")
+        sent = await msg.reply_text(
+            f"<b>Transcripción:</b>\n\n<code>{_esc(snippet)}</code>",
             reply_markup=build_transcript_keyboard(),
             parse_mode="HTML",
         )
+        context.user_data["pending_transcript"]["msg_id"] = sent.message_id
 
     except Exception as e:
         logger.error("Error transcribiendo audio: %s", e)
@@ -655,7 +661,7 @@ async def handle_document(
                 snippet += "..."
             await msg.reply_text(
                 f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                f"<i>{_esc(snippet)}</i>\n\n"
+                f"<code>{_esc(snippet)}</code>\n\n"
                 "Confirmá para clasificar o mandá texto corregido.",
                 reply_markup=build_extraction_keyboard(),
                 parse_mode="HTML",
@@ -767,7 +773,7 @@ async def _process_pdf_after_read_status(
             if len(text) > 500:
                 snippet += "..."
             pages = pdf_meta.get("pages", "?")
-            preview_text = f"Páginas: {pages}\n\n<i>{_esc(snippet)}</i>"
+            preview_text = f"Páginas: {pages}\n\n<code>{_esc(snippet)}</code>"
 
         await query.edit_message_text(
             f"<b>PDF extraído:</b>\n\n{preview_text}\n\n"
@@ -790,6 +796,7 @@ async def _classify_and_preview(
     resource_file: Optional[dict] = None,
     extra_fm: Optional[dict] = None,
     user_context: Optional[str] = None,
+    force_capture: bool = False,
 ) -> None:
     """Clasifica texto extraído y muestra preview.
 
@@ -805,6 +812,8 @@ async def _classify_and_preview(
         user_context: Mensaje del usuario enviado junto al archivo (caption). Se guarda
             en el frontmatter si la nota cae en modo degradado para que el cron pueda
             usarlo al reclasificar.
+        force_capture: Si True, ignora el mode del LLM y fuerza flujo de captura.
+            Usar cuando el usuario eligió explícitamente guardar como nota.
     """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
@@ -871,6 +880,17 @@ async def _classify_and_preview(
             parse_mode="HTML",
         )
         return
+
+    # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
+    if force_capture and mode != "capture":
+        result["mode"] = "capture"
+        mode = "capture"
+        if not isinstance(result.get("payload"), dict):
+            result["payload"] = {}
+        if not isinstance(result["payload"].get("frontmatter"), dict):
+            result["payload"]["frontmatter"] = {}
+        if not result["payload"].get("body"):
+            result["payload"]["body"] = text
 
     # Solo procesamos modo captura — query/manage no tienen frontmatter
     if mode != "capture":
@@ -1173,7 +1193,7 @@ async def _cb_intent_save(
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(update, context, text, media_type="text")
+    await _classify_and_preview(update, context, text, media_type="text", force_capture=True)
 
 
 async def _cb_intent_create(
@@ -1316,6 +1336,17 @@ async def handle_callback(
     # --- Audio / documento callbacks ---
     elif data == CB_TRANSCRIPT_OK:
         await _cb_transcript_ok(update, context)
+    elif data == CB_TRANSCRIPT_CORRECT:
+        pt = context.user_data.get("pending_transcript")
+        if pt:
+            pt["awaiting_correction"] = True
+            pt["msg_id"] = query.message.message_id
+            snippet = pt["text"][:500] + ("..." if len(pt["text"]) > 500 else "")
+            await query.edit_message_text(
+                f"<b>Transcripción actual:</b>\n\n<code>{_esc(snippet)}</code>\n\n"
+                "Enviá el texto corregido:",
+                parse_mode="HTML",
+            )
     elif data == CB_TRANSCRIPT_CANCEL:
         _cleanup_pending(context, "pending_transcript")
         await query.edit_message_text("Transcripción cancelada.")

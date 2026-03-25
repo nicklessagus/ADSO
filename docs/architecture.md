@@ -107,11 +107,16 @@ Obsidian (lectura visual, opcional)
 **Flujo de audio (paso previo al flujo general de confirmación):**
 ```
 1. Usuario manda audio
-2. Bot transcribe con Whisper y muestra el texto al usuario
-3. Usuario confirma o corrige la transcripción
-4. El texto corregido entra al flujo normal (clasificación → preview → confirmación → vault)
+2. Bot transcribe con Whisper y muestra el texto (tap-to-copy)
+   [Confirmar]  [Corregir]  [Cancelar]
+3a. [Confirmar] → entra al flujo normal de clasificación
+3b. [Corregir]  → el bot edita el mismo mensaje a "Enviá el texto corregido:"
+                   Usuario manda la corrección → bot edita el mensaje con texto nuevo
+                   [Confirmar]  [Corregir]  [Cancelar]  (puede corregir de nuevo)
+3c. [Cancelar]  → descarta el audio, no queda estado pendiente
+4. El texto confirmado entra al flujo normal (clasificación → preview → confirmación → vault)
 ```
-La corrección de la transcripción es un paso bloqueante: el bot no clasifica ni propone destino hasta que el usuario valide el texto.
+La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean mensajes nuevos). El texto se muestra en formato `<code>` para permitir tap-to-copy y usarlo como base para la corrección.
 
 ### `llm_client.py` — Cliente LLM
 - Proveedor primario: Gemini API (Google AI Studio, free tier)
@@ -512,7 +517,8 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 |---|---|
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
-| **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Audio transcripto** | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
 | **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
@@ -666,17 +672,17 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 2. Bot procesa y propone: tipo, destino (proyecto/área), frontmatter completo
 3a. LLM encontró destino claro:
        preview del frontmatter (bloque YAML en código)
-       [Confirmar]  [Corregir]  [Cancelar]
+       [Confirmar]  [Reubicar]  [Cancelar]
            │
-       [Corregir] → cambia solo el destino:
+       [Reubicar] → cambia solo el destino:
                     [Elegir área]  [Elegir proyecto]  [Inbox]
            │
-       preview actualizado → [Confirmar]  [Cancelar]
+       preview actualizado → [Confirmar]  [Reubicar]  [Cancelar]
 
 3b. LLM no encontró destino:
        [Elegir área]  [Elegir proyecto]  [Inbox]
            │
-       preview del frontmatter → [Confirmar]  [Corregir]  [Cancelar]
+       preview del frontmatter → [Confirmar]  [Reubicar]  [Cancelar]
 
 4. Bot escribe la nota
 ```
@@ -707,7 +713,7 @@ Al confirmar, los links se escriben en el `.md` bajo `## Ver también`:
 [[paper-referencia-metodologia]] [[dataset-imagenet]]
 ```
 
-**Correcciones por texto libre:** si antes de confirmar el usuario manda texto ("el título debería ser X", "agregá el tag #python"), el bot interpreta el texto como instrucción, actualiza el frontmatter y regenera el preview. `[Corregir]` es exclusivamente para cambiar el destino — cualquier otro campo se corrige por texto libre.
+**Correcciones por texto libre:** si antes de confirmar el usuario manda texto ("el título debería ser X", "agregá el tag #python"), el bot interpreta el texto como instrucción, actualiza el frontmatter y regenera el preview. `[Reubicar]` es exclusivamente para cambiar el destino — cualquier otro campo se corrige por texto libre.
 
 Si el proyecto o área no existe, el bot lo indica explícitamente y pide autorización para crearlo.
 

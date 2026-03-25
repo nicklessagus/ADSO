@@ -147,9 +147,9 @@ status: active     # valores dependen del type — ver docs/frontmatter-schema.m
 Los tipos `project-index` y `area-index` se generan automáticamente al crear proyecto/área (no por clasificación del LLM). Ambos requieren `description` — el bot la pide obligatoriamente en la creación. Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
-Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Corregir]` `[Cancelar]`).
+Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Reubicar]` `[Cancelar]`).
 
-`[Corregir]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
+`[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
 
 ### Prioridad inferida
 El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar, como cualquier otro campo.
@@ -173,8 +173,9 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 |---|---|
 | **PDF recibido** | `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter; aplica a cualquier PDF/documento |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
-| **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
-| **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Audio transcripto** | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
+| **Reubicar destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
