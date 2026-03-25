@@ -25,7 +25,7 @@ from adso.keyboards import (
 )
 from adso.llm_client import classify
 from adso.vault_search import find_by_property
-from adso.vault_writer import GitBackup, create_note, save_resource
+from adso.vault_writer import GitBackup, create_note, read_note, save_resource
 
 logger = logging.getLogger(__name__)
 
@@ -463,12 +463,20 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     context.user_data.pop("original_content", None)
 
     if inbox_path_str:
-        # Recalcular pendientes tras confirmar para mostrar el contador real
+        # Recalcular pendientes tras confirmar — mismo filtro que handle_clasificar:
+        # pending-classification + sin project ni area (caso B)
         try:
-            remaining_refs = await find_by_property(
+            all_pending = await find_by_property(
                 "status", "pending-classification", vault_path, scope="00-Inbox"
             )
-            remaining = len(remaining_refs)
+            remaining = 0
+            for ref in all_pending:
+                try:
+                    n = await read_note(ref.path)
+                    if not n.frontmatter.get("project") and not n.frontmatter.get("area"):
+                        remaining += 1
+                except Exception:
+                    pass
             if remaining > 0:
                 await query.message.reply_text(
                     f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
