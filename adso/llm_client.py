@@ -542,7 +542,7 @@ async def classify(
         "needs_disambiguation": False,
         "payload": {
             "frontmatter": {
-                "title": content[:80].strip() if content else "Sin título",
+                "title": "[Borrador] " + content[:60].strip() if content else "[Borrador]",
                 "type": "inbox",
                 "tags": [],
                 "status": "pending-classification",
