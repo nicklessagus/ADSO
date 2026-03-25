@@ -1610,12 +1610,7 @@ async def _cb_dest(
 
     await query.edit_message_text(
         preview + "\n\n¿Confirmar?",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
-                InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-            ]
-        ]),
+        reply_markup=build_capture_keyboard(fm, has_destination=True),
         parse_mode="HTML",
     )
 
