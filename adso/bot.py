@@ -907,9 +907,9 @@ async def _classify_and_preview(
         return
     suggested_links: list[str] = []
 
-    # Para texto libre el body es siempre el texto original del usuario,
-    # no la reformulación del LLM. Para PDFs/audio el LLM genera el body.
-    if media_type == "text":
+    # Para texto libre y audio el body es siempre el texto original del usuario,
+    # no la reformulación del LLM. Para PDFs el LLM genera el body estructurado.
+    if media_type in ("text", "audio"):
         body = text
         payload["body"] = text
     else:
@@ -1949,7 +1949,10 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
             if new_fm.get("status") in (None, "pending-classification"):
                 new_fm["status"] = _STATUS_DEFAULT.get(note_type, "active")
 
-            body = payload.get("body", extract_original_from_degraded(note.body))
+            if orig_fm.get("media_type") == "audio":
+                body = extract_original_from_degraded(note.body)
+            else:
+                body = payload.get("body", extract_original_from_degraded(note.body))
 
             # Verificar flujo activo justo antes de escribir (classify() tarda segundos)
             user_data_now: dict = context.application.user_data.get(chat_id, {})
