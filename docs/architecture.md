@@ -184,6 +184,8 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Cron nocturno re-indexa notas modificadas o sin embedding
 - Excluye carpetas en `vault.exclude_dirs`
 
+**Pendiente (Fase 7/8) — limpieza de embeddings huérfanos:** si el usuario borra una nota directamente desde Obsidian (no via bot), ChromaDB conserva el embedding sin referencia válida. La solución prevista es ampliar el cron existente para comparar IDs en ChromaDB contra los `.md` del vault y eliminar los huérfanos. No se implementa file watcher — innecesario para uso personal. Las búsquedas RAG no fallan por huérfanos (ChromaDB los devuelve pero el bot verifica existencia del archivo antes de mostrar), pero degradan la relevancia de los resultados.
+
 ### `vault_search.py` — Búsqueda estructural (Fase 1)
 - **Complementa a `knowledge_query.py`.** Busca por datos exactos en el vault: wikilinks, tags, properties del frontmatter.
 - Parsea archivos `.md` del vault extrayendo `[[wikilinks]]`, tags (`#tag`), y YAML frontmatter.
