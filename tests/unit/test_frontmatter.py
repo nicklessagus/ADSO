@@ -26,7 +26,7 @@ class TestFrontmatterGeneration:
         """Nota tiene todos los campos base requeridos."""
         fm = {
             "title": "Test note",
-            "type": "note",
+            "type": "reference",
             "tags": ["test"],
             "status": "active",
             "project": "tesis",
@@ -35,7 +35,7 @@ class TestFrontmatterGeneration:
         note = await read_note(path)
 
         assert note.frontmatter["title"] == "Test note"
-        assert note.frontmatter["type"] == "note"
+        assert note.frontmatter["type"] == "reference"
         assert "date_created" in note.frontmatter
         assert "date_modified" in note.frontmatter
         assert note.frontmatter["tags"] == ["test"]
@@ -45,7 +45,7 @@ class TestFrontmatterGeneration:
 
     @pytest.mark.asyncio
     async def test_dates_are_iso_8601(self, vault: Path) -> None:
-        fm = {"title": "ISO test", "type": "note", "project": "tesis"}
+        fm = {"title": "ISO test", "type": "reference", "project": "tesis"}
         path = await create_note(fm, "Body", vault)
         note = await read_note(path)
 
@@ -57,10 +57,10 @@ class TestFrontmatterGeneration:
     async def test_each_type_creates_valid_frontmatter(self, vault: Path) -> None:
         """Cada tipo genera frontmatter válido."""
         cases = [
-            {"title": "Nota", "type": "note", "project": "tesis"},
+            {"title": "Nota", "type": "reference", "project": "tesis"},
             {"title": "Tarea", "type": "task", "status": "pending", "area": "investigacion"},
             {"title": "Idea", "type": "idea", "status": "raw", "area": "investigacion"},
-            {"title": "Inbox", "type": "inbox", "status": "pending-classification"},
+            {"title": "Inbox", "type": "draft", "status": "pending-classification"},
         ]
         for fm_input in cases:
             path = await create_note(fm_input, "Body", vault)
@@ -106,7 +106,7 @@ class TestFrontmatterGeneration:
             "Comillas 'simples' y \"dobles\"",
         ]
         for title in titles:
-            fm = {"title": title, "type": "inbox"}
+            fm = {"title": title, "type": "draft"}
             path = await create_note(fm, "Body", vault)
             note = await read_note(path)
             assert note.frontmatter["title"] == title
@@ -116,7 +116,7 @@ class TestFrontmatterGeneration:
         """El YAML generado es parseable por python-frontmatter."""
         fm = {
             "title": "YAML test",
-            "type": "note",
+            "type": "reference",
             "tags": ["tag-1", "tag-2"],
             "project": "tesis",
         }
@@ -132,7 +132,7 @@ class TestFrontmatterGeneration:
     async def test_source_telegram_vs_system(self, vault: Path) -> None:
         # Default: telegram
         path1 = await create_note(
-            {"title": "User", "type": "inbox"}, "Body", vault
+            {"title": "User", "type": "draft"}, "Body", vault
         )
         n1 = await read_note(path1)
         assert n1.frontmatter["source"] == "telegram"
@@ -149,7 +149,7 @@ class TestFrontmatterGeneration:
 class TestCleanFrontmatter:
 
     def test_removes_none_values(self) -> None:
-        fm = {"title": "Test", "type": "note", "project": None, "area": None}
+        fm = {"title": "Test", "type": "reference", "project": None, "area": None}
         clean = _clean_frontmatter(fm)
         assert "project" not in clean
         assert "area" not in clean

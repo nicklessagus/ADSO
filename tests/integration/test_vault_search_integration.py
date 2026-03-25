@@ -32,21 +32,21 @@ async def _create_notes(vault: Path) -> dict[str, Path]:
     notes = {}
 
     notes["nota-a"] = await create_note(
-        {"title": "Nota A", "type": "note", "tags": ["ml", "cnn"],
+        {"title": "Nota A", "type": "reference", "tags": ["ml", "cnn"],
          "project": "tesis", "section": "experimentos", "status": "active"},
         "Contenido de A. Ver [[nota-b]] y [[nota-c]].",
         vault,
     )
 
     notes["nota-b"] = await create_note(
-        {"title": "Nota B", "type": "note", "tags": ["ml"],
+        {"title": "Nota B", "type": "reference", "tags": ["ml"],
          "project": "tesis", "section": "papers", "status": "active"},
         "Contenido de B. Referencia a [[nota-a]].",
         vault,
     )
 
     notes["nota-c"] = await create_note(
-        {"title": "Nota C", "type": "note", "tags": ["paper", "metodo/transformer"],
+        {"title": "Nota C", "type": "reference", "tags": ["paper", "metodo/transformer"],
          "project": "tesis", "status": "active"},
         "Contenido de C. Linkea a [[nota-a|Resultado A]] y al #deep-learning.",
         vault,
@@ -68,7 +68,7 @@ async def _create_notes(vault: Path) -> dict[str, Path]:
     )
 
     notes["inbox-1"] = await create_note(
-        {"title": "Sin clasificar", "type": "inbox",
+        {"title": "Sin clasificar", "type": "draft",
          "status": "pending-classification"},
         "Algo que no se clasificó.",
         vault,
@@ -132,9 +132,9 @@ class TestSearch:
     @pytest.mark.asyncio
     async def test_search_with_combined_filters(self, vault: Path) -> None:
         await _create_notes(vault)
-        results = await search("type:note project:tesis", vault, exclude_dirs=[])
+        results = await search("type:reference project:tesis", vault, exclude_dirs=[])
         assert len(results) >= 2
-        assert all(r.note_type == "note" for r in results)
+        assert all(r.note_type == "reference" for r in results)
 
     @pytest.mark.asyncio
     async def test_search_with_status_filter(self, vault: Path) -> None:
@@ -251,7 +251,7 @@ class TestGetWikilinks:
     async def test_no_duplicates(self, vault: Path) -> None:
         # Crear nota con links duplicados
         path = await create_note(
-            {"title": "Dupes", "type": "inbox"},
+            {"title": "Dupes", "type": "draft"},
             "[[x]] y [[x]] y [[x]]",
             vault,
         )

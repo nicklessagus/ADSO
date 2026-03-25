@@ -4,7 +4,7 @@
   "payload": {
     "frontmatter": {
       "title": "Nota sin clasificar",
-      "type": "inbox",
+      "type": "draft",
       "tags": [],
       "status": "pending-classification",
       "project": null,

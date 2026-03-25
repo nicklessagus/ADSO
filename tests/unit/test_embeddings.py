@@ -32,8 +32,8 @@ class TestSerializeMetadata:
         assert result["tags"] == "ml,cnn,paper"
 
     def test_string_passthrough(self) -> None:
-        result = _serialize_metadata({"type": "note"})
-        assert result["type"] == "note"
+        result = _serialize_metadata({"type": "reference"})
+        assert result["type"] == "reference"
 
     def test_int_passthrough(self) -> None:
         result = _serialize_metadata({"count": 42})
@@ -53,13 +53,13 @@ class TestSerializeMetadata:
 
     def test_mixed_metadata(self) -> None:
         result = _serialize_metadata({
-            "type": "note",
+            "type": "reference",
             "tags": ["ml", "cnn"],
             "project": None,
             "status": "active",
         })
         assert result == {
-            "type": "note",
+            "type": "reference",
             "tags": "ml,cnn",
             "project": "",
             "status": "active",
@@ -122,7 +122,7 @@ class TestIndexNote:
         await client.index_note(
             note_id="2025-01-15-test-note",
             content="Contenido de prueba sobre ML.",
-            metadata={"type": "note", "tags": ["ml"], "project": None},
+            metadata={"type": "reference", "tags": ["ml"], "project": None},
         )
 
         assert client.count() == 1
@@ -132,7 +132,7 @@ class TestIndexNote:
     async def test_upsert_updates_existing(self, mock_embed, client) -> None:
         mock_embed.return_value = FAKE_EMBEDDING
 
-        await client.index_note("note-1", "v1", {"type": "note"})
+        await client.index_note("note-1", "v1", {"type": "reference"})
         await client.index_note("note-1", "v2", {"type": "task"})
 
         assert client.count() == 1
@@ -161,7 +161,7 @@ class TestRemoveNote:
     @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
     async def test_remove_deletes(self, mock_embed, client) -> None:
         mock_embed.return_value = FAKE_EMBEDDING
-        await client.index_note("note-1", "content", {"type": "note"})
+        await client.index_note("note-1", "content", {"type": "reference"})
 
         await client.remove_note("note-1")
         assert client.count() == 0
@@ -178,9 +178,9 @@ class TestUpdateMetadata:
     @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
     async def test_update_changes_metadata(self, mock_embed, client) -> None:
         mock_embed.return_value = FAKE_EMBEDDING
-        await client.index_note("note-1", "content", {"type": "note", "status": "active"})
+        await client.index_note("note-1", "content", {"type": "reference", "status": "active"})
 
-        await client.update_metadata("note-1", {"type": "note", "status": "done"})
+        await client.update_metadata("note-1", {"type": "reference", "status": "done"})
 
         result = client._collection.get(ids=["note-1"], include=["metadatas"])
         assert result["metadatas"][0]["status"] == "done"
@@ -189,7 +189,7 @@ class TestUpdateMetadata:
     @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
     async def test_update_does_not_recalculate_embedding(self, mock_embed, client) -> None:
         mock_embed.return_value = FAKE_EMBEDDING
-        await client.index_note("note-1", "content", {"type": "note"})
+        await client.index_note("note-1", "content", {"type": "reference"})
 
         mock_embed.reset_mock()
         await client.update_metadata("note-1", {"type": "task"})
@@ -204,10 +204,10 @@ class TestQuerySimilar:
     async def test_query_returns_results(self, mock_embed, client) -> None:
         # Indexar con embeddings ligeramente diferentes
         mock_embed.return_value = [0.1] * 768
-        await client.index_note("note-1", "ML y redes neuronales", {"type": "note", "path": "a.md"})
+        await client.index_note("note-1", "ML y redes neuronales", {"type": "reference", "path": "a.md"})
 
         mock_embed.return_value = [0.9] * 768
-        await client.index_note("note-2", "Cocina italiana", {"type": "note", "path": "b.md"})
+        await client.index_note("note-2", "Cocina italiana", {"type": "reference", "path": "b.md"})
 
         # Query similar a note-1
         mock_embed.return_value = [0.1] * 768
@@ -221,7 +221,7 @@ class TestQuerySimilar:
     @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
     async def test_query_with_threshold_filters(self, mock_embed, client) -> None:
         mock_embed.return_value = [0.1] * 768
-        await client.index_note("note-1", "content", {"type": "note", "path": "a.md"})
+        await client.index_note("note-1", "content", {"type": "reference", "path": "a.md"})
 
         mock_embed.return_value = [0.1] * 768
         # Threshold muy alto (similitud > 0.99) — solo match casi exacto
@@ -240,11 +240,11 @@ class TestQuerySimilar:
     @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
     async def test_query_with_where_filter(self, mock_embed, client) -> None:
         mock_embed.return_value = FAKE_EMBEDDING
-        await client.index_note("note-1", "ML content", {"type": "note", "path": "a.md"})
+        await client.index_note("note-1", "ML content", {"type": "reference", "path": "a.md"})
         await client.index_note("task-1", "ML task", {"type": "task", "path": "b.md"})
 
         results = await client.query_similar(
-            "ML", n_results=5, where={"type": "note"},
+            "ML", n_results=5, where={"type": "reference"},
         )
         # Solo debería retornar note-1
         note_ids = [r.note_id for r in results]
@@ -284,7 +284,7 @@ class TestComputeEmbedding:
         client._ensure_initialized()
 
         with patch("google.genai.Client", return_value=mock_client):
-            await client.index_note("note-1", "content", {"type": "note"})
+            await client.index_note("note-1", "content", {"type": "reference"})
 
         assert call_count[0] == 3
         assert client.count() == 1
@@ -300,7 +300,7 @@ class TestComputeEmbedding:
 
         with patch("google.genai.Client", return_value=mock_client):
             with pytest.raises(ConnectionError):
-                await client.index_note("note-1", "content", {"type": "note"})
+                await client.index_note("note-1", "content", {"type": "reference"})
 
 
 class TestReindexVault:
@@ -314,7 +314,7 @@ class TestReindexVault:
         vault = tmp_path / "vault"
         (vault / "01-Projects" / "tesis").mkdir(parents=True)
         import frontmatter as fm_lib
-        post = fm_lib.Post("Contenido sobre ML.", title="Test Note", type="note")
+        post = fm_lib.Post("Contenido sobre ML.", title="Test Note", type="reference")
         (vault / "01-Projects" / "tesis" / "2025-01-15-test.md").write_text(
             fm_lib.dumps(post), encoding="utf-8"
         )
@@ -348,7 +348,7 @@ class TestReindexVault:
         vault = tmp_path / "vault"
         (vault / "05-Archive").mkdir(parents=True)
         import frontmatter as fm_lib
-        post = fm_lib.Post("Archived.", title="Old", type="note")
+        post = fm_lib.Post("Archived.", title="Old", type="reference")
         (vault / "05-Archive" / "old.md").write_text(
             fm_lib.dumps(post), encoding="utf-8"
         )

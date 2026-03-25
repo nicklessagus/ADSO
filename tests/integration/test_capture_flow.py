@@ -44,7 +44,7 @@ class TestCaptureFlow:
 
         note = await read_note(path)
         assert note.frontmatter["title"] == "Baseline CNN — resultados preliminares"
-        assert note.frontmatter["type"] == "note"
+        assert note.frontmatter["type"] == "reference"
         assert note.frontmatter["project"] == "tesis"
         assert "CNN baseline" in note.body
 
@@ -100,7 +100,7 @@ class TestCaptureFlow:
         """Directorios intermedios se crean si no existen."""
         fm = {
             "title": "Nueva nota",
-            "type": "note",
+            "type": "reference",
             "project": "nuevo-proyecto",
             "section": "nueva-seccion",
         }
@@ -112,7 +112,7 @@ class TestCaptureFlow:
     async def test_body_preserved_intact(self, vault: Path) -> None:
         """El body se preserva íntegro."""
         body = "Línea 1\n\n## Sección\n\nContenido con [[wikilink]] y #tag\n\n- Lista\n- Items"
-        fm = {"title": "Body test", "type": "inbox"}
+        fm = {"title": "Body test", "type": "draft"}
         path = await create_note(fm, body, vault)
         note = await read_note(path)
         assert note.body.strip() == body.strip()
@@ -120,7 +120,7 @@ class TestCaptureFlow:
     @pytest.mark.asyncio
     async def test_dry_run_does_not_write(self, vault: Path) -> None:
         """dry_run=True retorna path sin crear archivo."""
-        fm = {"title": "Dry run", "type": "inbox"}
+        fm = {"title": "Dry run", "type": "draft"}
         path = await create_note(fm, "Body", vault, dry_run=True)
         assert not path.exists()
         assert str(path).endswith(".md")

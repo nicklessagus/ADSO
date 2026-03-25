@@ -22,7 +22,7 @@ class TestDegradedMode:
         """En modo degradado, la nota va a 00-Inbox/ con pending-classification."""
         fm = {
             "title": "Nota sin clasificar",
-            "type": "inbox",
+            "type": "draft",
             "status": "pending-classification",
             "media_type": "text",
         }
@@ -34,7 +34,7 @@ class TestDegradedMode:
         assert "00-Inbox" in str(path)
 
         note = await read_note(path)
-        assert note.frontmatter["type"] == "inbox"
+        assert note.frontmatter["type"] == "draft"
         assert note.frontmatter["status"] == "pending-classification"
         assert note.body.strip() == original_body
 
@@ -43,7 +43,7 @@ class TestDegradedMode:
         """media_type se preserva aunque no haya clasificación."""
         fm = {
             "title": "Audio sin clasificar",
-            "type": "inbox",
+            "type": "draft",
             "status": "pending-classification",
             "media_type": "audio",
         }
@@ -62,7 +62,7 @@ class TestDegradedMode:
         )
         fm = {
             "title": "Integridad",
-            "type": "inbox",
+            "type": "draft",
             "status": "pending-classification",
         }
         path = await create_note(fm, body, vault)

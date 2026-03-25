@@ -21,7 +21,7 @@ from adso.bot import (
 )
 
 
-def _setup_pending_note(context, title="Test", note_type="note", project="tesis"):
+def _setup_pending_note(context, title="Test", note_type="reference", project="tesis"):
     """Simula una nota pendiente de confirmación en el contexto."""
     context.user_data["pending_note"] = {
         "mode": "capture",
@@ -107,7 +107,7 @@ class TestConfirmation:
         await handle_callback(update, mock_context)
 
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
-        assert fm["type"] == "inbox"
+        assert fm["type"] == "draft"
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})

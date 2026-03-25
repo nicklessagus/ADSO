@@ -25,7 +25,7 @@ Define la estructura de metadatos que el bot genera automáticamente para cada n
 title: "Título descriptivo de la nota"
 date_created: 2025-01-15T14:30:00     # ISO 8601, generado por el bot — sin comillas para tipo Date & time en Obsidian
 date_modified: 2025-01-15T14:30:00    # ISO 8601, actualizado en cada edición — sin comillas
-type: note                              # Ver tipos válidos abajo
+type: reference                         # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
 media_type: text                       # text | audio | image | link | document — origen del contenido, seteado automáticamente
@@ -82,10 +82,10 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 | Tipo | Valores de `status` | Default |
 |---|---|---|
-| `note` | `active`, `pending-classification` | `active` |
+| `reference` | `active`, `pending-classification` | `active` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
-| `inbox` | `pending-classification` | `pending-classification` |
+| `draft` | `pending-classification` | `pending-classification` |
 | `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
 | `area-index` | — (sin ciclo de vida) | — |
 
@@ -95,10 +95,10 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
-| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
+| `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
 | `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
-| `idea` | `02-Areas/{area}/` | Idea sin proyecto definido — se promueve a proyecto o se descarta |
-| `inbox` | `00-Inbox/` | Sin clasificar, requiere revisión |
+| `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
+| `draft` | `00-Inbox/` | Sin clasificar, requiere revisión |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 
@@ -106,10 +106,10 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 ## Campos adicionales por tipo
 
-### `note`
+### `reference`
 ```yaml
 ---
-type: note
+type: reference
 project: tesis                          # Text plano — nombre del proyecto (carpeta) — opcional
 section: experimentos                   # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
 area: docencia                          # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
@@ -121,13 +121,13 @@ related: ["[[otra-nota]]"]             # links siempre entre comillas dobles den
 
 ### Campos opcionales para contenido académico
 
-Cuando el pipeline de extracción detecta contenido académico (papers, artículos, preprints), estos campos se agregan al frontmatter de la nota. No definen un tipo separado — un paper es una `note` con tag `#paper` y estos campos poblados.
+Cuando el pipeline de extracción detecta contenido académico (papers, artículos, preprints), estos campos se agregan al frontmatter de la nota. No definen un tipo separado — un paper es una `reference` con tag `#paper` y estos campos poblados.
 
 Los papers se identifican por la presencia del tag `#paper` y/o la presencia de estos campos en el frontmatter.
 
 ```yaml
 ---
-type: note
+type: reference
 tags: [paper, cosmology, machine-learning]        # generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 read_status: unread                               # unread | reading | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
@@ -201,7 +201,9 @@ related: ["[[otra-nota]]"]             # links siempre entre comillas dobles den
 ---
 type: idea
 status: raw                             # Text enum — raw | developing | mature
-area: investigacion                     # Text plano — opcional, determina la carpeta destino (02-Areas/{area}/). Si no hay área clara → 00-Inbox/
+project: tesis                          # Text plano — opcional, determina carpeta destino (01-Projects/{proyecto}/)
+section: brainstorm                     # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
+area: investigacion                     # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
 priority: low                           # Text enum — low | medium | high — inferido o explícito
 related: ["[[nota-relacionada]]"]       # links siempre entre comillas dobles dentro del array
 ---

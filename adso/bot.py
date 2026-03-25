@@ -288,8 +288,8 @@ async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
 
 def _has_destination(fm: dict) -> bool:
     """Determina si el frontmatter tiene un destino claro."""
-    if fm.get("type") in ("inbox", "task", "idea"):
-        return True  # inbox va a inbox, task/idea van a su área
+    if fm.get("type") in ("draft", "task"):
+        return True  # draft va a inbox, task va a su área
     if fm.get("project") or fm.get("area"):
         return True
     return False
@@ -1151,8 +1151,8 @@ async def _handle_text_correction(
         fm["tags"].append(tag)
     elif text_lower.startswith("tipo ") or text_lower.startswith("type "):
         new_type = text_lower.split(" ", 1)[1].strip()
-        if new_type in ("note", "nota"):
-            fm["type"] = "note"
+        if new_type in ("reference", "referencia", "note", "nota"):
+            fm["type"] = "reference"
         elif new_type in ("task", "tarea"):
             fm["type"] = "task"
         elif new_type in ("idea",):
@@ -1575,7 +1575,7 @@ async def _cb_dest(
     fm = pending["payload"]["frontmatter"]
 
     if dest_type == "inbox":
-        fm["type"] = "inbox"
+        fm["type"] = "draft"
         fm["project"] = None
         fm["section"] = None
         fm["area"] = None
@@ -1590,16 +1590,16 @@ async def _cb_dest(
         fm["project"] = None
         fm["section"] = None
         fm["area"] = dest_name
-        if fm.get("type") == "inbox":
-            fm["type"] = "note"
+        if fm.get("type") == "draft":
+            fm["type"] = "reference"
         if fm.get("status") == "pending-classification":
             fm["status"] = "active"
     elif dest_type == "project":
         fm["project"] = dest_name
         fm["section"] = None
         fm["area"] = None
-        if fm.get("type") == "inbox":
-            fm["type"] = "note"
+        if fm.get("type") == "draft":
+            fm["type"] = "reference"
         if fm.get("status") == "pending-classification":
             fm["status"] = "active"
 
@@ -1635,7 +1635,7 @@ async def _handle_capture_from_callback(
         payload = {
             "frontmatter": {
                 "title": original_text[:80].strip(),
-                "type": "inbox",
+                "type": "draft",
                 "tags": [],
                 "status": "pending-classification",
             },
@@ -1892,7 +1892,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
     projects, areas = await _get_existing_items(vault_path)
     existing_tags = await _get_existing_tags(vault_path)
 
-    _STATUS_DEFAULT = {"note": "active", "task": "pending", "idea": "raw"}
+    _STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
 
     for ref in inbox_notes:
         try:
@@ -1945,7 +1945,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
             new_fm.pop("user_context", None)
 
             # Status correcto según tipo (reemplaza pending-classification)
-            note_type = new_fm.get("type", "note")
+            note_type = new_fm.get("type", "reference")
             if new_fm.get("status") in (None, "pending-classification"):
                 new_fm["status"] = _STATUS_DEFAULT.get(note_type, "active")
 

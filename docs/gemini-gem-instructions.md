@@ -133,7 +133,7 @@ Los resources no tienen ciclo de vida (referencia permanente). Las áreas no tie
 title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
-type: note                             # note | task | idea | inbox | project-index | area-index
+type: reference                        # reference | task | idea | draft | project-index | area-index
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: text                       # text | audio | image | link | document
@@ -145,10 +145,10 @@ status: active                         # valores dependen del type
 
 | Tipo | Carpeta destino | Valores de `status` | Default |
 |---|---|---|---|
-| `note` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
+| `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
 | `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
-| `idea` | `02-Areas/{area}/` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
-| `inbox` | `00-Inbox/` | `pending-classification` | `pending-classification` |
+| `idea` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
+| `draft` | `00-Inbox/` | `pending-classification` | `pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed`, `archived` | `active` |
 
 `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor.
@@ -159,7 +159,7 @@ status: active                         # valores dependen del type
 
 ### Campos adicionales por tipo
 
-**`note`:** `project` (opcional), `section` (opcional), `area` (opcional — solo si no tiene proyecto), `summary`, `related`, `read_status` (opcional — ver abajo)
+**`reference`:** `project` (opcional), `section` (opcional), `area` (opcional — solo si no tiene proyecto), `summary`, `related`, `read_status` (opcional — ver abajo)
 
 Campos opcionales para contenido académico (populados por el pipeline cuando detecta contenido académico): `authors`, `year`, `url`, `doi`, `relevance`, `context`, `contribution`, `methods`, `dataset`, `conclusions`
 
@@ -194,7 +194,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 |---|---|---|
 | **Captura** | Contenido a guardar como nota | Texto, audio, link, imagen, PDF |
 | **Consulta** | Pregunta sobre el vault | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
-| **Edición** | Modificar nota existente (solo `note` e `idea`) | "actualizá la nota X" |
+| **Edición** | Modificar nota existente (solo `reference` e `idea`) | "actualizá la nota X" |
 | **Gestión** | Operaciones sobre la estructura | Crear proyecto, archivar, renombrar |
 
 No hay modo Agenda — el agendamiento se resuelve via tasks: `due_date` genera chip en Calendar automáticamente, `scheduled` crea evento en calendario ADSO.
@@ -358,7 +358,7 @@ Al crear una nota nueva, el bot busca en ChromaDB las notas más similares y sug
 
 - **Lectura:** todos los calendarios del usuario
 - **Escritura y borrado:** solo en calendario dedicado `ADSO` (creado por el bot si no existe)
-- Solo se agendan ítems que ya existen en el vault: `task`, `idea` (sesión de trabajo), `note` (hito, reunión o bloque de lectura)
+- Solo se agendan ítems que ya existen en el vault: `task`, `idea` (sesión de trabajo), `reference` (hito, reunión o bloque de lectura)
 - Fecha + hora → evento con horario. Solo día → evento de día completo.
 
 ### Tasks

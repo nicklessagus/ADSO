@@ -29,7 +29,7 @@ class TestCaptureMessage:
             "payload": {
                 "frontmatter": {
                     "title": "Resultado del experimento",
-                    "type": "note",
+                    "type": "reference",
                     "tags": ["ml"],
                     "status": "active",
                     "project": "tesis",
@@ -64,7 +64,7 @@ class TestCaptureMessage:
         note_path = [f for f in md_files if f.stem != "_index"][0]
         note = await read_note(note_path)
         assert note.frontmatter["title"] == "Resultado del experimento"
-        assert note.frontmatter["type"] == "note"
+        assert note.frontmatter["type"] == "reference"
         assert "0.87" in note.body
 
     @pytest.mark.asyncio
@@ -83,7 +83,7 @@ class TestCaptureMessage:
             "payload": {
                 "frontmatter": {
                     "title": "Sin clasificar",
-                    "type": "inbox",
+                    "type": "draft",
                     "tags": [],
                     "status": "pending-classification",
                 },
@@ -104,7 +104,7 @@ class TestCaptureMessage:
         assert "pending_note" in mock_context.user_data
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
         assert fm["status"] == "pending-classification"
-        assert fm["type"] == "inbox"
+        assert fm["type"] == "draft"
 
         # Confirmar → escribe al vault
         cb_confirm = make_callback_query(data=CB_CONFIRM)
@@ -126,7 +126,7 @@ class TestCaptureMessage:
             "payload": {
                 "frontmatter": {
                     "title": "Ambiguo",
-                    "type": "note",
+                    "type": "reference",
                     "tags": [],
                     "status": "active",
                     "project": None,

@@ -56,13 +56,13 @@ DATE_FIELDS = {"date_created", "date_modified", "due_date", "scheduled"}
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
-VALID_TYPES = {"note", "task", "idea", "inbox", "project-index", "area-index"}
+VALID_TYPES = {"reference", "task", "idea", "draft", "project-index", "area-index"}
 
 VALID_STATUS: dict[str, set[str]] = {
-    "note": {"active", "pending-classification"},
+    "reference": {"active", "pending-classification"},
     "task": {"pending", "in-progress", "done", "pending-classification"},
     "idea": {"raw", "developing", "mature", "pending-classification"},
-    "inbox": {"pending-classification"},
+    "draft": {"pending-classification"},
     "project-index": {"active", "on-hold", "completed", "archived"},
     "area-index": set(),
 }
@@ -133,12 +133,12 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
         Path del directorio destino, o None si el destino no se puede resolver
         (nota sin proyecto ni área — el caller debe preguntar al usuario).
     """
-    note_type = fm.get("type", "inbox")
+    note_type = fm.get("type", "draft")
     project = fm.get("project")
     section = fm.get("section")
     area = fm.get("area")
 
-    if note_type == "inbox":
+    if note_type == "draft":
         return vault_path / "00-Inbox"
 
     if note_type == "project-index":
@@ -151,7 +151,7 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
             return vault_path / "02-Areas" / area
         return vault_path / "00-Inbox"
 
-    if note_type == "note":
+    if note_type == "reference":
         if project:
             base = vault_path / "01-Projects" / project
             if section:
@@ -168,9 +168,14 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
         return vault_path / "00-Inbox"
 
     if note_type == "idea":
+        if project:
+            base = vault_path / "01-Projects" / project
+            if section:
+                return base / section
+            return base
         if area:
             return vault_path / "02-Areas" / area
-        return vault_path / "00-Inbox"
+        return None
 
     return vault_path / "00-Inbox"
 

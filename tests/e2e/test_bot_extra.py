@@ -32,7 +32,7 @@ from adso.bot import (
 )
 
 
-def _setup_pending_note(context, title="Test", note_type="note", project="tesis"):
+def _setup_pending_note(context, title="Test", note_type="reference", project="tesis"):
     context.user_data["pending_note"] = {
         "mode": "capture",
         "confidence": 0.9,
@@ -82,23 +82,23 @@ class TestBuildPreview:
         assert "Body contenido" in preview
 
     def test_preview_area_destination(self) -> None:
-        fm = {"title": "X", "type": "note", "area": "investigacion"}
+        fm = {"title": "X", "type": "reference", "area": "investigacion"}
         preview = build_preview(fm, "body", [])
         assert "02-Areas/investigacion" in preview
 
     def test_preview_no_destination(self) -> None:
-        fm = {"title": "X", "type": "note"}
+        fm = {"title": "X", "type": "reference"}
         preview = build_preview(fm, "body", [])
         assert "por definir" in preview
 
     def test_preview_long_body_truncated(self) -> None:
-        fm = {"title": "X", "type": "note"}
+        fm = {"title": "X", "type": "reference"}
         long_body = "A" * 300
         preview = build_preview(fm, long_body, [])
         assert "..." in preview
 
     def test_preview_no_links(self) -> None:
-        fm = {"title": "X", "type": "note"}
+        fm = {"title": "X", "type": "reference"}
         preview = build_preview(fm, "body", [])
         assert "Links sugeridos" not in preview
 
@@ -112,22 +112,25 @@ class TestEsc:
 class TestHasDestination:
 
     def test_inbox_has_destination(self) -> None:
-        assert _has_destination({"type": "inbox"})
+        assert _has_destination({"type": "draft"})
 
     def test_task_has_destination(self) -> None:
         assert _has_destination({"type": "task"})
 
-    def test_idea_has_destination(self) -> None:
-        assert _has_destination({"type": "idea"})
+    def test_idea_with_area_has_destination(self) -> None:
+        assert _has_destination({"type": "idea", "area": "investigacion"})
+
+    def test_idea_without_dest(self) -> None:
+        assert not _has_destination({"type": "idea"})
 
     def test_note_with_project(self) -> None:
-        assert _has_destination({"type": "note", "project": "tesis"})
+        assert _has_destination({"type": "reference", "project": "tesis"})
 
     def test_note_with_area(self) -> None:
-        assert _has_destination({"type": "note", "area": "investigacion"})
+        assert _has_destination({"type": "reference", "area": "investigacion"})
 
     def test_note_without_dest(self) -> None:
-        assert not _has_destination({"type": "note"})
+        assert not _has_destination({"type": "reference"})
 
 
 class TestKeyboards:
@@ -136,7 +139,7 @@ class TestKeyboards:
         kb = build_capture_keyboard({}, True)
         texts = [b.text for row in kb.inline_keyboard for b in row]
         assert "Confirmar" in texts
-        assert "Corregir" in texts
+        assert "Reubicar" in texts
         assert "Cancelar" in texts
 
     def test_capture_keyboard_without_destination(self) -> None:
@@ -260,7 +263,7 @@ class TestTextCorrectionExtra:
         update = make_update(text="tipo nota")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
-        assert fm["type"] == "note"
+        assert fm["type"] == "reference"
 
     @pytest.mark.asyncio
     @patch("adso.bot.classify")

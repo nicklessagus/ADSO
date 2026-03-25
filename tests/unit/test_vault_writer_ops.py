@@ -28,7 +28,7 @@ async def vault(tmp_path: Path) -> Path:
 
 @pytest.fixture
 async def sample_note(vault: Path) -> Path:
-    fm = {"title": "Test Note", "type": "note", "tags": ["ml"], "status": "active",
+    fm = {"title": "Test Note", "type": "reference", "tags": ["ml"], "status": "active",
           "project": "tesis"}
     return await create_note(fm, "Body original.", vault)
 

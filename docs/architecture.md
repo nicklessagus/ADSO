@@ -335,13 +335,13 @@ Si `pymupdf` no puede extraer texto (PDF escaneado o basado en imagen), el bot l
 
 #### Papers: todas las fuentes producen la misma nota
 
-Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: note` con campos académicos poblados (authors, year, doi, methods, dataset, contribution, conclusions). La diferencia es solo el campo de origen:
+Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: reference` con campos académicos poblados (authors, year, doi, methods, dataset, contribution, conclusions). La diferencia es solo el campo de origen:
 
 | | Link arXiv/ADS | PDF adjunto | Búsqueda por nombre |
 |---|---|---|---|
 | **Obtener contenido** | API arXiv/ADS | `pymupdf` extrae texto | Bot busca en arXiv/ADS, usuario confirma |
 | **Metadata** | Estructurada desde la API | Extraída localmente (título, autores, DOI) — bypass LLM | Estructurada desde la API |
-| **Clasificar** | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos | LLM → `type: note` + campos académicos |
+| **Clasificar** | LLM → `type: reference` + campos académicos | LLM → `type: reference` + campos académicos | LLM → `type: reference` + campos académicos |
 | **Campo origen** | `source_url` | `source_file` | `source_url` |
 | **Archivo físico** | No | Sí (PDF en `03-Resources/`) | No |
 | **Embeddings** | Del contenido extraído | Del texto extraído del PDF | Del contenido extraído |
@@ -392,7 +392,7 @@ El usuario puede enviar cualquiera de estos inputs para indexar un paper:
 - PDF adjunto
 - Solo el nombre o título del paper (el bot busca y confirma antes de proceder)
 
-El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota (`type: note` con campos académicos) en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
+El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota (`type: reference` con campos académicos) en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
 
 El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → usuario confirma → escritura al vault.
 
@@ -692,7 +692,7 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 El preview se muestra como bloque de código YAML — fiel al frontmatter que se escribirá al vault, sin transformaciones. Solo se omiten los campos nulos para no saturar el mensaje. Ejemplo:
 
 ```yaml
-type: note
+type: reference
 title: "Baseline CNN — resultados preliminares"
 tags: [machine-learning, cnn, baseline]
 project: tesis
@@ -741,7 +741,7 @@ El usuario puede listar primero y luego pedir clasificar un ítem específico po
 
 ### Flujo de edición de notas existentes
 
-> **Scope:** aplica a notas `note` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
+> **Scope:** aplica a notas `reference` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
 
 ```
 1. Usuario pide editar una nota (por título, búsqueda o link)

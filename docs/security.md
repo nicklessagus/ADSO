@@ -261,7 +261,7 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | Campo | Tipo | Notas |
 |---|---|---|
 | `frontmatter` | object | Todos los campos del schema de frontmatter. Campos no aplicables van en `null`. `date_created`, `date_modified`, `source` y `media_type` los setea el bot, no el LLM |
-| `frontmatter.type` | string enum | `note`, `task`, `idea`, `inbox` — nunca `project-index` ni `area-index` (esos los genera el bot) |
+| `frontmatter.type` | string enum | `reference`, `task`, `idea`, `draft` — nunca `project-index` ni `area-index` (esos los genera el bot) |
 | `frontmatter.project` | string \| null | Nombre del proyecto destino. Si no existe, el bot pide confirmación para crearlo |
 | `frontmatter.section` | string \| null | Sección dentro del proyecto. Solo si hay proyecto |
 | `frontmatter.area` | string \| null | Área destino. Solo si no hay proyecto |
@@ -326,7 +326,7 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | `changes` | string | Descripción en lenguaje natural de los cambios pedidos |
 | `search_hint` | string | Términos de búsqueda para encontrar la nota si el target no es un match exacto |
 
-El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra diff para confirmación. Solo aplica a `note` e `idea` — las tasks no se editan via ADSO.
+El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra diff para confirmación. Solo aplica a `reference` e `idea` — las tasks no se editan via ADSO.
 
 #### Modo `manage` — Gestión de estructura
 

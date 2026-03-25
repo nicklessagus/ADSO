@@ -2,7 +2,7 @@
 title: "Baseline CNN — resultados preliminares"
 date_created: "2025-01-15T14:30:00"
 date_modified: "2025-01-15T14:30:00"
-type: note
+type: reference
 tags: [machine-learning, cnn, baseline]
 source: telegram
 media_type: text

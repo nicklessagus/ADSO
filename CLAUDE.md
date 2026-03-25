@@ -124,7 +124,7 @@ adso/
 00-Inbox/nota.md                               # sin clasificar
 05-Archive/                                    # proyectos inactivos o completados
 ```
-Las ideas (`type: idea`) viven en su área correspondiente. No hay carpeta `04-Ideas/`.
+Las ideas (`type: idea`) viven en su proyecto o área correspondiente, igual que `reference`. No hay carpeta `04-Ideas/`.
 
 ### Ciclo de vida
 Nota con `type: idea` en área → Proyecto activo → Archivo → (borrado con doble confirmación)
@@ -136,7 +136,7 @@ Las áreas no tienen ciclo de vida.
 title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
-type: ""           # note | task | idea | inbox | project-index | area-index
+type: ""           # reference | task | idea | draft | project-index | area-index
 tags: []           # siempre en inglés, kebab-case; el LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
@@ -209,7 +209,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 |---|---|
 | **Captura** | Texto, audio, link, imagen, PDF con contenido a guardar |
 | **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
-| **Edición** | "actualizá la nota X" (solo `note` e `idea`) |
+| **Edición** | "actualizá la nota X" (solo `reference` e `idea`) |
 | **Gestión** | Crear proyecto, archivar, renombrar |
 
 No hay modo Agenda — el agendamiento se maneja via tasks con `due_date` (chip en Calendar) o `scheduled` (evento en Calendar ADSO). Las tasks no se editan via ADSO.
@@ -288,7 +288,7 @@ VAULT_PATH                 # default: /vault
 
 ## Decisiones clave
 
-- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `note`, `task`, `idea`, `inbox`, `project-index`, `area-index`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `note` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
+- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `reference`, `task`, `idea`, `draft`, `project-index`, `area-index`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `reference` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
 
 - **Creación de proyecto/área desde bot:** `_extract_name_from_command()` parsea el nombre directamente con regex para patrones simples (`crear proyecto "X"`, `nuevo proyecto X`). Solo llama al LLM cuando el patrón no es reconocible (ej: "quiero un proyecto para mi tesis"). El intent ya viene confirmado por el botón, solo hace falta el nombre.
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.

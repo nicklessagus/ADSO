@@ -2,7 +2,7 @@
 title: "Nota sin clasificar"
 date_created: "2025-01-23T08:00:00"
 date_modified: "2025-01-23T08:00:00"
-type: inbox
+type: draft
 tags: []
 source: telegram
 media_type: text

@@ -28,7 +28,7 @@ class TestValidateResponse:
         data = _load("classify_text_note.json")
         result = validate_llm_response(data)
         assert result["mode"] == "capture"
-        assert result["payload"]["frontmatter"]["type"] == "note"
+        assert result["payload"]["frontmatter"]["type"] == "reference"
 
     def test_valid_capture_task(self) -> None:
         data = _load("classify_text_task.json")
@@ -45,7 +45,7 @@ class TestValidateResponse:
     def test_valid_capture_inbox(self) -> None:
         data = _load("classify_text_inbox.json")
         result = validate_llm_response(data)
-        assert result["payload"]["frontmatter"]["type"] == "inbox"
+        assert result["payload"]["frontmatter"]["type"] == "draft"
 
     def test_valid_manage_create_project(self) -> None:
         data = _load("manage_create_project.json")
@@ -96,7 +96,7 @@ class TestInvalidResponse:
         data = {
             "mode": "capture", "confidence": 0.9,
             "payload": {
-                "frontmatter": {"type": "note"},
+                "frontmatter": {"type": "reference"},
                 "body": "test",
             },
         }
@@ -119,7 +119,7 @@ class TestInvalidResponse:
         data = {
             "mode": "capture", "confidence": 0.9,
             "payload": {
-                "frontmatter": {"title": "Test", "type": "note", "status": "done"},
+                "frontmatter": {"title": "Test", "type": "reference", "status": "done"},
                 "body": "test",
             },
         }
@@ -141,7 +141,7 @@ class TestInvalidResponse:
         data = {
             "mode": "capture", "confidence": 0.9,
             "payload": {
-                "frontmatter": {"title": "Test", "type": "note"},
+                "frontmatter": {"title": "Test", "type": "reference"},
             },
         }
         result = validate_llm_response(data)
@@ -201,7 +201,7 @@ class TestDisambiguation:
         data = {
             "mode": "capture",
             "payload": {
-                "frontmatter": {"title": "Test", "type": "note"},
+                "frontmatter": {"title": "Test", "type": "reference"},
                 "body": "test",
             },
         }

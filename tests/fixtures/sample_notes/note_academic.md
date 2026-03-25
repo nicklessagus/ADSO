@@ -2,7 +2,7 @@
 title: "Martinez et al. 2024 — Transformers para series temporales"
 date_created: "2025-01-20T10:00:00"
 date_modified: "2025-01-20T10:00:00"
-type: note
+type: reference
 tags: [paper, transformers, series-temporales]
 source: telegram
 media_type: link
