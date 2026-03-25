@@ -15,6 +15,25 @@ from adso.vault_search import find_by_property, get_all_tags
 from adso.vault_writer import read_note
 
 
+def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True si hay una acción con teclado inline pendiente de resolución.
+
+    Cubre los estados que muestran un teclado al usuario y esperan que
+    presione un botón antes de procesar nuevo contenido.
+    No bloquea estados que explícitamente esperan texto (awaiting_correction,
+    pending_description, manage_missing_fields).
+    """
+    ud = context.user_data
+    if ud.get("pending_note"):
+        return True
+    pt = ud.get("pending_transcript", {})
+    if pt and not pt.get("awaiting_correction"):
+        return True
+    if ud.get("pending_extraction"):
+        return True
+    return False
+
+
 def _has_destination(fm: dict) -> bool:
     """Determina si el frontmatter tiene un destino claro."""
     if fm.get("type") in ("draft", "task"):

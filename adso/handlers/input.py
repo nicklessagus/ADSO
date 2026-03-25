@@ -12,7 +12,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _cleanup_pending, _detect_manage_keywords, _has_destination
+from adso.bot_utils import _cleanup_pending, _detect_manage_keywords, _has_destination, _has_pending_keyboard
 from adso.config import Settings
 from adso.constants import CB_EXTRACTION_CANCEL
 from adso.document_extractor import (
@@ -45,7 +45,7 @@ async def handle_text(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Handler principal de mensajes de texto."""
-    from adso.handlers.capture import _classify_and_preview, _handle_text_correction
+    from adso.handlers.capture import _classify_and_preview
     from adso.handlers.manage import _handle_manage, _handle_manage_missing_fields
 
     settings: Settings = context.bot_data["settings"]
@@ -107,10 +107,12 @@ async def handle_text(
         await _handle_manage_missing_fields(update, context, text)
         return
 
-    # Preview pendiente: corrección por texto libre
-    pending = context.user_data.get("pending_note")
-    if pending:
-        await _handle_text_correction(update, context, text, pending)
+    # Preview pendiente: bloquear hasta que el usuario resuelva el teclado
+    if context.user_data.get("pending_note"):
+        await update.message.reply_text(
+            "Hay una nota pendiente de confirmación. "
+            "Confirmá, reubicá o cancelá antes de continuar."
+        )
         return
 
     # Nuevo contenido
@@ -150,6 +152,12 @@ async def handle_audio(
     """Handler para mensajes de audio y voz."""
     settings: Settings = context.bot_data["settings"]
     msg = update.message
+
+    if _has_pending_keyboard(context):
+        await msg.reply_text(
+            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+        )
+        return
 
     audio_file = msg.voice or msg.audio
     if not audio_file:
@@ -215,6 +223,12 @@ async def handle_document(
     settings: Settings = context.bot_data["settings"]
     msg = update.message
     doc = msg.document
+
+    if _has_pending_keyboard(context):
+        await msg.reply_text(
+            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+        )
+        return
 
     if not doc:
         await msg.reply_text("No se pudo procesar el documento.")
