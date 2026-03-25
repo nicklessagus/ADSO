@@ -1040,6 +1040,25 @@ Calcula una puntuación para cada paper no leído combinando:
 
 Genera dos rankings: "refuerza lo que ya sabés" vs "introduce algo nuevo".
 
+### Índice de notas en `_index.md` por proyecto/área
+
+Cada `_index.md` tiene una sección `## Notas` generada automáticamente por el reporte semanal, con wikilinks a todas las notas del proyecto/área agrupadas por tipo:
+
+```markdown
+## Notas
+
+### Referencias
+- [[paper-x]] · [[paper-y]]
+
+### Ideas
+- [[idea-tesis]]
+
+### Tareas
+- [[tarea-experimento]]
+```
+
+Esto convierte los `_index.md` en nodos hub reales del grafo de Obsidian — cada proyecto/área aparece como centro radial conectado a sus notas. El reporte semanal regenera esta sección completa (no hace append — reemplaza). Los `_index.md` llevan `tags: [system]` para poder filtrarlos del grafo con `-tag:system` si se prefiere una vista sin los nodos hub.
+
 ### Detección de gaps
 
 - **Temas sin acción:** clusters de notas sin tareas ni notas de proyecto asociadas

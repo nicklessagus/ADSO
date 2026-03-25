@@ -138,7 +138,7 @@ async def _cb_manage_confirm(
                 "status": "active",
                 "description": params["description"],
                 "sections": [],
-                "tags": [params["name"]],
+                "tags": ["system", params["name"]],
                 "source": "system",
                 "project": params["name"],
             }
@@ -161,6 +161,7 @@ async def _cb_manage_confirm(
                 "title": params["name"].replace("-", " ").title(),
                 "type": "area-index",
                 "description": params["description"],
+                "tags": ["system", params["name"]],
                 "source": "system",
                 "area": params["name"],
             }
