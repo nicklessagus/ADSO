@@ -26,6 +26,8 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     ud = context.user_data
     if ud.get("pending_note"):
         return True
+    if ud.get("pending_raw_content"):
+        return True
     pt = ud.get("pending_transcript", {})
     if pt and not pt.get("awaiting_correction"):
         return True

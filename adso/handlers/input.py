@@ -107,11 +107,10 @@ async def handle_text(
         await _handle_manage_missing_fields(update, context, text)
         return
 
-    # Preview pendiente: bloquear hasta que el usuario resuelva el teclado
-    if context.user_data.get("pending_note"):
+    # Bloquear si hay cualquier teclado pendiente de resolución
+    if _has_pending_keyboard(context):
         await update.message.reply_text(
-            "Hay una nota pendiente de confirmación. "
-            "Confirmá, reubicá o cancelá antes de continuar."
+            "Hay una acción pendiente. Resolvé los botones antes de continuar."
         )
         return
 
