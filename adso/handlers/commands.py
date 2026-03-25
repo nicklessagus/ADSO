@@ -8,7 +8,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags
+from adso.bot_utils import _get_existing_items, _get_existing_tags, _has_pending_keyboard
 from adso.config import Settings
 from adso.constants import CB_CLASIFICAR_INBOX
 from adso.keyboards import _esc, build_capture_keyboard, build_preview
@@ -114,6 +114,13 @@ async def handle_clasificar(
         reply = update.callback_query.message.reply_text
     else:
         reply = update.message.reply_text
+
+    if _has_pending_keyboard(context):
+        ids = context.user_data.setdefault("block_msg_ids", [])
+        ids.append(update.message.message_id)
+        sent = await reply("Hay una acción pendiente. Resolvé los botones antes de continuar.")
+        ids.append(sent.message_id)
+        return
 
     inbox_notes = await find_by_property(
         "status", "pending-classification", vault_path,
