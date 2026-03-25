@@ -109,9 +109,10 @@ async def handle_text(
 
     # Bloquear si hay cualquier teclado pendiente de resolución
     if _has_pending_keyboard(context):
-        await update.message.reply_text(
+        sent = await update.message.reply_text(
             "Hay una acción pendiente. Resolvé los botones antes de continuar."
         )
+        context.user_data.setdefault("block_msg_ids", []).append(sent.message_id)
         return
 
     # Nuevo contenido
@@ -153,9 +154,10 @@ async def handle_audio(
     msg = update.message
 
     if _has_pending_keyboard(context):
-        await msg.reply_text(
+        sent = await msg.reply_text(
             "Hay una acción pendiente. Resolvé los botones antes de continuar."
         )
+        context.user_data.setdefault("block_msg_ids", []).append(sent.message_id)
         return
 
     audio_file = msg.voice or msg.audio
@@ -224,9 +226,10 @@ async def handle_document(
     doc = msg.document
 
     if _has_pending_keyboard(context):
-        await msg.reply_text(
+        sent = await msg.reply_text(
             "Hay una acción pendiente. Resolvé los botones antes de continuar."
         )
+        context.user_data.setdefault("block_msg_ids", []).append(sent.message_id)
         return
 
     if not doc:

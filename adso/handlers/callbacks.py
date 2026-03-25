@@ -72,6 +72,13 @@ async def handle_callback(
     await query.answer()
     data = query.data
 
+    # Borrar mensajes de bloqueo acumulados
+    for mid in context.user_data.pop("block_msg_ids", []):
+        try:
+            await context.bot.delete_message(chat_id=query.message.chat_id, message_id=mid)
+        except Exception:
+            pass
+
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
