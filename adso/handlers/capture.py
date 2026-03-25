@@ -437,6 +437,12 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         except Exception as e:
             logger.warning("Error guardando recurso: %s", e)
 
+    # Si viene de /clasificar y el LLM dejó pending-classification, la nota
+    # fue revisada y confirmada por el usuario — ya no está pendiente.
+    if inbox_path_str and fm.get("status") == "pending-classification":
+        _STATUS_CONFIRMED = {"reference": "active", "task": "pending", "idea": "raw"}
+        fm["status"] = _STATUS_CONFIRMED.get(fm.get("type", ""), "active")
+
     path = await create_note(fm, body, vault_path)
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
