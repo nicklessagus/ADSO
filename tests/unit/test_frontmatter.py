@@ -50,8 +50,12 @@ class TestFrontmatterGeneration:
         note = await read_note(path)
 
         # Verificar que son parseables como ISO 8601
-        datetime.fromisoformat(note.frontmatter["date_created"])
-        datetime.fromisoformat(note.frontmatter["date_modified"])
+        # python-frontmatter parsea fechas automáticamente a objetos datetime
+        for field in ("date_created", "date_modified"):
+            val = note.frontmatter[field]
+            if isinstance(val, str):
+                datetime.fromisoformat(val)
+            # Si ya es datetime, python-frontmatter lo parseó correctamente
 
     @pytest.mark.asyncio
     async def test_each_type_creates_valid_frontmatter(self, vault: Path) -> None:

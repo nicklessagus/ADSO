@@ -1,0 +1,174 @@
+"""Jobs periódicos del bot: reclasificación de inbox y reindex de embeddings."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Optional
+
+from telegram.ext import ContextTypes
+
+from adso.bot_utils import _get_existing_items, _get_existing_tags
+from adso.config import Settings
+from adso.embeddings import EmbeddingsClient
+from adso.handlers.capture import _index_note_safe
+from adso.keyboards import _esc
+from adso.llm_client import classify, extract_original_from_degraded
+from adso.vault_search import find_by_property
+from adso.vault_writer import GitBackup, create_note, delete_note, read_note
+
+logger = logging.getLogger(__name__)
+
+_PENDING_FLOW_KEYS = {
+    "pending_note", "pending_operation", "pending_raw_content",
+    "pending_extraction", "pending_transcript", "pending_description",
+    "manage_missing_fields",
+}
+
+_STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
+
+
+async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job periódico: clasifica silenciosamente notas de Inbox con destino ya asignado (Caso A).
+
+    Caso A — nota con project/area en frontmatter: el LLM genera tags, summary y body
+    limpio, preserva el destino del usuario y mueve la nota al directorio correcto.
+    Notificación breve al usuario al completar.
+
+    Caso B — nota sin destino: se ignora. El usuario debe usar /clasificar.
+    """
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+    chat_id = settings.telegram_allowed_user_id
+
+    inbox_notes = await find_by_property(
+        "status", "pending-classification", vault_path,
+        scope="00-Inbox",
+    )
+
+    if not inbox_notes:
+        return
+
+    user_data: dict = context.application.user_data.get(chat_id, {})
+    if any(k in user_data for k in _PENDING_FLOW_KEYS):
+        logger.info("Reclasificación: usuario tiene flujo pendiente, posponiendo.")
+        return
+
+    projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
+
+    for ref in inbox_notes:
+        try:
+            note = await read_note(ref.path)
+            orig_fm = note.frontmatter
+
+            # Caso B: sin destino — esperar /clasificar
+            if not orig_fm.get("project") and not orig_fm.get("area"):
+                continue
+
+            # Caso A: destino asignado — clasificar silenciosamente
+            if not note.body or not note.body.strip():
+                logger.info("Reclasificación: saltando nota sin body: %s", ref.path)
+                continue
+
+            result = await classify(
+                content=extract_original_from_degraded(note.body),
+                media_type=orig_fm.get("media_type", "text"),
+                existing_projects=projects,
+                existing_areas=areas,
+                existing_tags=existing_tags,
+                disambiguation_threshold=settings.llm.disambiguation_threshold,
+                user_context=orig_fm.get("user_context") or None,
+            )
+
+            if result.get("mode") == "degraded":
+                logger.info("Reclasificación: LLM no disponible, reintentará.")
+                return
+
+            if result.get("mode") != "capture":
+                logger.info(
+                    "Reclasificación: %s clasificada como '%s', omitiendo.",
+                    ref.path, result.get("mode"),
+                )
+                continue
+
+            payload = result["payload"]
+            if "frontmatter" not in payload:
+                logger.warning("Reclasificación: payload sin frontmatter en %s", ref.path)
+                continue
+
+            new_fm = payload["frontmatter"]
+
+            # Invariante: el destino asignado por el usuario nunca se sobreescribe
+            new_fm["project"] = orig_fm.get("project")
+            new_fm["section"] = orig_fm.get("section")
+            new_fm["area"] = orig_fm.get("area")
+            new_fm["date_created"] = orig_fm.get("date_created", "")
+            new_fm["source"] = "telegram"
+            new_fm["media_type"] = orig_fm.get("media_type", "text")
+            new_fm.pop("user_context", None)
+
+            note_type = new_fm.get("type", "reference")
+            if new_fm.get("status") in (None, "pending-classification"):
+                new_fm["status"] = _STATUS_DEFAULT.get(note_type, "active")
+
+            if orig_fm.get("media_type") == "audio":
+                body = extract_original_from_degraded(note.body)
+            else:
+                body = payload.get("body", extract_original_from_degraded(note.body))
+
+            # Verificar flujo activo justo antes de escribir (classify() tarda segundos)
+            user_data_now: dict = context.application.user_data.get(chat_id, {})
+            if any(k in user_data_now for k in _PENDING_FLOW_KEYS):
+                logger.info("Reclasificación: flujo iniciado durante classify(), posponiendo.")
+                return
+
+            await delete_note(ref.path)
+            new_path = await create_note(new_fm, body, vault_path)
+
+            git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
+            if git_backup:
+                await git_backup.notify(new_fm.get("title", "Sin título"))
+
+            embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+            if embeddings and body:
+                asyncio.create_task(
+                    _index_note_safe(embeddings, new_path, body, new_fm, vault_path)
+                )
+
+            title = new_fm.get("title", "Sin título")
+            dest = (
+                f"01-Projects/{new_fm['project']}"
+                if new_fm.get("project")
+                else f"02-Areas/{new_fm['area']}"
+            )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✓ Nota clasificada: <b>{_esc(title)}</b> → <code>{dest}</code>",
+                parse_mode="HTML",
+            )
+
+            logger.info("Reclasificación exitosa: %s → %s", ref.path, new_path)
+            return  # Procesar de a una por ciclo
+
+        except Exception as e:
+            logger.warning("Error reclasificando %s: %s", ref.path, e)
+
+
+async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job nocturno: reindexar vault completo en ChromaDB."""
+    settings: Settings = context.bot_data["settings"]
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+
+    if not embeddings:
+        return
+
+    logger.info("Reindex nocturno iniciando...")
+    try:
+        stats = await embeddings.reindex_vault(
+            vault_path=settings.vault_path,
+            exclude_dirs=settings.vault.exclude_dirs,
+        )
+        logger.info("Reindex completo: %s", stats)
+    except Exception as e:
+        logger.error("Error en reindex nocturno: %s", e)

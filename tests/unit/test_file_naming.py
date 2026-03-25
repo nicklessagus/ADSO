@@ -12,11 +12,11 @@ class TestMakeFilename:
 
     def test_basic_format(self) -> None:
         """Formato YYYY-MM-DD-slug.md."""
-        name = _make_filename("Mi primer nota", date="2025-01-15T14:30:00")
+        name = _make_filename("Mi primer nota", date_val="2025-01-15T14:30:00")
         assert name == "2025-01-15-mi-primer-nota.md"
 
     def test_special_chars_removed(self) -> None:
-        name = _make_filename("Nota: con (caracteres) #especiales!", date="2025-01-15")
+        name = _make_filename("Nota: con (caracteres) #especiales!", date_val="2025-01-15")
         assert "#" not in name
         assert ":" not in name
         assert "!" not in name
@@ -25,23 +25,23 @@ class TestMakeFilename:
     def test_long_title_truncated(self) -> None:
         """Slug truncado a MAX_SLUG_LENGTH."""
         long_title = "a" * 200
-        name = _make_filename(long_title, date="2025-01-15")
+        name = _make_filename(long_title, date_val="2025-01-15")
         slug_part = name[len("2025-01-15-"):-len(".md")]
         assert len(slug_part) <= 60
 
     def test_accents_transliterated(self) -> None:
-        name = _make_filename("Café con leche y niño", date="2025-01-15")
+        name = _make_filename("Café con leche y niño", date_val="2025-01-15")
         assert "cafe" in name
         assert "nino" in name
 
     def test_empty_title_fallback(self) -> None:
         """Título vacío → fallback a 'nota'."""
-        name = _make_filename("", date="2025-01-15")
+        name = _make_filename("", date_val="2025-01-15")
         assert "nota" in name
         assert name.endswith(".md")
 
     def test_whitespace_only_fallback(self) -> None:
-        name = _make_filename("   ", date="2025-01-15")
+        name = _make_filename("   ", date_val="2025-01-15")
         assert "nota" in name
 
     def test_no_date_uses_today(self) -> None:
@@ -54,7 +54,7 @@ class TestMakeFilename:
         assert len(parts[2]) == 2  # day
 
     def test_kebab_case(self) -> None:
-        name = _make_filename("Mi Nota Con Mayúsculas", date="2025-01-15")
+        name = _make_filename("Mi Nota Con Mayúsculas", date_val="2025-01-15")
         # El slug debe ser lowercase con guiones
         slug = name[len("2025-01-15-"):-len(".md")]
         assert slug == slug.lower()

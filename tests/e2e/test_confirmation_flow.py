@@ -6,9 +6,9 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from adso.bot import (
-    handle_text,
-    handle_callback,
+from adso.handlers.input import handle_text
+from adso.handlers.callbacks import handle_callback
+from adso.constants import (
     CB_CONFIRM,
     CB_CANCEL,
     CB_CORRECT,
@@ -128,7 +128,7 @@ class TestConfirmation:
 class TestTextCorrection:
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_title_correction(
         self, mock_classify, make_update, mock_context
@@ -143,7 +143,7 @@ class TestTextCorrection:
         assert fm["title"] == "Nuevo título corregido"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_priority_correction(
         self, mock_classify, make_update, mock_context
@@ -158,7 +158,7 @@ class TestTextCorrection:
         assert fm["priority"] == "high"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_add_tag(
         self, mock_classify, make_update, mock_context
@@ -176,7 +176,7 @@ class TestTextCorrection:
 class TestManageFlow:
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_create_project_flow(
         self, mock_classify, make_update, make_callback_query, mock_context
@@ -218,7 +218,7 @@ class TestManageFlow:
         assert index_path.exists()
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_manage_cancel(
         self, mock_classify, make_update, make_callback_query, mock_context

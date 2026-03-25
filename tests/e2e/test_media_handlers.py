@@ -8,14 +8,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import ALLOWED_USER_ID, make_message, make_user, make_chat
 
-from adso.bot import (
-    handle_audio,
-    handle_document,
-    handle_callback,
-    handle_text,
+from adso.handlers.input import handle_audio, handle_document, handle_text, _process_pdf_after_read_status
+from adso.handlers.callbacks import handle_callback
+from adso.handlers.capture import _classify_and_preview
+from adso.bot_utils import _cleanup_pending
+from adso.keyboards import (
     build_transcript_keyboard,
     build_read_status_keyboard,
     build_extraction_keyboard,
+)
+from adso.constants import (
     CB_TRANSCRIPT_OK,
     CB_TRANSCRIPT_CANCEL,
     CB_READ_STATUS_READ,
@@ -23,9 +25,6 @@ from adso.bot import (
     CB_EXTRACTION_OK,
     CB_EXTRACTION_CANCEL,
     CB_CONFIRM,
-    _classify_and_preview,
-    _process_pdf_after_read_status,
-    _cleanup_pending,
 )
 
 # Decorador común para autorizar el user_id de test
@@ -67,7 +66,7 @@ class TestHandleAudio:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot.transcribe_audio")
+    @patch("adso.handlers.input.transcribe_audio")
     async def test_voice_message_transcribes(
         self, mock_transcribe, make_update, mock_context, tmp_path,
     ) -> None:
@@ -125,7 +124,7 @@ class TestHandleAudio:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot.transcribe_audio")
+    @patch("adso.handlers.input.transcribe_audio")
     async def test_audio_file_message(
         self, mock_transcribe, make_update, mock_context, tmp_path,
     ) -> None:
@@ -157,7 +156,7 @@ class TestHandleAudio:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot.transcribe_audio")
+    @patch("adso.handlers.input.transcribe_audio")
     async def test_empty_transcription(
         self, mock_transcribe, make_update, mock_context, tmp_path,
     ) -> None:
@@ -309,7 +308,7 @@ class TestTranscriptCallbacks:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot._classify_and_preview", new_callable=AsyncMock)
+    @patch("adso.handlers.capture._classify_and_preview", new_callable=AsyncMock)
     async def test_transcript_ok_classifies(
         self, mock_classify, make_callback_query, mock_context,
     ) -> None:
@@ -357,7 +356,7 @@ class TestReadStatusCallbacks:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot.extract_pdf")
+    @patch("adso.handlers.input.extract_pdf")
     async def test_read_status_triggers_extraction(
         self, mock_extract, make_callback_query, mock_context, tmp_path,
     ) -> None:
@@ -386,7 +385,7 @@ class TestReadStatusCallbacks:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot.extract_pdf")
+    @patch("adso.handlers.input.extract_pdf")
     async def test_empty_pdf_asks_description(
         self, mock_extract, make_callback_query, mock_context, tmp_path,
     ) -> None:
@@ -416,7 +415,7 @@ class TestExtractionCallbacks:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot._classify_and_preview", new_callable=AsyncMock)
+    @patch("adso.handlers.capture._classify_and_preview", new_callable=AsyncMock)
     async def test_extraction_ok_classifies(
         self, mock_classify, make_callback_query, mock_context,
     ) -> None:
@@ -479,6 +478,7 @@ class TestTextCorrectionsInMediaFlows:
             "text": "texto original",
             "temp_path": "/tmp/fake.ogg",
             "media_type": "audio",
+            "awaiting_correction": True,
         }
 
         update = make_update(text="texto corregido")
@@ -506,7 +506,7 @@ class TestTextCorrectionsInMediaFlows:
 
     @pytest.mark.asyncio
     @AUTH
-    @patch("adso.bot._classify_and_preview", new_callable=AsyncMock)
+    @patch("adso.handlers.capture._classify_and_preview", new_callable=AsyncMock)
     async def test_text_provides_description(
         self, mock_classify, make_update, mock_context,
     ) -> None:

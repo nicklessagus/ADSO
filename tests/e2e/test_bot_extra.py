@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from adso.bot import (
-    handle_text,
-    handle_callback,
+from adso.handlers.input import handle_text
+from adso.handlers.callbacks import handle_callback
+from adso.keyboards import (
     build_preview,
     build_capture_keyboard,
     build_destination_keyboard,
@@ -15,8 +15,10 @@ from adso.bot import (
     build_manage_keyboard,
     build_area_selector,
     build_project_selector,
-    _has_destination,
     _esc,
+)
+from adso.bot_utils import _has_destination
+from adso.constants import (
     CB_CONFIRM,
     CB_CANCEL,
     CB_CORRECT,
@@ -246,7 +248,7 @@ class TestCallbackPaths:
 class TestTextCorrectionExtra:
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_type_correction(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
@@ -256,7 +258,7 @@ class TestTextCorrectionExtra:
         assert fm["type"] == "task"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_type_nota_correction(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context, note_type="task")
@@ -266,7 +268,7 @@ class TestTextCorrectionExtra:
         assert fm["type"] == "reference"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_type_idea_correction(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
@@ -276,7 +278,7 @@ class TestTextCorrectionExtra:
         assert fm["type"] == "idea"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_priority_media(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
@@ -286,7 +288,7 @@ class TestTextCorrectionExtra:
         assert fm["priority"] == "medium"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_priority_baja(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
@@ -296,7 +298,7 @@ class TestTextCorrectionExtra:
         assert fm["priority"] == "low"
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_default_correction_sets_title(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)

@@ -115,7 +115,13 @@ class TestSetProperty:
     async def test_set_valid_date(self, sample_note: Path) -> None:
         await set_property(sample_note, "due_date", "2025-06-15T10:00:00")
         note = await read_note(sample_note)
-        assert note.frontmatter["due_date"] == "2025-06-15T10:00:00"
+        # python-frontmatter puede devolver datetime o string según el parser YAML
+        from datetime import datetime as dt
+        val = note.frontmatter["due_date"]
+        if isinstance(val, dt):
+            assert val == dt(2025, 6, 15, 10, 0)
+        else:
+            assert val == "2025-06-15T10:00:00"
 
 
 class TestDeleteNote:

@@ -6,14 +6,16 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from adso.bot import handle_text, handle_callback, CB_CONFIRM, CB_INTENT_SAVE
+from adso.handlers.input import handle_text
+from adso.handlers.callbacks import handle_callback
+from adso.constants import CB_CONFIRM, CB_INTENT_SAVE
 from adso.vault_writer import read_note
 
 
 class TestCaptureMessage:
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_text_to_preview_to_confirm_to_vault(
         self, mock_classify, make_update, make_callback_query, mock_context
@@ -68,7 +70,7 @@ class TestCaptureMessage:
         assert "0.87" in note.body
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_degraded_mode_shows_preview(
         self, mock_classify, make_update, make_callback_query, mock_context
@@ -113,7 +115,7 @@ class TestCaptureMessage:
         assert len(inbox_files) >= 1
 
     @pytest.mark.asyncio
-    @patch("adso.bot.classify")
+    @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_disambiguation_shows_buttons(
         self, mock_classify, make_update, mock_context
