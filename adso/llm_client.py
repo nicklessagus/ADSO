@@ -261,6 +261,15 @@ def validate_llm_response(response_json: dict) -> dict:
     return response_json
 
 
+def _to_kebab(tag: str) -> str:
+    """Normalize a tag to kebab-case (lowercase, spaces→hyphens, strip invalid chars)."""
+    tag = tag.lower().strip()
+    tag = re.sub(r"[\s_]+", "-", tag)          # spaces and underscores → hyphens
+    tag = re.sub(r"[^a-z0-9\-]", "", tag)      # remove anything else
+    tag = re.sub(r"-{2,}", "-", tag)            # collapse consecutive hyphens
+    return tag.strip("-")
+
+
 def _validate_capture_payload(payload: dict) -> None:
     """Validate the capture mode payload."""
     fm = payload.get("frontmatter")
@@ -292,6 +301,13 @@ def _validate_capture_payload(payload: dict) -> None:
     priority = fm.get("priority")
     if priority is not None and priority not in VALID_PRIORITY:
         raise LLMResponseError(f"Invalid priority: {priority!r}")
+
+    # Normalize tags to kebab-case regardless of model
+    tags = fm.get("tags")
+    if isinstance(tags, list):
+        fm["tags"] = [t for t in (_to_kebab(str(tag)) for tag in tags) if t]
+    elif tags is None:
+        fm["tags"] = []
 
     if "body" not in payload:
         payload["body"] = ""  # small models occasionally omit the body
