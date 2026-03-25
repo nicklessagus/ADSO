@@ -445,6 +445,26 @@ Brief summary in Spanish (1-2 sentences, plain text, no callout syntax) | null
   - delete_area: {{"name": "..."}}
   - rename_project / rename_area: {{"old_name": "...", "new_name": "..."}}
   - convert_idea_to_project: {{"note": "...", "project_name": "...", "description": "..."}}
+
+## REQUIRED output format (always wrap your response in this exact JSON structure):
+{{
+  "mode": "capture",
+  "confidence": 0.9,
+  "payload": {{
+    "frontmatter": {{
+      "title": "...",
+      "type": "note",
+      "tags": [],
+      "status": "active",
+      "project": null,
+      "area": null,
+      "priority": null
+    }},
+    "body": "...",
+    "summary": "..."
+  }}
+}}
+The top-level keys "mode", "confidence", and "payload" are mandatory in every response.
 """
 
 
