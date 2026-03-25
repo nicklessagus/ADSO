@@ -517,10 +517,10 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 |---|---|
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
-| **Audio transcripto** | `[Confirmar]` `[Corregir]` `[Cancelar]` |
-| **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
+| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
+| **Captura** (destino claro) | `[Cancelar]` `[Reubicar]` `[Confirmar]` |
 | **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
-| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
+| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` + `[Cancelar]` abajo |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
@@ -528,6 +528,10 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **Fallback OCR falla** | `[Gemini Vision]` `[Describí vos]` `[Cancelar]` |
 | **Fallback Gemini Vision falla** | `[OCR]` `[Describí vos]` `[Cancelar]` |
 | **Fallback extracción web falla** | `[Describí vos]` `[Cancelar]` |
+
+**Convención de orden:** en teclados con `[Cancelar]` y `[Confirmar]` en la misma fila, `[Cancelar]` siempre va a la izquierda (más alejado del pulgar) y `[Confirmar]` a la derecha. Las acciones intermedias (Reubicar, Corregir) van en el centro.
+
+**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución (`pending_note`, `pending_raw_content`, `pending_transcript` sin `awaiting_correction`, `pending_extraction`), el bot rechaza cualquier nuevo mensaje (texto, audio, documento) con un aviso. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat.
 
 ### Desambiguación de intención
 
