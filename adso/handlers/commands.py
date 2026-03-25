@@ -187,10 +187,3 @@ async def handle_clasificar(
     keyboard = build_capture_keyboard(new_fm, has_dest)
 
     await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")
-
-    remaining = len(caso_b) - 1
-    if remaining > 0:
-        await reply(
-            f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
-            "Mandá /clasificar para continuar."
-        )

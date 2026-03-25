@@ -462,6 +462,21 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     )
     context.user_data.pop("original_content", None)
 
+    if inbox_path_str:
+        # Recalcular pendientes tras confirmar para mostrar el contador real
+        try:
+            remaining_refs = await find_by_property(
+                "status", "pending-classification", vault_path, scope="00-Inbox"
+            )
+            remaining = len(remaining_refs)
+            if remaining > 0:
+                await query.message.reply_text(
+                    f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
+                    "Mandá /clasificar para continuar."
+                )
+        except Exception as e:
+            logger.warning("Error calculando notas pendientes tras confirmar: %s", e)
+
 
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
