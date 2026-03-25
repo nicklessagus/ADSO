@@ -137,6 +137,7 @@ def build_destination_keyboard() -> InlineKeyboardMarkup:
     """Teclado para corregir destino."""
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
             InlineKeyboardButton("Inbox", callback_data=CB_DEST_INBOX),
         ],
         [
