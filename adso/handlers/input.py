@@ -123,8 +123,8 @@ async def handle_text(
             "Detecté un patrón sospechoso en el contenido. "
             "¿Querés procesarlo de todas formas?",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Sí, procesar", callback_data=CB_INTENT_SAVE),
                 InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+                InlineKeyboardButton("Sí, procesar", callback_data=CB_INTENT_SAVE),
             ]]),
         )
         return

@@ -67,7 +67,10 @@ def _detect_manage_keywords(text: str) -> list[str]:
         Lista de intenciones detectadas: 'project', 'area', 'archive', 'delete', 'rename'.
     """
     lower = text.lower()
-    return [intent for intent, kws in MANAGE_KEYWORDS.items() if any(kw in lower for kw in kws)]
+    return [
+        intent for intent, kws in MANAGE_KEYWORDS.items()
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", lower) for kw in kws)
+    ]
 
 
 def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:

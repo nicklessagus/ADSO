@@ -113,9 +113,9 @@ def build_capture_keyboard(
     if has_destination:
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
-                InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
                 InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+                InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
+                InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
             ]
         ])
     else:
@@ -160,8 +160,8 @@ def build_manage_keyboard() -> InlineKeyboardMarkup:
     """Teclado de confirmación para operaciones de gestión."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Confirmar", callback_data=CB_MANAGE_CONFIRM),
             InlineKeyboardButton("Cancelar", callback_data=CB_MANAGE_CANCEL),
+            InlineKeyboardButton("Confirmar", callback_data=CB_MANAGE_CONFIRM),
         ]
     ])
 
@@ -170,9 +170,9 @@ def build_transcript_keyboard() -> InlineKeyboardMarkup:
     """Teclado para confirmar/corregir/cancelar transcripción de audio."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Confirmar", callback_data=CB_TRANSCRIPT_OK),
-            InlineKeyboardButton("Corregir", callback_data=CB_TRANSCRIPT_CORRECT),
             InlineKeyboardButton("Cancelar", callback_data=CB_TRANSCRIPT_CANCEL),
+            InlineKeyboardButton("Corregir", callback_data=CB_TRANSCRIPT_CORRECT),
+            InlineKeyboardButton("Confirmar", callback_data=CB_TRANSCRIPT_OK),
         ]
     ])
 
@@ -191,8 +191,8 @@ def build_extraction_keyboard() -> InlineKeyboardMarkup:
     """Teclado para confirmar texto extraído de un documento."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Confirmar", callback_data=CB_EXTRACTION_OK),
             InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
+            InlineKeyboardButton("Confirmar", callback_data=CB_EXTRACTION_OK),
         ]
     ])
 
@@ -209,8 +209,8 @@ async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -227,8 +227,8 @@ async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
     ]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -247,8 +247,8 @@ def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
 
     rows = [manage_buttons[i:i+2] for i in range(0, len(manage_buttons), 2)] if manage_buttons else []
     rows.append([
-        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -256,6 +256,6 @@ def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
 def build_save_keyboard() -> InlineKeyboardMarkup:
     """Teclado mínimo: guardar como nota o cancelar."""
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
     ]])
