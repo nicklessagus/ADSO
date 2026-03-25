@@ -15,6 +15,7 @@ services:
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config.yaml
       - ANONYMIZED_TELEMETRY=false
+      - HF_HOME=/app/data/hf_cache
 
 volumes:
   adso-data:

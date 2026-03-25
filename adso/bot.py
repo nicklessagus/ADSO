@@ -34,6 +34,7 @@ from adso.vault_writer import (
     GitBackup,
     NoteData,
     create_note,
+    delete_note,
     ensure_vault_structure,
     read_note,
     save_resource,
@@ -64,6 +65,7 @@ CB_MANAGE_CANCEL = "manage:cancel"
 CB_INTENT_SAVE = "intent:save"
 CB_INTENT_CREATE_PROJECT = "intent:project"
 CB_INTENT_CREATE_AREA = "intent:area"
+CB_CLASIFICAR_INBOX = "clasificar:inbox"
 
 # Audio / documento
 CB_TRANSCRIPT_OK = "transcript:ok"
@@ -544,7 +546,7 @@ async def handle_audio(
         await tg_file.download_to_drive(str(tmp_path))
 
         # Transcribir
-        text = await transcribe_audio(tmp_path, model=settings.whisper.model)
+        text = await transcribe_audio(tmp_path, model=settings.whisper.model, model_dir=settings.whisper.model_dir, language=settings.whisper.language)
 
         if not text.strip():
             await msg.reply_text("No se pudo extraer texto del audio.")
@@ -615,6 +617,7 @@ async def handle_document(
             "temp_path": str(tmp_path),
             "original_filename": filename,
             "media_type": "document",
+            "user_context": msg.caption or None,
         }
         await msg.reply_text(
             f"PDF recibido: <b>{_esc(filename)}</b>",
@@ -637,6 +640,7 @@ async def handle_document(
                 "original_filename": filename,
                 "media_type": "document",
                 "metadata": {},
+                "user_context": msg.caption or None,
             }
 
             snippet = text[:500]
@@ -778,6 +782,7 @@ async def _classify_and_preview(
     media_type: str,
     resource_file: Optional[dict] = None,
     extra_fm: Optional[dict] = None,
+    user_context: Optional[str] = None,
 ) -> None:
     """Clasifica texto extraído y muestra preview.
 
@@ -790,6 +795,9 @@ async def _classify_and_preview(
         media_type: 'audio' o 'document'.
         resource_file: Info del archivo para guardar en Resources {temp_path, filename}.
         extra_fm: Campos adicionales para el frontmatter (read_status, etc.).
+        user_context: Mensaje del usuario enviado junto al archivo (caption). Se guarda
+            en el frontmatter si la nota cae en modo degradado para que el cron pueda
+            usarlo al reclasificar.
     """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
@@ -811,6 +819,7 @@ async def _classify_and_preview(
         existing_tags=existing_tags,
         disambiguation_threshold=settings.llm.disambiguation_threshold,
         on_retry=on_retry,
+        user_context=user_context,
     )
 
     mode = result.get("mode", "")
@@ -837,6 +846,9 @@ async def _classify_and_preview(
         fm["media_type"] = media_type
         if extra_fm:
             fm.update(extra_fm)
+        # Guardar contexto del usuario para que el cron lo use al reclasificar
+        if user_context:
+            fm["user_context"] = user_context
 
         context.user_data["pending_note"] = result
         result["payload"]["suggested_links"] = []
@@ -1293,20 +1305,15 @@ async def handle_callback(
     elif data == CB_EXTRACTION_CANCEL:
         _cleanup_pending(context, "pending_extraction", "pending_description")
         await query.edit_message_text("Cancelado.")
+    elif data == CB_CLASIFICAR_INBOX:
+        await handle_clasificar(update, context)
 
 
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
     """Confirma y escribe la nota al vault."""
-    # Chequear si es una reclasificación de inbox (estado en bot_data, no user_data)
-    msg_id = query.message.message_id
-    reclassify_map: dict = context.bot_data.get("reclassify_pending", {})
-    inbox_path_str: Optional[str] = None
-    if msg_id in reclassify_map:
-        entry = reclassify_map.pop(msg_id)
-        pending = entry["result"]
-        inbox_path_str = entry["inbox_path"]
-    else:
-        pending = context.user_data.pop("pending_note", None)
+    pending = context.user_data.pop("pending_note", None)
+    # inbox_path_str: si viene de /clasificar, hay que borrar la nota vieja del Inbox
+    inbox_path_str: Optional[str] = context.user_data.pop("clasificar_inbox_path", None)
 
     if not pending:
         await query.edit_message_text("No hay nota pendiente.")
@@ -1395,9 +1402,7 @@ async def _index_note_safe(
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
     _cleanup_pending(context)
-    # Limpiar reclasificación pendiente si corresponde a este mensaje
-    msg_id = query.message.message_id
-    context.bot_data.get("reclassify_pending", {}).pop(msg_id, None)
+    context.user_data.pop("clasificar_inbox_path", None)
     await query.edit_message_text("Cancelado.")
 
 
@@ -1491,6 +1496,7 @@ async def _cb_extraction_ok(
         media_type=pe.get("media_type", "document"),
         resource_file=resource_info,
         extra_fm=extra_fm or None,
+        user_context=pe.get("user_context"),
     )
 
 
@@ -1735,9 +1741,24 @@ async def handle_status(
     vault_path = settings.vault_path
 
     # --- Vault stats ---
-    inbox_notes = list((vault_path / "00-Inbox").glob("*.md")) if (vault_path / "00-Inbox").exists() else []
-    pending = [f for f in inbox_notes if "pending-classification" in f.read_text(errors="ignore")]
     total_notes = len(list(vault_path.rglob("*.md")))
+    inbox_dir = vault_path / "00-Inbox"
+    inbox_count = 0
+    pending_auto = 0   # Caso A: con destino (el cron los procesa)
+    pending_manual = 0  # Caso B: sin destino (requieren /clasificar)
+    if inbox_dir.exists():
+        for f in inbox_dir.glob("*.md"):
+            inbox_count += 1
+            try:
+                note = await read_note(f)
+                if note.frontmatter.get("status") == "pending-classification":
+                    if note.frontmatter.get("project") or note.frontmatter.get("area"):
+                        pending_auto += 1
+                    else:
+                        pending_manual += 1
+            except Exception:
+                pass
+    total_pending = pending_auto + pending_manual
 
     # --- LLM ---
     llm_model = "gemini-2.5-flash-lite"  # TODO: leer de settings cuando se exponga
@@ -1758,7 +1779,7 @@ async def handle_status(
         f"<b>Git backup:</b> {backup_status}",
         "",
         f"<b>Notas en vault:</b> {total_notes}",
-        f"<b>En inbox:</b> {len(inbox_notes)} ({len(pending)} pendientes de clasificar)",
+        f"<b>En inbox:</b> {inbox_count}",
         "",
         f"<b>Vault:</b> <code>{vault_path}</code>",
         # TODO: última sincronización Syncthing
@@ -1766,7 +1787,20 @@ async def handle_status(
         # TODO: conteo por área/proyecto
         # TODO: uso de tokens / llamadas API del día
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+    markup = None
+    if total_pending > 0:
+        lines.append("")
+        lines.append(f"⚠️ <b>Inbox pendiente:</b> {total_pending}")
+        if pending_auto:
+            lines.append(f"  · Con destino asignado: {pending_auto} (el bot las procesa automáticamente)")
+        if pending_manual:
+            lines.append(f"  · Sin destino: {pending_manual}")
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Clasificar inbox", callback_data=CB_CLASIFICAR_INBOX)]
+            ])
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=markup)
 
 
 # ---------------------------------------------------------------------------
@@ -1775,10 +1809,13 @@ async def handle_status(
 
 
 async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job periódico: reintenta clasificar notas de Inbox pendientes.
+    """Job periódico: clasifica silenciosamente notas de Inbox con destino ya asignado (Caso A).
 
-    Si la reclasificación tiene éxito, manda preview al usuario para confirmación
-    en vez de escribir directamente al vault.
+    Caso A — nota con project/area en frontmatter: el LLM genera tags, summary y body
+    limpio, preserva el destino del usuario y mueve la nota al directorio correcto.
+    Notificación breve al usuario al completar.
+
+    Caso B — nota sin destino: se ignora. El usuario debe usar /clasificar.
     """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
@@ -1792,16 +1829,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not inbox_notes:
         return
 
-    projects, areas = await _get_existing_items(vault_path)
-    existing_tags = await _get_existing_tags(vault_path)
-
-    # Si ya hay una reclasificación pendiente de confirmación, no mandar más
-    pending_map: dict = context.bot_data.get("reclassify_pending", {})
-    if pending_map:
-        logger.info("Reclasificación: hay %d previews pendientes de confirmación, esperando.", len(pending_map))
-        return
-
-    # Si el usuario está en medio de un flujo (nota pendiente, operación, etc.), no interrumpir
+    # No interrumpir si el usuario tiene un flujo activo
     _PENDING_FLOW_KEYS = {
         "pending_note", "pending_operation", "pending_raw_content",
         "pending_extraction", "pending_transcript", "pending_description",
@@ -1812,30 +1840,42 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("Reclasificación: usuario tiene flujo pendiente, posponiendo.")
         return
 
+    projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
+
+    _STATUS_DEFAULT = {"note": "active", "task": "pending", "idea": "raw"}
+
     for ref in inbox_notes:
         try:
             note = await read_note(ref.path)
+            orig_fm = note.frontmatter
 
-            # Ignorar notas sin body real (ej: mensajes de gestión guardados en degradado)
+            # Caso B: sin destino — esperar /clasificar
+            if not orig_fm.get("project") and not orig_fm.get("area"):
+                continue
+
+            # Caso A: destino asignado — clasificar silenciosamente
             if not note.body or not note.body.strip():
                 logger.info("Reclasificación: saltando nota sin body: %s", ref.path)
                 continue
 
             result = await classify(
                 content=extract_original_from_degraded(note.body),
-                media_type=note.frontmatter.get("media_type", "text"),
+                media_type=orig_fm.get("media_type", "text"),
                 existing_projects=projects,
                 existing_areas=areas,
                 existing_tags=existing_tags,
                 disambiguation_threshold=settings.llm.disambiguation_threshold,
+                user_context=orig_fm.get("user_context") or None,
             )
 
             if result.get("mode") == "degraded":
-                continue
+                # LLM no disponible — reintentará en el próximo ciclo
+                logger.info("Reclasificación: LLM no disponible, reintentará.")
+                return
 
-            # Ignorar si el LLM clasificó como manage (no es una nota capturable)
             if result.get("mode") != "capture":
-                logger.info("Reclasificación: nota %s clasificada como '%s', omitiendo.", ref.path, result.get("mode"))
+                logger.info("Reclasificación: %s clasificada como '%s', omitiendo.", ref.path, result.get("mode"))
                 continue
 
             payload = result["payload"]
@@ -1843,44 +1883,163 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.warning("Reclasificación: payload sin frontmatter en %s", ref.path)
                 continue
 
-            # Preservar metadatos originales
-            fm = payload["frontmatter"]
-            fm["date_created"] = note.frontmatter.get("date_created", "")
-            fm["source"] = "telegram"
-            fm["media_type"] = note.frontmatter.get("media_type", "text")
+            new_fm = payload["frontmatter"]
+
+            # Invariante: el destino asignado por el usuario nunca se sobreescribe
+            new_fm["project"] = orig_fm.get("project")
+            new_fm["section"] = orig_fm.get("section")
+            new_fm["area"] = orig_fm.get("area")
+            new_fm["date_created"] = orig_fm.get("date_created", "")
+            new_fm["source"] = "telegram"
+            new_fm["media_type"] = orig_fm.get("media_type", "text")
+            # user_context consumido — eliminarlo del frontmatter final
+            new_fm.pop("user_context", None)
+
+            # Status correcto según tipo (reemplaza pending-classification)
+            note_type = new_fm.get("type", "note")
+            if new_fm.get("status") in (None, "pending-classification"):
+                new_fm["status"] = _STATUS_DEFAULT.get(note_type, "active")
+
             body = payload.get("body", extract_original_from_degraded(note.body))
 
-            # Re-verificar flujo activo justo antes de enviar (classify() tarda segundos)
+            # Verificar flujo activo justo antes de escribir (classify() tarda segundos)
             user_data_now: dict = context.application.user_data.get(chat_id, {})
             if any(k in user_data_now for k in _PENDING_FLOW_KEYS):
                 logger.info("Reclasificación: flujo iniciado durante classify(), posponiendo.")
                 return
 
-            # Mandar preview al usuario — de a uno por cron
-            preview_text = build_preview(fm, body, [])
-            preview_text = "♻️ <b>Nota reclasificada del Inbox</b>\n\n" + preview_text
-            has_dest = bool(fm.get("project") or fm.get("area"))
-            keyboard = build_capture_keyboard(fm, has_dest)
+            # Borrar nota vieja del Inbox y crear clasificada en destino
+            await delete_note(ref.path)
+            new_path = await create_note(new_fm, body, vault_path)
 
-            msg = await context.bot.send_message(
+            # Git backup
+            git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
+            if git_backup:
+                await git_backup.notify(new_fm.get("title", "Sin título"))
+
+            # Indexar embedding
+            embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+            if embeddings and body:
+                asyncio.create_task(
+                    _index_note_safe(embeddings, new_path, body, new_fm, vault_path)
+                )
+
+            # Notificación breve al usuario
+            title = new_fm.get("title", "Sin título")
+            dest = (
+                f"01-Projects/{new_fm['project']}"
+                if new_fm.get("project")
+                else f"02-Areas/{new_fm['area']}"
+            )
+            await context.bot.send_message(
                 chat_id=chat_id,
-                text=preview_text,
+                text=f"✓ Nota clasificada: <b>{_esc(title)}</b> → <code>{dest}</code>",
                 parse_mode="HTML",
-                reply_markup=keyboard,
             )
 
-            if "reclassify_pending" not in context.bot_data:
-                context.bot_data["reclassify_pending"] = {}
-            context.bot_data["reclassify_pending"][msg.message_id] = {
-                "result": result,
-                "inbox_path": str(ref.path),
-            }
-            logger.info("Reclasificación pendiente de confirmación: %s", ref.path)
-            # Mandar solo una por ciclo de cron
+            logger.info("Reclasificación exitosa: %s → %s", ref.path, new_path)
+            # Procesar de a una por ciclo
             return
 
         except Exception as e:
             logger.warning("Error reclasificando %s: %s", ref.path, e)
+
+
+@authorized
+async def handle_clasificar(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /clasificar — procesa notas de Inbox sin destino asignado (Caso B).
+
+    Toma la primera nota pendiente sin project/area, llama al LLM y muestra el
+    preview para confirmación del usuario (mismo flujo que captura normal).
+    Si hay más notas pendientes, avisa al usuario para que vuelva a invocar el comando.
+    """
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+
+    # Determinar función de reply según contexto (comando vs botón inline)
+    if update.callback_query:
+        await update.callback_query.answer()
+        reply = update.callback_query.message.reply_text
+    else:
+        reply = update.message.reply_text
+
+    inbox_notes = await find_by_property(
+        "status", "pending-classification", vault_path,
+        scope="00-Inbox",
+    )
+
+    # Filtrar solo Caso B: sin project ni area
+    caso_b: list[tuple] = []
+    for ref in inbox_notes:
+        try:
+            note = await read_note(ref.path)
+            fm = note.frontmatter
+            if not fm.get("project") and not fm.get("area"):
+                caso_b.append((ref, note))
+        except Exception as e:
+            logger.warning("Error leyendo nota de inbox para /clasificar: %s", e)
+
+    if not caso_b:
+        await reply("No hay notas pendientes de clasificar.")
+        return
+
+    ref, note = caso_b[0]
+    orig_fm = note.frontmatter
+
+    if not note.body or not note.body.strip():
+        await reply(f"Nota {ref.path.name} sin contenido, saltando. Volvé a intentar.")
+        return
+
+    projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
+
+    await reply("Clasificando...")
+
+    result = await classify(
+        content=extract_original_from_degraded(note.body),
+        media_type=orig_fm.get("media_type", "text"),
+        existing_projects=projects,
+        existing_areas=areas,
+        existing_tags=existing_tags,
+        disambiguation_threshold=settings.llm.disambiguation_threshold,
+        user_context=orig_fm.get("user_context") or None,
+    )
+
+    if result.get("mode") == "degraded":
+        await reply("El LLM no está disponible. La nota quedó en Inbox.")
+        return
+
+    if result.get("mode") != "capture" or "frontmatter" not in result.get("payload", {}):
+        await reply("No se pudo clasificar la nota.")
+        return
+
+    payload = result["payload"]
+    new_fm = payload["frontmatter"]
+    new_fm["date_created"] = orig_fm.get("date_created", "")
+    new_fm["source"] = "telegram"
+    new_fm["media_type"] = orig_fm.get("media_type", "text")
+    new_fm.pop("user_context", None)
+    body = payload.get("body", extract_original_from_degraded(note.body))
+
+    # Guardar para confirmación normal + referencia a nota vieja de Inbox
+    context.user_data["pending_note"] = result
+    context.user_data["clasificar_inbox_path"] = str(ref.path)
+
+    preview_text = "♻️ <b>Nota de Inbox</b>\n\n" + build_preview(new_fm, body, [])
+    has_dest = bool(new_fm.get("project") or new_fm.get("area"))
+    keyboard = build_capture_keyboard(new_fm, has_dest)
+
+    await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")
+
+    remaining = len(caso_b) - 1
+    if remaining > 0:
+        await reply(
+            f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
+            "Mandá /clasificar para continuar."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1925,6 +2084,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("status", handle_status))
+    app.add_handler(CommandHandler("clasificar", handle_clasificar))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

@@ -21,12 +21,16 @@ _model_name: str = ""
 async def transcribe_audio(
     file_path: Path,
     model: str = "base",
+    model_dir: str = "/app/data/whisper",
+    language: str = "es",
 ) -> str:
     """Transcribe un archivo de audio a texto.
 
     Args:
         file_path: Path al archivo de audio (ogg, mp3, wav, etc.).
         model: Nombre del modelo whisper ('tiny' o 'base').
+        model_dir: Directorio donde se almacena/descarga el modelo. Debe ser
+            escribible; en Docker usar un path dentro del volumen /app/data.
 
     Returns:
         Texto transcripto.
@@ -39,11 +43,11 @@ async def transcribe_audio(
         raise FileNotFoundError(f"Archivo de audio no encontrado: {file_path}")
 
     def _do_transcribe() -> str:
-        mdl = _get_model(model)
+        mdl = _get_model(model, model_dir)
         segments, info = mdl.transcribe(
             str(file_path),
             beam_size=5,
-            language=None,  # auto-detect
+            language=language,
         )
         text = " ".join(segment.text.strip() for segment in segments)
         logger.info(
@@ -56,11 +60,12 @@ async def transcribe_audio(
     return await asyncio.to_thread(_do_transcribe)
 
 
-def _get_model(model_name: str) -> object:
+def _get_model(model_name: str, model_dir: str = "/app/data/whisper") -> object:
     """Obtiene o carga el modelo WhisperModel (singleton lazy).
 
     Args:
         model_name: 'tiny' o 'base'.
+        model_dir: Directorio local donde se descarga/cachea el modelo.
 
     Returns:
         Instancia de WhisperModel.
@@ -71,9 +76,23 @@ def _get_model(model_name: str) -> object:
         return _model
 
     from faster_whisper import WhisperModel
+    import os
 
-    logger.info("Cargando modelo whisper '%s' (CPU, int8)...", model_name)
-    _model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    def _load(target_dir: str) -> object:
+        os.makedirs(target_dir, exist_ok=True)
+        return WhisperModel(model_name, device="cpu", compute_type="int8", download_root=target_dir)
+
+    logger.info("Cargando modelo whisper '%s' en %s (CPU, int8)...", model_name, model_dir)
+    try:
+        _model = _load(model_dir)
+    except OSError as e:
+        fallback = "/tmp/whisper_models"
+        logger.warning(
+            "No se pudo usar model_dir=%s (%s) — usando %s (no persistente, "
+            "el modelo se re-descargará en cada reinicio)",
+            model_dir, e, fallback,
+        )
+        _model = _load(fallback)
     _model_name = model_name
     logger.info("Modelo whisper '%s' cargado.", model_name)
 

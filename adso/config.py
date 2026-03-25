@@ -53,6 +53,8 @@ class VaultConfig:
 @dataclass
 class WhisperConfig:
     model: str = "base"
+    model_dir: str = "/app/data/whisper"
+    language: str = "es"
 
 
 @dataclass

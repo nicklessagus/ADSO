@@ -63,6 +63,9 @@ vault:
 # ─── Transcripción (Fase 3) ────────────────────────────────────────────────
 whisper:
   model: base                      # tiny | base — modelos recomendados para RPi4 (< 200MB RAM)
+  model_dir: /app/data/whisper     # directorio de descarga/caché del modelo (debe ser escribible por el proceso)
+  language: es                     # idioma fijo para transcripción (evita detección automática, mejora velocidad)
+                                   # null para auto-detect (útil si se mezclan idiomas)
 
 # ─── Extracción de contenido web ───────────────────────────────────────────
 content_extraction:
