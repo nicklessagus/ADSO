@@ -56,6 +56,12 @@ def build_preview(
 ) -> str:
     """Construye texto de preview para mostrar al usuario.
 
+    Regla de destino:
+    - project → 01-Projects/{project}/{section}
+    - area    → 02-Areas/{area}
+    - type == "draft" (sin project ni area) → 00-Inbox
+    - otro tipo sin destino → "por definir" (el usuario debe elegir)
+
     Args:
         frontmatter: Dict del frontmatter propuesto.
         body: Cuerpo de la nota.
@@ -77,6 +83,8 @@ def build_preview(
         lines.append(f"<b>Destino:</b> {dest}")
     elif fm.get("area"):
         lines.append(f"<b>Destino:</b> 02-Areas/{fm['area']}")
+    elif fm.get("type") == "draft":
+        lines.append("<b>Destino:</b> 00-Inbox")
     else:
         lines.append("<b>Destino:</b> por definir")
 

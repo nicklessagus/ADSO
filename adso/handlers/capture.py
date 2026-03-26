@@ -657,15 +657,24 @@ async def _classify_and_preview_arxiv(
     Llama al LLM con el contenido académico para inferir proyecto, área y tags.
     Sobreescribe los campos literales del frontmatter (title, authors, year, doi,
     keywords) con los valores de la API de arXiv — el LLM no los inventa.
-    El body combina el summary del LLM con el abstract textual literal.
+
+    Body resultante: ``> [!summary] AI Summary`` (del campo ``summary`` del LLM)
+    + ``## Abstract`` (texto literal de la API) + ``## Personal Notes``.
+
+    Nota sobre campos del LLM: se usa ``payload["summary"]`` (resumen breve en
+    español, 1-2 oraciones) y NO ``payload["body"]``. El ``body`` que genera el
+    LLM es el documento completo con callout + secciones — usarlo causaría
+    duplicación del abstract y del callout. El ``summary`` en cambio es solo el
+    texto plano del resumen, que ``build_arxiv_body()`` envuelve en el callout
+    con el formato correcto.
 
     Args:
         update: Telegram update.
         context: Bot context.
         metadata: Dict retornado por arxiv_client.fetch_arxiv_metadata().
         url: URL canónica del paper en arxiv.org.
-        reply_msg: Mensaje existente a editar con el preview (ej: el status "Clasificando...").
-            Si es None, se envía como reply al mensaje original.
+        reply_msg: Mensaje existente a editar con el preview (ej: el status
+            "Clasificando..."). Si es None, se envía como reply al mensaje original.
     """
     from adso.arxiv_client import build_arxiv_classify_content, build_arxiv_body
 
@@ -730,8 +739,11 @@ async def _classify_and_preview_arxiv(
     if "paper" not in tags:
         fm["tags"] = ["paper"] + tags
 
-    # Body: summary del LLM + abstract literal
-    llm_summary = payload.get("body", "").strip() or None
+    # Body: summary del LLM + abstract literal.
+    # Usamos el campo "summary" (resumen breve en español, 1-2 oraciones) y no
+    # "body", porque el LLM genera el body completo con callout + secciones —
+    # nosotros construimos esa estructura con build_arxiv_body().
+    llm_summary = (payload.get("summary") or "").strip() or None
     body = build_arxiv_body(metadata, llm_summary)
     payload["body"] = body
     payload["frontmatter"] = fm
