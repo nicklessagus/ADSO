@@ -51,6 +51,7 @@ docker compose up --build
 - **Entorno:** Docker + docker-compose
 - **Lenguaje:** Python 3.9+ (dev), 3.11 (Docker), implementación asíncrona
 - **Vault:** Markdown en filesystem local (Syncthing para sync en vivo + Git para backup/DR — ver `docs/architecture.md`)
+- **Health check:** `heartbeat_job` toca `/tmp/adso_heartbeat` cada 60s. Docker verifica que el archivo tenga menos de 2 minutos (`find -mmin -2`); 3 fallos consecutivos → `unhealthy`. `start_period: 30s` para absorber el arranque.
 
 Toda propuesta de implementación debe evaluarse contra las restricciones de CPU y RAM de la RPi4. Mencionar explícitamente el impacto estimado en recursos.
 
@@ -172,8 +173,10 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | Momento | Botones |
 |---|---|
 | **PDF recibido** | `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter; aplica a cualquier PDF/documento |
-| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
-| **Audio transcripto** | `[Confirmar]` `[Corregir]` `[Cancelar]` |
+| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
+| **Resultado OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` — dos filas; Gemini Vision descarta el OCR y reprocesa |
+| **Resultado Gemini Vision** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
+| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
 | **Reubicar destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
@@ -181,7 +184,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` *(Fase 7)* |
-| **Fallback extracción falla** | `[OCR]`/`[Gemini Vision]`/`[Describí vos]` `[Cancelar]` — según qué falló |
+| **Fallback OCR sin texto** | `[Gemini Vision]` / `[Cancelar]` `[Describir]` — OCR no encontró texto, sin botón OCR |
 
 ### Desambiguación de intención
 Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` es Fase 7 — por ahora responde "disponible en próxima versión".
@@ -245,12 +248,25 @@ Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el 
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto |
 | 4 | Imágenes y capturas (OCR + Gemini Vision) |
-| 5 | Integraciones externas (arXiv, NASA ADS) |
+| 5 | Integraciones externas (arXiv) |
 | 6 | Google Calendar + Google Tasks |
 | 7 | Consultas RAG en lenguaje natural |
 | 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
 
 Implementar en orden. No saltar fases.
+
+### Fase 5 — arXiv
+
+Cuando el usuario manda un link de arxiv.org, el bot lo detecta por dominio y usa la **API de arXiv** (no scraping) para extraer metadata literal: título, autores, año, abstract, DOI, keywords. La nota resultante tiene el mismo formato que un paper subido como PDF:
+
+- **Frontmatter:** campos académicos (`authors`, `year`, `doi`, `keywords`, `methods` si inferible por LLM, `read_status`).
+- **Body:** abstract textual literal + summary/interpretación del LLM debajo, igual que en PDF.
+- **`source_url`:** apunta a arxiv.org (no hay archivo local). No se descarga el PDF.
+- **`media_type`:** `link` (el flujo de entrada es un link, no un documento).
+
+El flujo de confirmación es idéntico al de cualquier captura: preview → `[Confirmar]` `[Reubicar]` `[Cancelar]`.
+
+La detección de arXiv ocurre en el handler de links, antes de llamar al extractor web genérico. Si la API de arXiv falla, se cae al extractor web como fallback.
 
 ---
 
@@ -265,6 +281,7 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 - **Detección de conocimiento obsoleto:** trackear `last_retrieved` por nota — las que nunca aparecen en resultados RAG ni tienen links son candidatas a revisión.
 - **Generación de Canvas:** crear archivos `.canvas` (JSON) automáticamente desde clusters de embeddings, posicionando notas similares cerca.
 - **Bibliografía anotada on-demand:** generar un documento consolidado con papers de un proyecto, agrupados por método o tema, con `relevance`, `contribution` y `conclusions`.
+- **NASA ADS:** integración de cuenta para importar colecciones/listas de papers en bloque o por sync periódico. No es flujo de captura individual — requiere OAuth o API key de ADS y un mecanismo de reconciliación con el vault (evitar duplicados por DOI/arXiv ID).
 
 ---
 

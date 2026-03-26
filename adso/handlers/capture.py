@@ -643,3 +643,128 @@ async def _cb_extraction_ok(
         extra_fm=extra_fm or None,
         user_context=pe.get("user_context"),
     )
+
+
+async def _classify_and_preview_arxiv(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    metadata: dict,
+    url: str,
+    reply_msg: Optional[Any] = None,
+) -> None:
+    """Clasifica un paper de arXiv y muestra preview.
+
+    Llama al LLM con el contenido académico para inferir proyecto, área y tags.
+    Sobreescribe los campos literales del frontmatter (title, authors, year, doi,
+    keywords) con los valores de la API de arXiv — el LLM no los inventa.
+    El body combina el summary del LLM con el abstract textual literal.
+
+    Args:
+        update: Telegram update.
+        context: Bot context.
+        metadata: Dict retornado por arxiv_client.fetch_arxiv_metadata().
+        url: URL canónica del paper en arxiv.org.
+        reply_msg: Mensaje existente a editar con el preview (ej: el status "Clasificando...").
+            Si es None, se envía como reply al mensaje original.
+    """
+    from adso.arxiv_client import build_arxiv_classify_content, build_arxiv_body
+
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+
+    projects, areas = await _get_existing_items(vault_path)
+    existing_tags = await _get_existing_tags(vault_path)
+
+    content = build_arxiv_classify_content(metadata)
+
+    async def on_retry(attempt: int, max_attempts: int) -> None:
+        reply_fn = (
+            update.callback_query.edit_message_text
+            if update.callback_query
+            else update.message.reply_text
+        )
+        await reply_fn(f"Servicio caído, reintento {attempt}/{max_attempts}...")
+
+    result = await classify(
+        content=content,
+        media_type="link",
+        existing_projects=projects,
+        existing_areas=areas,
+        existing_tags=existing_tags,
+        disambiguation_threshold=settings.llm.disambiguation_threshold,
+        on_retry=on_retry,
+    )
+
+    mode = result.get("mode", "")
+    if mode in ("query", "edit"):
+        result["mode"] = "capture"
+        mode = "capture"
+
+    if mode not in ("capture", "degraded"):
+        reply_fn = (
+            update.callback_query.edit_message_text
+            if update.callback_query
+            else update.message.reply_text
+        )
+        await reply_fn("No pude clasificar el paper. Intentá de nuevo.")
+        return
+
+    payload = result["payload"]
+    fm = payload.get("frontmatter", {})
+
+    # Sobreescribir con datos literales de la API (tienen prioridad absoluta sobre el LLM)
+    fm["title"] = metadata["title"] or fm.get("title", "")
+    fm["type"] = "reference"
+    fm["source_url"] = url
+    fm["media_type"] = "link"
+    if metadata.get("authors"):
+        fm["authors"] = metadata["authors"]
+    if metadata.get("year"):
+        fm["year"] = metadata["year"]
+    if metadata.get("doi"):
+        fm["doi"] = metadata["doi"]
+    if metadata.get("keywords"):
+        fm["keywords"] = metadata["keywords"]
+    fm.setdefault("read_status", "unread")
+    tags = fm.get("tags") or []
+    if "paper" not in tags:
+        fm["tags"] = ["paper"] + tags
+
+    # Body: summary del LLM + abstract literal
+    llm_summary = payload.get("body", "").strip() or None
+    body = build_arxiv_body(metadata, llm_summary)
+    payload["body"] = body
+    payload["frontmatter"] = fm
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    fm["date_created"] = now
+    fm["date_modified"] = now
+    fm["source"] = "telegram"
+
+    suggested_links: list[str] = []
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if embeddings and metadata.get("abstract"):
+        try:
+            similar = await embeddings.query_similar(
+                query_text=metadata["abstract"],
+                n_results=settings.links.max_suggestions,
+                threshold=settings.links.similarity_threshold,
+            )
+            if similar:
+                suggested_links = [s.note_id for s in similar]
+        except Exception as e:
+            logger.warning("Error buscando links similares: %s", e)
+
+    result["payload"]["suggested_links"] = suggested_links
+    context.user_data["pending_note"] = result
+
+    has_dest = _has_destination(fm)
+    preview = build_preview(fm, body, suggested_links)
+    keyboard = build_capture_keyboard(fm, has_dest)
+
+    if reply_msg is not None:
+        await reply_msg.edit_text(preview, reply_markup=keyboard, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(preview, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")

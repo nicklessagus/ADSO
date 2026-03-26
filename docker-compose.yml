@@ -16,6 +16,12 @@ services:
       - CONFIG_PATH=/app/config.yaml
       - ANONYMIZED_TELEMETRY=false
       - HF_HOME=/app/data/hf_cache
+    healthcheck:
+      test: ["CMD", "find", "/tmp/adso_heartbeat", "-mmin", "-2"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     logging:
       driver: "json-file"
       options:

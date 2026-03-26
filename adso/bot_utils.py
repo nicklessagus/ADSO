@@ -97,10 +97,13 @@ def _detect_manage_keywords(text: str) -> list[str]:
 
 
 def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
-    """Limpia estados pendientes del user_data.
+    """Limpia estados pendientes del user_data y archivos temporales asociados.
 
     Si no se pasan keys, limpia todos los estados conocidos.
-    Si se pasan keys, limpia solo esos + cleanup de temp files.
+    Si se pasan keys, limpia solo esos.
+
+    Busca temp_path tanto en el nivel raíz del dict como anidado en
+    ``resource_file`` (estructura de pending_transcript).
     """
     if not keys:
         keys = (
@@ -113,9 +116,15 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
 
     for key in keys:
         data = context.user_data.pop(key, None)
-        # Limpiar archivo temporal si existe
-        if isinstance(data, dict) and "temp_path" in data:
-            Path(data["temp_path"]).unlink(missing_ok=True)
+        if not isinstance(data, dict):
+            continue
+        # temp_path puede estar en la raíz (pending_fallback_pdf) o
+        # anidado en resource_file (pending_transcript)
+        temp_path = data.get("temp_path") or (
+            data.get("resource_file") or {}
+        ).get("temp_path")
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
 
 
 async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]:

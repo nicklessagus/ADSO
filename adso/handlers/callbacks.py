@@ -167,7 +167,7 @@ async def handle_callback(
 
     elif data == CB_TRANSCRIPT_CANCEL:
         _cleanup_pending(context, "pending_transcript")
-        await query.edit_message_text("Transcripción cancelada.")
+        await query.edit_message_text("Cancelado.")
 
     elif data == CB_READ_STATUS_READ:
         await _process_pdf_after_read_status(update, context, "read")
@@ -233,7 +233,13 @@ async def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> l
 
 
 async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Extrae texto de imagen o PDF escaneado usando pytesseract."""
+    """Extrae texto de imagen o PDF escaneado usando pytesseract.
+
+    Lee ``pending_fallback_pdf`` del contexto. Si encuentra texto, mueve el
+    estado a ``pending_transcript`` y muestra el resultado con
+    ``build_ocr_result_keyboard`` (que incluye la opción de cambiar a Gemini
+    Vision). Si no encuentra texto, ofrece un teclado de fallback sin OCR.
+    """
     import asyncio
     from pathlib import Path
 
@@ -294,25 +300,44 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         },
     }
 
-    from adso.keyboards import build_transcript_keyboard
+    from adso.keyboards import build_ocr_result_keyboard
     snippet = text[:500] + ("..." if len(text) > 500 else "")
     sent = await query.edit_message_text(
         f"<b>Texto extraído (OCR):</b>\n\n<code>{_esc(snippet)}</code>",
-        reply_markup=build_transcript_keyboard(),
+        reply_markup=build_ocr_result_keyboard(),
         parse_mode="HTML",
     )
     context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
 
 
 async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Describe imagen o PDF escaneado usando Gemini Vision."""
+    """Describe imagen o PDF escaneado usando Gemini Vision.
+
+    Puede ser invocado desde dos estados:
+    - ``pending_fallback_pdf``: flujo original de imagen/PDF sin texto extraíble.
+    - ``pending_transcript``: el usuario eligió Gemini Vision tras ver el resultado OCR.
+
+    En ambos casos procesa la imagen y reemplaza el estado por un nuevo
+    ``pending_transcript`` con el texto de Vision.
+    """
     from pathlib import Path
 
     query = update.callback_query
+    from_ocr = False
     pending = context.user_data.get("pending_fallback_pdf")
     if not pending:
-        await query.answer("No hay imagen pendiente.", show_alert=True)
-        return
+        # Invocado desde el resultado OCR: recuperar imagen de pending_transcript
+        transcript = context.user_data.get("pending_transcript")
+        if transcript and transcript.get("resource_file"):
+            pending = {
+                "temp_path": transcript["resource_file"]["temp_path"],
+                "media_type": transcript.get("media_type", "image"),
+                "original_filename": transcript["resource_file"].get("filename", "imagen.jpg"),
+            }
+            from_ocr = True
+        else:
+            await query.answer("No hay imagen pendiente.", show_alert=True)
+            return
 
     await query.edit_message_text("Consultando Gemini Vision...")
 
@@ -340,7 +365,12 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await query.edit_message_text(f"Error consultando Gemini Vision: {e}")
         return
 
-    context.user_data.pop("pending_fallback_pdf", None)
+    # Limpiar el estado previo solo tras éxito
+    if from_ocr:
+        context.user_data.pop("pending_transcript", None)
+    else:
+        context.user_data.pop("pending_fallback_pdf", None)
+
     context.user_data["pending_transcript"] = {
         "text": text,
         "media_type": media_type,

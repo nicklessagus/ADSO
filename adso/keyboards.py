@@ -183,6 +183,24 @@ def build_transcript_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_ocr_result_keyboard() -> InlineKeyboardMarkup:
+    """Teclado post-OCR: confirmar, corregir, cambiar a Gemini Vision o cancelar.
+
+    Fila 1: Cancelar (izq) · Corregir (der) — acciones sobre el estado actual.
+    Fila 2: Gemini Vision (izq) · Confirmar (der) — método alternativo o aceptar.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_TRANSCRIPT_CANCEL),
+            InlineKeyboardButton("Corregir", callback_data=CB_TRANSCRIPT_CORRECT),
+        ],
+        [
+            InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION),
+            InlineKeyboardButton("Confirmar", callback_data=CB_TRANSCRIPT_OK),
+        ],
+    ])
+
+
 def build_read_status_keyboard() -> InlineKeyboardMarkup:
     """Teclado para marcar si ya se leyó un PDF/link."""
     return InlineKeyboardMarkup([

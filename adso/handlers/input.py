@@ -118,6 +118,14 @@ async def handle_text(
         ids.append(sent.message_id)  # respuesta del bot
         return
 
+    # Detectar URL de arXiv antes del flujo genérico
+    from adso.arxiv_client import extract_arxiv_id
+    arxiv_id = extract_arxiv_id(text)
+    if arxiv_id:
+        context.user_data["pending_raw_content"] = text.strip()
+        await _handle_arxiv(update, context, text.strip(), arxiv_id)
+        return
+
     # Nuevo contenido
     context.user_data["pending_raw_content"] = text
 
@@ -145,6 +153,51 @@ async def handle_text(
             "¿Guardar como nota?",
             reply_markup=build_save_keyboard(),
         )
+
+
+async def _handle_arxiv(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    url: str,
+    arxiv_id: str,
+) -> None:
+    """Handler para links de arXiv: obtiene metadata via API y muestra preview de paper.
+
+    Si la API de arXiv falla, informa al usuario y ofrece guardar el link como
+    nota genérica con el teclado estándar.
+
+    Args:
+        update: Telegram update.
+        context: Bot context.
+        url: URL original enviada por el usuario.
+        arxiv_id: ID de arXiv extraído de la URL (ej: "2301.12345").
+    """
+    from adso.arxiv_client import fetch_arxiv_metadata
+    from adso.handlers.capture import _classify_and_preview_arxiv
+
+    msg = update.message
+    status_msg = await msg.reply_text(f"Obteniendo metadata de arXiv ({arxiv_id})...")
+
+    try:
+        metadata = await fetch_arxiv_metadata(arxiv_id)
+    except Exception as e:
+        logger.warning("Error consultando arXiv API para %s: %s", arxiv_id, e)
+        await status_msg.edit_text(
+            "No pude obtener la metadata de arXiv. "
+            "¿Guardás el link como nota genérica?",
+            reply_markup=build_save_keyboard(),
+        )
+        return
+
+    canonical_url = metadata.get("source_url") or url
+    await status_msg.edit_text(
+        f"<b>{_esc(metadata['title'])}</b>\nClasificando...",
+        parse_mode="HTML",
+    )
+
+    # Pasar el status_msg para que _classify_and_preview_arxiv lo edite con el preview
+    # en vez de enviar un mensaje nuevo.
+    await _classify_and_preview_arxiv(update, context, metadata, canonical_url, reply_msg=status_msg)
 
 
 @authorized
