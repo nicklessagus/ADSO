@@ -120,10 +120,21 @@ async def _classify_and_preview(
         )
         return
 
+    # Modos no implementados (query, edit) → tratar como captura
+    if mode in ("query", "edit"):
+        mode = "capture"
+        result["mode"] = "capture"
+
     # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
     if force_capture and mode != "capture":
         result["mode"] = "capture"
         mode = "capture"
+
+    # Reparar payload si el modo fue forzado a capture desde un mode sin frontmatter
+    if mode == "capture" and (
+        not isinstance(result.get("payload"), dict)
+        or not isinstance(result.get("payload", {}).get("frontmatter"), dict)
+    ):
         if not isinstance(result.get("payload"), dict):
             result["payload"] = {}
         if not isinstance(result["payload"].get("frontmatter"), dict):
