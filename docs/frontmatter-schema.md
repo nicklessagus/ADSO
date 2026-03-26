@@ -78,16 +78,20 @@ Reglas de serialización para máxima compatibilidad con la UI de Properties de 
 
 Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor. El status refleja el estado dentro del ciclo de vida del tipo.
 
-`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado).
+`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado) o si el LLM no pudo asignar destino. Las notas con este status son candidatas para reclasificación automática (cron) o manual (`/clasificar`).
 
 | Tipo | Valores de `status` | Default |
 |---|---|---|
 | `reference` | `active`, `pending-classification` | `active` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
-| `draft` | `pending-classification` | `pending-classification` |
+| `draft` | `draft`, `pending-classification` | `pending-classification` |
 | `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
 | `area-index` | — (sin ciclo de vida) | — |
+
+Para `type: draft`, la distinción entre los dos valores:
+- `status: pending-classification` — el LLM no respondió (modo degradado) o no pudo asignar destino. El sistema intentará reclasificar automáticamente.
+- `status: draft` — el usuario envió la nota explícitamente al Inbox. No se reclasifica automáticamente.
 
 ---
 

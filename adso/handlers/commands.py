@@ -177,7 +177,8 @@ async def handle_clasificar(
     new_fm["source"] = "telegram"
     new_fm["media_type"] = orig_fm.get("media_type", "text")
     new_fm.pop("user_context", None)
-    body = payload.get("body", extract_original_from_degraded(note.body))
+    body = extract_original_from_degraded(note.body)
+    payload["body"] = body
 
     context.user_data["pending_note"] = result
     context.user_data["clasificar_inbox_path"] = str(ref.path)

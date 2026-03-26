@@ -148,14 +148,14 @@ status: active                         # valores dependen del type
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
 | `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
-| `draft` | `00-Inbox/` | `pending-classification` | `pending-classification` |
+| `draft` | `00-Inbox/` | `draft`, `pending-classification` | `pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed`, `archived` | `active` |
 
 `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor.
 
 `area-index` no tiene status — las áreas no tienen ciclo de vida.
 
-`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado).
+`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado) o no pudo asignar destino. El sistema intentará reclasificarlo automáticamente. Para `type: draft`, `status: draft` indica que el usuario envió la nota explícitamente al Inbox — no se reclasifica automáticamente.
 
 ### Campos adicionales por tipo
 
