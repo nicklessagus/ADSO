@@ -180,11 +180,13 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
-| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` *(Fase 7)* |
 | **Fallback extracción falla** | `[OCR]`/`[Gemini Vision]`/`[Describí vos]` `[Cancelar]` — según qué falló |
 
 ### Desambiguación de intención
-Si el LLM no tiene confianza alta en el modo (captura vs consulta vs otro), el bot pregunta con botones en vez de asumir.
+Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` es Fase 7 — por ahora responde "disponible en próxima versión".
+
+El LLM no usa `mode=query` ni `mode=edit` (removidos del prompt hasta Fase 7). Todo input que no sea `manage` se clasifica como `capture`. Si el LLM devuelve `query` o `edit` de todas formas, el código los redirige a `capture` automáticamente.
 
 ### Consultas con refinamiento de scope
 El patrón es: el LLM interpreta lo que pueda del lenguaje natural y los botones cubren lo que falta. Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope (toda la bóveda, uno o más proyectos).

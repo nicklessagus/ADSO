@@ -281,14 +281,16 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
-| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` *(Fase 7)* |
 | **Fallback OCR falla** | `[Gemini Vision]` `[Describí vos]` `[Cancelar]` |
 | **Fallback Gemini Vision falla** | `[OCR]` `[Describí vos]` `[Cancelar]` |
 | **Fallback extracción web falla** | `[Describí vos]` `[Cancelar]` |
 
 ### Desambiguación de intención
 
-Si el LLM no tiene confianza alta en el modo (captura vs consulta vs gestión), el bot pregunta con botones en vez de asumir.
+Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` es Fase 7 — por ahora responde "disponible en próxima versión".
+
+El LLM no usa `mode=query` ni `mode=edit` (removidos del prompt hasta Fase 7). Todo input que no sea `manage` se clasifica como `capture`. Si el LLM devuelve `query` o `edit` de todas formas, el código los redirige a `capture` automáticamente.
 
 ### Consultas con refinamiento de scope
 
