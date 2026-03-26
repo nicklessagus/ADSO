@@ -693,9 +693,13 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
 
 
 _VISION_PROMPT_IMAGE = (
-    "Describe detalladamente el contenido de esta imagen en español. "
-    "Si hay texto visible, transcribilo completo. "
-    "Si es un diagrama, esquema o figura, describí su estructura y contenido."
+    "Analizá esta imagen y respondé en español con dos partes:\n\n"
+    "1. **Texto visible:** transcribí todo el texto que aparezca en la imagen, "
+    "respetando el orden de lectura. Si no hay texto, escribí 'Sin texto'.\n\n"
+    "2. **Descripción visual:** describí el contenido de la imagen — "
+    "qué muestra, qué tipo de imagen es (foto, captura de pantalla, diagrama, manuscrito, etc.), "
+    "contexto relevante y cualquier detalle útil para indexarla y recuperarla después.\n\n"
+    "No uses formato markdown ni encabezados adicionales."
 )
 
 _VISION_PROMPT_PDF = (

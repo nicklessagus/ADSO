@@ -209,7 +209,7 @@ No hay modo Agenda — el agendamiento se resuelve via tasks: `due_date` genera 
 |---|---|---|
 | Texto libre | Clasificación LLM | Nota en vault |
 | Audio | faster-whisper → texto → usuario confirma/corrige → LLM | Nota en vault |
-| Imagen | Descripción del usuario (primaria) o extracción automática — usuario elige entre [OCR] o [Modelo de visión] → muestra resultado → usuario corrige si hace falta | Nota en vault |
+| Imagen | Flujo idéntico al PDF escaneado — [OCR] (pytesseract) o [Gemini Vision] (texto + descripción visual) o [Describir] (manual) → resultado en tap-to-copy → usuario confirma/corrige → LLM clasifica | Nota en vault con imagen en Resources |
 | Archivo adjunto (cualquier tipo) | Descripción del usuario (primaria) o extracción automática si el formato lo permite → muestra texto extraído → usuario corrige si hace falta. Archivo guardado en `03-Resources/`, nota donde se clasifique con embed `![[archivo]]`. | Nota en vault con archivo |
 | Link web genérico | Descripción del usuario (primaria) o extracción automática del contenido → muestra texto extraído → usuario corrige si hace falta | Nota en vault |
 | Link arXiv / NASA ADS | Descripción del usuario (primaria) o extracción via API → metadatos estructurados → usuario corrige si hace falta | Nota de paper |

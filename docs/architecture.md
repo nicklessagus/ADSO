@@ -238,17 +238,23 @@ El bot usa la timezone del servidor (RPi4) para todas las fechas locales (`sched
 
 ### Imágenes y capturas (Fase 4)
 
+El flujo de imágenes es idéntico al de PDFs escaneados — mismo teclado, misma corrección, mismo pipeline de confirmación. La diferencia está solo en el prompt de Vision.
+
 Al recibir una imagen, el bot pregunta con botones `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]`.
 
 | Motor | Botón | RAM | Cuándo usarlo |
 |---|---|---|---|
-| Tesseract (via `pytesseract`) | `[OCR]` | ~50MB | Texto impreso, capturas de pantalla, documentos escaneados |
-| Gemini Vision API | `[Gemini Vision]` | 0 local | Fotos, diagramas, manuscritos, imágenes sin texto predominante |
+| Tesseract (via `pytesseract`) | `[OCR]` | ~50MB | Fotos de texto, capturas de pantalla, documentos escaneados |
+| Gemini Vision API | `[Gemini Vision]` | 0 local | Cualquier imagen — extrae texto visible Y describe el contenido visual |
 | Descripción manual | `[Describir]` | 0 | El usuario escribe el contenido a clasificar |
 
 Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
 
-El resultado (OCR o Vision) se muestra igual que una transcripción de audio: en tipografía `código` (tap-to-copy) con botones `[Confirmar]` `[Corregir]` `[Cancelar]`. El usuario puede corregir el texto antes de clasificar.
+**Prompt de Gemini Vision para imágenes:** solicita dos partes — (1) transcripción completa de todo texto visible, (2) descripción visual del contenido (tipo de imagen, contexto, detalles relevantes para indexación). Devuelve texto plano sin markdown.
+
+**Prompt de Gemini Vision para PDFs escaneados:** solicita secciones estructuradas de paper — TÍTULO, AUTHORS, DOI, ABSTRACT, KEYWORDS, METHODS, CONCLUSIONS.
+
+El resultado (OCR o Vision) se muestra igual que una transcripción de audio: en tipografía `código` (tap-to-copy) con botones `[Confirmar]` `[Corregir]` `[Cancelar]`. El usuario puede corregir antes de clasificar.
 
 ### Links
 
