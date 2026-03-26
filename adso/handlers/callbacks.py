@@ -191,10 +191,183 @@ async def handle_callback(
             )
 
     elif data == CB_OCR:
-        await query.answer("OCR disponible en próxima versión.", show_alert=True)
+        await _cb_ocr(update, context)
 
     elif data == CB_VISION:
-        await query.answer("Gemini Vision disponible en próxima versión.", show_alert=True)
+        await _cb_vision(update, context)
 
     elif data == CB_CLASIFICAR_INBOX:
         await handle_clasificar(update, context)
+
+
+_PDF_SCAN_PAGES = 2  # páginas a procesar en OCR y Vision para PDFs escaneados
+
+
+async def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> list[tuple[bytes, str]]:
+    """Renderiza las primeras n_pages de un PDF como imágenes PNG.
+
+    Returns:
+        Lista de (bytes, mime_type) lista para enviar a Vision o pytesseract.
+    """
+    import fitz
+    import tempfile
+    from pathlib import Path
+
+    doc = fitz.open(str(tmp_path))
+    pages_to_render = min(n_pages, len(doc))
+    result = []
+    tmp_files = []
+
+    for i in range(pages_to_render):
+        img_tmp = Path(tempfile.mktemp(suffix=".png"))
+        tmp_files.append(img_tmp)
+        pix = doc[i].get_pixmap(dpi=dpi)
+        pix.save(str(img_tmp))
+        result.append((img_tmp.read_bytes(), "image/png"))
+
+    doc.close()
+    for f in tmp_files:
+        f.unlink(missing_ok=True)
+
+    return result
+
+
+async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Extrae texto de imagen o PDF escaneado usando pytesseract."""
+    import asyncio
+    from pathlib import Path
+
+    query = update.callback_query
+    pending = context.user_data.get("pending_fallback_pdf")
+    if not pending:
+        await query.answer("No hay imagen pendiente.", show_alert=True)
+        return
+
+    tmp_path = Path(pending["temp_path"])
+    media_type = pending.get("media_type", "image")
+
+    try:
+        import pytesseract
+        from PIL import Image
+
+        if media_type == "document":
+            import fitz
+            doc = fitz.open(str(tmp_path))
+            total_pages = len(doc)
+            doc.close()
+            pages_to_scan = min(_PDF_SCAN_PAGES, total_pages)
+            await query.edit_message_text(
+                f"Ejecutando OCR en las primeras {pages_to_scan} página(s) del PDF..."
+            )
+            page_images = await _render_pdf_pages(tmp_path, pages_to_scan)
+            texts = []
+            for img_bytes, _ in page_images:
+                import io
+                img = Image.open(io.BytesIO(img_bytes))
+                t = await asyncio.to_thread(pytesseract.image_to_string, img, lang="spa+eng")
+                texts.append(t)
+            text = "\n\n".join(texts)
+        else:
+            await query.edit_message_text("Ejecutando OCR...")
+            img = Image.open(tmp_path)
+            text = await asyncio.to_thread(pytesseract.image_to_string, img, lang="spa+eng")
+
+        if not text.strip():
+            await query.edit_message_text(
+                "OCR no encontró texto. Podés intentar con Gemini Vision o describir el contenido.",
+                reply_markup=_build_fallback_keyboard_without_ocr(),
+            )
+            return
+
+    except Exception as e:
+        logger.error("Error en OCR: %s", e)
+        await query.edit_message_text(f"Error en OCR: {e}")
+        return
+
+    context.user_data.pop("pending_fallback_pdf", None)
+    context.user_data["pending_transcript"] = {
+        "text": text,
+        "media_type": media_type,
+        "resource_file": {
+            "temp_path": str(tmp_path),
+            "filename": pending.get("original_filename", "imagen.jpg"),
+        },
+    }
+
+    from adso.keyboards import build_transcript_keyboard
+    snippet = text[:500] + ("..." if len(text) > 500 else "")
+    sent = await query.edit_message_text(
+        f"<b>Texto extraído (OCR):</b>\n\n<code>{_esc(snippet)}</code>",
+        reply_markup=build_transcript_keyboard(),
+        parse_mode="HTML",
+    )
+    context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
+
+
+async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Describe imagen o PDF escaneado usando Gemini Vision."""
+    from pathlib import Path
+
+    query = update.callback_query
+    pending = context.user_data.get("pending_fallback_pdf")
+    if not pending:
+        await query.answer("No hay imagen pendiente.", show_alert=True)
+        return
+
+    await query.edit_message_text("Consultando Gemini Vision...")
+
+    tmp_path = Path(pending["temp_path"])
+    media_type = pending.get("media_type", "image")
+
+    try:
+        from adso.llm_client import (
+            describe_image_with_vision,
+            _VISION_PROMPT_IMAGE,
+            _VISION_PROMPT_PDF,
+        )
+
+        if media_type == "document":
+            images = await _render_pdf_pages(tmp_path, _PDF_SCAN_PAGES)
+            text = await describe_image_with_vision(images, prompt=_VISION_PROMPT_PDF)
+        else:
+            image_bytes = tmp_path.read_bytes()
+            text = await describe_image_with_vision(
+                [(image_bytes, "image/jpeg")], prompt=_VISION_PROMPT_IMAGE
+            )
+
+    except Exception as e:
+        logger.error("Error en Gemini Vision: %s", e)
+        await query.edit_message_text(f"Error consultando Gemini Vision: {e}")
+        return
+
+    context.user_data.pop("pending_fallback_pdf", None)
+    context.user_data["pending_transcript"] = {
+        "text": text,
+        "media_type": media_type,
+        "resource_file": {
+            "temp_path": str(tmp_path),
+            "filename": pending.get("original_filename", "imagen.jpg"),
+        },
+    }
+
+    from adso.keyboards import build_transcript_keyboard
+    snippet = text[:500] + ("..." if len(text) > 500 else "")
+    label = "Texto extraído (Gemini Vision)"
+    sent = await query.edit_message_text(
+        f"<b>{label}:</b>\n\n<code>{_esc(snippet)}</code>",
+        reply_markup=build_transcript_keyboard(),
+        parse_mode="HTML",
+    )
+    context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
+
+
+def _build_fallback_keyboard_without_ocr():
+    """Teclado de fallback cuando OCR no encontró texto (sin botón OCR)."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION)],
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
+            InlineKeyboardButton("Describir", callback_data=CB_DESCRIBE),
+        ],
+    ])

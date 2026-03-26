@@ -322,6 +322,55 @@ async def handle_document(
         )
 
 
+@authorized
+async def handle_photo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler para imágenes. Descarga la foto y ofrece OCR, Gemini Vision o descripción manual."""
+    settings: Settings = context.bot_data["settings"]
+    msg = update.message
+
+    if _has_pending_keyboard(context):
+        ids = context.user_data.setdefault("block_msg_ids", [])
+        ids.append(msg.message_id)
+        sent = await msg.reply_text(
+            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+        )
+        ids.append(sent.message_id)
+        return
+
+    photo = msg.photo[-1] if msg.photo else None  # mayor resolución disponible
+    if not photo:
+        await msg.reply_text("No se pudo procesar la imagen.")
+        return
+
+    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    if photo.file_size and photo.file_size > max_bytes:
+        await msg.reply_text(
+            f"Imagen demasiado grande (máx {settings.documents.max_size_mb}MB)."
+        )
+        return
+
+    import tempfile
+    tg_file = await photo.get_file()
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    await tg_file.download_to_drive(str(tmp_path))
+
+    context.user_data["pending_fallback_pdf"] = {
+        "temp_path": str(tmp_path),
+        "original_filename": f"imagen_{photo.file_unique_id}.jpg",
+        "media_type": "image",
+        "user_context": msg.caption or None,
+    }
+
+    await msg.reply_text(
+        "Imagen recibida. ¿Cómo querés extraer el contenido?",
+        reply_markup=build_fallback_pdf_keyboard(),
+    )
+
+
 async def _process_pdf_after_read_status(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

@@ -8,3 +8,5 @@ gitpython~=3.1
 chromadb~=0.5
 faster-whisper>=1.0
 pymupdf>=1.23
+pytesseract>=0.3
+Pillow>=10.0

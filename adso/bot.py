@@ -22,8 +22,8 @@ from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.callbacks import handle_callback
 from adso.handlers.commands import handle_clasificar, handle_start, handle_status
-from adso.handlers.input import handle_audio, handle_document, handle_text
-from adso.handlers.jobs import reindex_job, reclassify_inbox
+from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
+from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
 from adso.vault_writer import GitBackup, ensure_vault_structure, seed_vault
 
 
@@ -66,11 +66,14 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     app.add_handler(CommandHandler("status", handle_status))
     app.add_handler(CommandHandler("clasificar", handle_clasificar))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     # Jobs periódicos
+    app.job_queue.run_repeating(heartbeat_job, interval=60, first=10)
+
     if settings.llm.degraded_retry_minutes > 0:
         app.job_queue.run_repeating(
             reclassify_inbox,

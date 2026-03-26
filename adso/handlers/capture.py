@@ -585,16 +585,20 @@ async def _cb_transcript_ok(
         return
 
     text = pt["text"]
+    media_type = pt.get("media_type", "audio")
     temp_path = pt.get("temp_path")
+    resource_file = pt.get("resource_file")
 
-    if temp_path:
+    if temp_path and not resource_file:
+        # Audio: borrar el temp. Para imagen/doc el temp es el recurso — lo borra _cb_confirm.
         Path(temp_path).unlink(missing_ok=True)
 
     await update.callback_query.edit_message_text("Clasificando...")
 
     await _classify_and_preview(
         update, context, text,
-        media_type="audio",
+        media_type=media_type,
+        resource_file=resource_file,
     )
 
 

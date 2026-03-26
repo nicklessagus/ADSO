@@ -274,7 +274,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | Momento | Botones |
 |---|---|
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
-| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
+| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Corregir]` `[Cancelar]` |
 | **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |

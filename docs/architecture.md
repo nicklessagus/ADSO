@@ -78,7 +78,7 @@ Obsidian (lectura visual, opcional)
 |---|---|---|
 | Texto libre | No | Clasificación LLM directa |
 | Audio | No | Whisper → texto → LLM |
-| Imagen | No | [OCR] [Gemini Vision] [Sin extracción] → LLM |
+| Imagen | No | [OCR] [Gemini Vision] [Describir] → texto → LLM |
 | PDF | Sí | [Ya lo leí] [Lo quiero leer] → pymupdf → LLM |
 | Documento de texto (.txt, .py, .csv, .json, .md) | Sí | [Ya lo leí] [Lo quiero leer] → lectura directa → LLM |
 | Link web genérico | Sí | [Ya lo leí] [Lo quiero leer] → extracción web → LLM |
@@ -238,14 +238,17 @@ El bot usa la timezone del servidor (RPi4) para todas las fechas locales (`sched
 
 ### Imágenes y capturas (Fase 4)
 
-Al recibir una imagen, el bot pregunta con botones `[OCR]` `[Gemini Vision]` `[Sin extracción]`. Si elige un motor de extracción:
+Al recibir una imagen, el bot pregunta con botones `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]`.
 
-| Motor | Botón | RAM | Calidad | Cuándo usarlo |
-|---|---|---|---|---|
-| Tesseract (via `pytesseract`) | `[OCR]` | ~50MB | Buena para texto impreso | Capturas de pantalla, documentos escaneados, texto claro |
-| Gemini Vision API | `[Gemini Vision]` | 0 local | Superior para contenido visual | Fotos, diagramas, manuscritos, imágenes sin texto predominante |
+| Motor | Botón | RAM | Cuándo usarlo |
+|---|---|---|---|
+| Tesseract (via `pytesseract`) | `[OCR]` | ~50MB | Texto impreso, capturas de pantalla, documentos escaneados |
+| Gemini Vision API | `[Gemini Vision]` | 0 local | Fotos, diagramas, manuscritos, imágenes sin texto predominante |
+| Descripción manual | `[Describir]` | 0 | El usuario escribe el contenido a clasificar |
 
-Si elige `[Sin extracción]`, la imagen se guarda en `03-Resources/` con una nota descriptiva generada por el LLM. Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
+Ambos motores siempre disponibles. El usuario elige en el momento, no hay configuración global.
+
+El resultado (OCR o Vision) se muestra igual que una transcripción de audio: en tipografía `código` (tap-to-copy) con botones `[Confirmar]` `[Corregir]` `[Cancelar]`. El usuario puede corregir el texto antes de clasificar.
 
 ### Links
 
@@ -297,9 +300,13 @@ Usuario manda PDF
 ```
 Usuario manda imagen
   │
-  [OCR]  [Gemini Vision]  [Sin extracción]
+  [OCR]  [Gemini Vision]  [Describir]  [Cancelar]
   │
-  → bot muestra texto/descripción extraída → usuario confirma o corrige
+  ├─ [OCR] → pytesseract → texto en código (tap-to-copy) → [Confirmar][Corregir][Cancelar]
+  ├─ [Gemini Vision] → Gemini Vision API → descripción en código → [Confirmar][Corregir][Cancelar]
+  └─ [Describir] → usuario escribe descripción → LLM clasifica → flujo de confirmación
+  │
+  Si [OCR] no encuentra texto → teclado reducido: [Gemini Vision] [Describir] [Cancelar]
   → LLM clasifica → flujo de confirmación → vault
 ```
 Sin pregunta de read_status — la imagen se manda para guardar algo, no como contenido a leer.
@@ -333,7 +340,12 @@ Para imágenes, el usuario elige explícitamente entre OCR y modelo de visión a
 
 #### PDFs sin texto extraíble
 
-Si `pymupdf` no puede extraer texto (PDF escaneado o basado en imagen), el bot lo detecta y cae al flujo de descripción manual.
+Si `pymupdf` no puede extraer texto (PDF escaneado o basado en imagen), el bot lo detecta y muestra el mismo teclado que para imágenes: `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]`.
+
+- **OCR en PDF escaneado:** renderiza las primeras 2 páginas (configurable con `_PDF_SCAN_PAGES`) a imagen PNG (200 DPI) y corre pytesseract sobre cada una. El bot informa al usuario que solo procesa esas páginas.
+- **Gemini Vision en PDF escaneado:** renderiza las primeras 2 páginas y las envía juntas a Gemini con un prompt especializado que extrae TÍTULO, AUTHORS, DOI, ABSTRACT, KEYWORDS, METHODS, CONCLUSIONS — equivalente a lo que `extract_paper_sections()` hace con un PDF de texto.
+
+En ambos casos, el resultado entra al mismo flujo de confirmación/corrección que el audio.
 
 #### Papers: todas las fuentes producen la misma nota
 
@@ -518,7 +530,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | Momento | Botones |
 |---|---|
 | **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
-| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Sin extracción]` |
+| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
 | **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
 | **Captura** (destino claro) | `[Cancelar]` `[Reubicar]` `[Confirmar]` |
 | **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |

@@ -1,4 +1,4 @@
-"""Tests E2E para handlers de audio y documentos (Fase 3)."""
+"""Tests E2E para handlers de audio, documentos (Fase 3) e imágenes (Fase 4)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import ALLOWED_USER_ID, make_message, make_user, make_chat
 
-from adso.handlers.input import handle_audio, handle_document, handle_text, _process_pdf_after_read_status
+from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text, _process_pdf_after_read_status
 from adso.handlers.callbacks import handle_callback
 from adso.handlers.capture import _classify_and_preview
 from adso.bot_utils import _cleanup_pending
@@ -18,12 +18,15 @@ from adso.keyboards import (
     build_extraction_keyboard,
 )
 from adso.constants import (
-    CB_TRANSCRIPT_OK,
-    CB_TRANSCRIPT_CANCEL,
+    CB_DESCRIBE,
+    CB_EXTRACTION_CANCEL,
+    CB_EXTRACTION_OK,
+    CB_OCR,
     CB_READ_STATUS_READ,
     CB_READ_STATUS_UNREAD,
-    CB_EXTRACTION_OK,
-    CB_EXTRACTION_CANCEL,
+    CB_TRANSCRIPT_CANCEL,
+    CB_TRANSCRIPT_OK,
+    CB_VISION,
     CB_CONFIRM,
 )
 
@@ -386,9 +389,10 @@ class TestReadStatusCallbacks:
     @pytest.mark.asyncio
     @AUTH
     @patch("adso.handlers.input.extract_pdf")
-    async def test_empty_pdf_asks_description(
+    async def test_empty_pdf_shows_fallback_keyboard(
         self, mock_extract, make_callback_query, mock_context, tmp_path,
     ) -> None:
+        """PDF escaneado (sin texto) → muestra teclado OCR/Vision/Describir."""
         pdf_path = tmp_path / "scanned.pdf"
         pdf_path.write_bytes(b"fake pdf")
 
@@ -408,7 +412,10 @@ class TestReadStatusCallbacks:
         update = make_callback_query(CB_READ_STATUS_UNREAD)
         await handle_callback(update, mock_context)
 
-        assert "pending_description" in mock_context.user_data
+        assert "pending_fallback_pdf" in mock_context.user_data
+        pending = mock_context.user_data["pending_fallback_pdf"]
+        assert pending["read_status"] == "unread"
+        assert pending["media_type"] == "document"
 
 
 class TestExtractionCallbacks:
@@ -589,3 +596,364 @@ class TestSaveResource:
 
         with pytest.raises(FileNotFoundError):
             await save_resource(tmp_path / "no.pdf", "no.pdf", vault_path)
+
+
+# ---------------------------------------------------------------------------
+# Fase 4 — handle_photo
+# ---------------------------------------------------------------------------
+
+
+class TestHandlePhoto:
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_photo_stores_pending_and_shows_keyboard(
+        self, make_update, mock_context, tmp_path,
+    ) -> None:
+        update = make_update()
+        photo = MagicMock()
+        photo.file_size = 1024
+        photo.file_unique_id = "abc123"
+        tg_file = MagicMock()
+        tg_file.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=tg_file)
+        update.message.photo = [photo]
+        update.message.caption = None
+
+        with patch("tempfile.NamedTemporaryFile") as mock_tmp:
+            fake_tmp = MagicMock()
+            fake_tmp.name = str(tmp_path / "img.jpg")
+            fake_tmp.__enter__ = lambda s: s
+            fake_tmp.__exit__ = lambda s, *a: None
+            mock_tmp.return_value = fake_tmp
+            (tmp_path / "img.jpg").write_bytes(b"\xff\xd8\xff")
+
+            await handle_photo(update, mock_context)
+
+        assert "pending_fallback_pdf" in mock_context.user_data
+        pending = mock_context.user_data["pending_fallback_pdf"]
+        assert pending["media_type"] == "image"
+        update.message.reply_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_photo_too_large(self, make_update, mock_context) -> None:
+        update = make_update()
+        photo = MagicMock()
+        photo.file_size = 100 * 1024 * 1024
+        update.message.photo = [photo]
+
+        await handle_photo(update, mock_context)
+
+        assert "grande" in str(update.message.reply_text.call_args)
+        assert "pending_fallback_pdf" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_photo_no_photos(self, make_update, mock_context) -> None:
+        update = make_update()
+        update.message.photo = []
+
+        await handle_photo(update, mock_context)
+
+        assert "No se pudo" in str(update.message.reply_text.call_args)
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_photo_caption_stored_as_user_context(
+        self, make_update, mock_context, tmp_path,
+    ) -> None:
+        update = make_update()
+        photo = MagicMock()
+        photo.file_size = 512
+        photo.file_unique_id = "xyz"
+        tg_file = MagicMock()
+        tg_file.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=tg_file)
+        update.message.photo = [photo]
+        update.message.caption = "esquema de red neuronal"
+
+        with patch("tempfile.NamedTemporaryFile") as mock_tmp:
+            fake_tmp = MagicMock()
+            fake_tmp.name = str(tmp_path / "img.jpg")
+            fake_tmp.__enter__ = lambda s: s
+            fake_tmp.__exit__ = lambda s, *a: None
+            mock_tmp.return_value = fake_tmp
+            (tmp_path / "img.jpg").write_bytes(b"\xff\xd8\xff")
+
+            await handle_photo(update, mock_context)
+
+        assert mock_context.user_data["pending_fallback_pdf"]["user_context"] == "esquema de red neuronal"
+
+
+# ---------------------------------------------------------------------------
+# Fase 4 — keyboard fallback
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackPdfKeyboard:
+
+    def test_fallback_keyboard_has_all_buttons(self) -> None:
+        from adso.keyboards import build_fallback_pdf_keyboard
+        kb = build_fallback_pdf_keyboard()
+        buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+        assert CB_OCR in buttons
+        assert CB_VISION in buttons
+        assert CB_DESCRIBE in buttons
+        assert CB_EXTRACTION_CANCEL in buttons
+
+
+# ---------------------------------------------------------------------------
+# Fase 4 — CB_OCR
+# ---------------------------------------------------------------------------
+
+
+class TestOcrCallback:
+
+    @pytest.mark.asyncio
+    @AUTH
+    @patch("adso.handlers.callbacks.pytesseract", create=True)
+    @patch("adso.handlers.callbacks.Image", create=True)
+    async def test_ocr_image_success(
+        self, mock_pil, mock_tesseract, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+        }
+
+        with patch("adso.handlers.callbacks._cb_ocr") as mock_ocr:
+            mock_ocr.return_value = None
+            update = make_callback_query(CB_OCR)
+            await handle_callback(update, mock_context)
+            mock_ocr.assert_called_once()
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_ocr_no_pending(self, make_callback_query, mock_context) -> None:
+        with patch("adso.handlers.callbacks._cb_ocr") as mock_ocr:
+            mock_ocr.return_value = None
+            update = make_callback_query(CB_OCR)
+            await handle_callback(update, mock_context)
+            mock_ocr.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ocr_image_sets_pending_extraction(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        import sys
+        from adso.handlers.callbacks import _cb_ocr
+
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+        }
+
+        update = make_callback_query(CB_OCR)
+
+        mock_pil_image = MagicMock()
+        mock_tesseract = MagicMock()
+        mock_tesseract.image_to_string = MagicMock(return_value="Texto extraído por OCR")
+        mock_pil = MagicMock()
+        mock_pil.Image.open = MagicMock(return_value=mock_pil_image)
+
+        with patch.dict(sys.modules, {"pytesseract": mock_tesseract, "PIL": mock_pil, "PIL.Image": mock_pil.Image}):
+            await _cb_ocr(update, mock_context)
+
+        assert "pending_transcript" in mock_context.user_data
+        pt = mock_context.user_data["pending_transcript"]
+        assert pt["text"] == "Texto extraído por OCR"
+        assert pt["media_type"] == "image"
+        assert pt["resource_file"]["filename"] == "foto.jpg"
+        assert "pending_fallback_pdf" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_ocr_empty_result_shows_reduced_keyboard(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        import sys
+        from adso.handlers.callbacks import _cb_ocr
+
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+        }
+
+        update = make_callback_query(CB_OCR)
+
+        mock_tesseract = MagicMock()
+        mock_tesseract.image_to_string = MagicMock(return_value="   ")
+        mock_pil = MagicMock()
+
+        with patch.dict(sys.modules, {"pytesseract": mock_tesseract, "PIL": mock_pil, "PIL.Image": mock_pil.Image}):
+            await _cb_ocr(update, mock_context)
+
+        assert "pending_extraction" not in mock_context.user_data
+        call_text = str(update.callback_query.edit_message_text.call_args)
+        assert "no encontró" in call_text.lower() or "no" in call_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_ocr_pdf_renders_correct_pages(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        import sys
+        from adso.handlers.callbacks import _cb_ocr, _PDF_SCAN_PAGES
+
+        pdf_path = tmp_path / "scanned.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(pdf_path),
+            "original_filename": "scanned.pdf",
+            "media_type": "document",
+        }
+
+        update = make_callback_query(CB_OCR)
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=10)
+        mock_pix = MagicMock()
+        mock_doc.__getitem__ = MagicMock(
+            return_value=MagicMock(get_pixmap=MagicMock(return_value=mock_pix))
+        )
+        mock_tesseract = MagicMock()
+        mock_tesseract.image_to_string = MagicMock(return_value="texto pagina")
+        mock_pil = MagicMock()
+
+        with patch("fitz.open", return_value=mock_doc), \
+             patch("pathlib.Path.read_bytes", return_value=b"\x89PNG"), \
+             patch.dict(sys.modules, {"pytesseract": mock_tesseract, "PIL": mock_pil, "PIL.Image": mock_pil.Image}):
+            await _cb_ocr(update, mock_context)
+
+        call_args = str(update.callback_query.edit_message_text.call_args_list)
+        assert str(_PDF_SCAN_PAGES) in call_args
+
+
+# ---------------------------------------------------------------------------
+# Fase 4 — CB_VISION
+# ---------------------------------------------------------------------------
+
+
+class TestVisionCallback:
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_vision_dispatches(self, make_callback_query, mock_context) -> None:
+        with patch("adso.handlers.callbacks._cb_vision") as mock_vision:
+            mock_vision.return_value = None
+            update = make_callback_query(CB_VISION)
+            await handle_callback(update, mock_context)
+            mock_vision.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_vision_image_sets_pending_extraction(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        from adso.handlers.callbacks import _cb_vision
+
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+        }
+
+        update = make_callback_query(CB_VISION)
+
+        with patch("adso.llm_client.describe_image_with_vision", new_callable=AsyncMock) as mock_vision:
+            mock_vision.return_value = "Descripción de la imagen."
+            await _cb_vision(update, mock_context)
+
+        assert "pending_transcript" in mock_context.user_data
+        pt = mock_context.user_data["pending_transcript"]
+        assert pt["text"] == "Descripción de la imagen."
+        assert pt["media_type"] == "image"
+        assert pt["resource_file"]["filename"] == "foto.jpg"
+        assert "pending_fallback_pdf" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_vision_pdf_marks_is_paper(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        from adso.handlers.callbacks import _cb_vision
+
+        pdf_path = tmp_path / "scanned.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(pdf_path),
+            "original_filename": "scanned.pdf",
+            "media_type": "document",
+        }
+
+        update = make_callback_query(CB_VISION)
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=5)
+        mock_pix = MagicMock()
+        mock_pix.save = MagicMock()
+        mock_doc.__getitem__ = MagicMock(
+            return_value=MagicMock(get_pixmap=MagicMock(return_value=mock_pix))
+        )
+
+        with patch("fitz.open", return_value=mock_doc), \
+             patch("pathlib.Path.read_bytes", return_value=b"\x89PNG"), \
+             patch("adso.llm_client.describe_image_with_vision", new_callable=AsyncMock) as mock_vision:
+            mock_vision.return_value = "TÍTULO: Paper\nABSTRACT: ..."
+            await _cb_vision(update, mock_context)
+
+        assert "pending_transcript" in mock_context.user_data
+        assert mock_context.user_data["pending_transcript"]["media_type"] == "document"
+
+    @pytest.mark.asyncio
+    async def test_vision_pdf_uses_paper_prompt(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        from adso.handlers.callbacks import _cb_vision
+        from adso.llm_client import _VISION_PROMPT_PDF
+
+        pdf_path = tmp_path / "scanned.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(pdf_path),
+            "original_filename": "scanned.pdf",
+            "media_type": "document",
+        }
+
+        update = make_callback_query(CB_VISION)
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=3)
+        mock_pix = MagicMock()
+        mock_pix.save = MagicMock()
+        mock_doc.__getitem__ = MagicMock(
+            return_value=MagicMock(get_pixmap=MagicMock(return_value=mock_pix))
+        )
+
+        with patch("fitz.open", return_value=mock_doc), \
+             patch("pathlib.Path.read_bytes", return_value=b"\x89PNG"), \
+             patch("adso.llm_client.describe_image_with_vision", new_callable=AsyncMock) as mock_vision:
+            mock_vision.return_value = "TÍTULO: Paper"
+            await _cb_vision(update, mock_context)
+
+        _, kwargs = mock_vision.call_args
+        assert kwargs.get("prompt") == _VISION_PROMPT_PDF
+
+    @pytest.mark.asyncio
+    async def test_vision_no_pending(self, make_callback_query, mock_context) -> None:
+        from adso.handlers.callbacks import _cb_vision
+
+        update = make_callback_query(CB_VISION)
+        await _cb_vision(update, mock_context)
+
+        update.callback_query.answer.assert_called_once()
+        assert "pending_extraction" not in mock_context.user_data

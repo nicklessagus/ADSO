@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 from telegram.ext import ContextTypes
@@ -153,6 +154,11 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         except Exception as e:
             logger.warning("Error reclasificando %s: %s", ref.path, e)
+
+
+async def heartbeat_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job periódico: actualiza /tmp/adso_heartbeat para el HEALTHCHECK de Docker."""
+    Path("/tmp/adso_heartbeat").touch()
 
 
 async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:

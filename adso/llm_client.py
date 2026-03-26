@@ -692,6 +692,70 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
     return response.text
 
 
+_VISION_PROMPT_IMAGE = (
+    "Describe detalladamente el contenido de esta imagen en español. "
+    "Si hay texto visible, transcribilo completo. "
+    "Si es un diagrama, esquema o figura, describí su estructura y contenido."
+)
+
+_VISION_PROMPT_PDF = (
+    "Este es un PDF académico escaneado. Extraé el siguiente contenido con exactamente "
+    "estos encabezados (omitir el encabezado si la sección no está visible):\n\n"
+    "TÍTULO:\n"
+    "AUTHORS:\n"
+    "DOI:\n"
+    "ABSTRACT:\n"
+    "KEYWORDS:\n"
+    "METHODS:\n"
+    "CONCLUSIONS:\n\n"
+    "Transcribí el texto exacto, sin parafrasear ni traducir."
+)
+
+
+async def describe_image_with_vision(
+    images: list[tuple[bytes, str]],
+    prompt: str = _VISION_PROMPT_IMAGE,
+) -> str:
+    """Describe una o más imágenes usando Gemini Vision.
+
+    Args:
+        images: Lista de (bytes, mime_type). Para PDFs, una entrada por página.
+        prompt: Instrucción para el modelo.
+
+    Returns:
+        Texto extraído o descripción generada.
+
+    Raises:
+        RuntimeError: Si la API falla o devuelve respuesta vacía.
+    """
+    from google import genai
+    from google.genai import types
+    import os
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY not configured")
+
+    client = genai.Client(api_key=api_key)
+
+    contents: list = [
+        types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
+        for img_bytes, mime_type in images
+    ]
+    contents.append(prompt)
+
+    response = await asyncio.to_thread(
+        client.models.generate_content,
+        model="gemini-2.5-flash-lite",
+        contents=contents,
+    )
+
+    if not response.text:
+        raise RuntimeError("Gemini Vision returned empty response")
+
+    return response.text
+
+
 def _parse_json_response(text: str) -> dict:
     """Parse JSON from an LLM response, stripping markdown fences if present.
 
