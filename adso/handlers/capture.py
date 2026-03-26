@@ -23,7 +23,7 @@ from adso.keyboards import (
     build_destination_keyboard,
     build_preview,
 )
-from adso.llm_client import classify
+from adso.llm_client import VALID_TYPES, classify
 from adso.vault_search import find_by_property
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
 
@@ -128,6 +128,11 @@ async def _classify_and_preview(
             result["payload"] = {}
         if not isinstance(result["payload"].get("frontmatter"), dict):
             result["payload"]["frontmatter"] = {}
+        fm_forced = result["payload"]["frontmatter"]
+        if not fm_forced.get("type") or fm_forced["type"] not in VALID_TYPES:
+            fm_forced["type"] = "draft"
+        if not fm_forced.get("title"):
+            fm_forced["title"] = text[:80].strip()
         if not result["payload"].get("body"):
             result["payload"]["body"] = text
 
