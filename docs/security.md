@@ -96,7 +96,7 @@ VALID_TYPES = {"note", "task", "idea", "inbox", "project-index", "area-index"}
 VALID_STATUS = {
     "note":           {"active", "pending-classification"},
     "task":           {"pending", "in-progress", "done", "pending-classification"},
-    "idea":           {"raw", "developing", "mature", "pending-classification"},
+    "idea":           {"raw", "implemented", "discarded", "pending-classification"},
     "inbox":          {"pending-classification"},
     "project-index":  {"active", "on-hold", "completed", "archived"},
     "area-index":     set(),  # no tiene status — áreas no tienen ciclo de vida

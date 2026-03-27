@@ -1,4 +1,4 @@
-"""Handlers de comandos de Telegram: /start, /status, /clasificar."""
+"""Handlers de comandos de Telegram: /start, /status, /clasificar, /reporte, /help."""
 
 from __future__ import annotations
 
@@ -18,6 +18,26 @@ from adso.vault_search import find_by_property
 from adso.vault_writer import GitBackup, read_note
 
 logger = logging.getLogger(__name__)
+
+
+_HELP_TEXT = """\
+<b>Comandos disponibles</b>
+
+/reporte — Generá un reporte del vault (proyecto, área, ideas, salud, cola de lectura)
+/clasificar — Clasificá notas de Inbox sin destino asignado
+/status — Estado del sistema (vault, embeddings, inbox)
+/start — Verificar que el bot está activo
+/help — Mostrar este mensaje
+"""
+
+
+@authorized
+async def handle_help(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /help."""
+    await update.message.reply_text(_HELP_TEXT, parse_mode="HTML")
 
 
 @authorized

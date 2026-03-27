@@ -517,6 +517,61 @@ async def get_all_tags(
     return await asyncio.to_thread(_scan)
 
 
+async def scan_notes(
+    vault_path: Path,
+    scope: Optional[str] = None,
+    exclude_dirs: Optional[list[str]] = None,
+    filters: Optional[dict] = None,
+) -> list[NoteData]:
+    """Retorna NoteData completos (con todo el frontmatter) para notas que cumplan los filtros.
+
+    Args:
+        vault_path: Raíz del vault.
+        scope: Subdirectorio que restringe la búsqueda (relativo a vault_path).
+        exclude_dirs: Carpetas a excluir (default: _DEFAULT_EXCLUDE).
+        filters: Dict {campo: valor} — comparación case-insensitive.
+            El valor puede ser str, list[str] (OR), o None (campo existe con cualquier valor).
+
+    Returns:
+        Lista de NoteData que cumplan todos los filtros.
+    """
+
+    def _scan() -> list[NoteData]:
+        results = []
+        for md_path in _scan_vault(vault_path, exclude_dirs, scope):
+            note = _parse_note_safe(md_path)
+            if note is None:
+                continue
+
+            if filters:
+                skip = False
+                for field_name, expected in filters.items():
+                    fm_value = note.frontmatter.get(field_name)
+                    if expected is None:
+                        # Solo verificar que el campo existe
+                        if fm_value is None:
+                            skip = True
+                            break
+                    elif isinstance(expected, list):
+                        # OR: el valor del frontmatter debe estar en la lista
+                        fm_str = str(fm_value).lower() if fm_value is not None else ""
+                        if not any(str(v).lower() == fm_str for v in expected):
+                            skip = True
+                            break
+                    else:
+                        # Comparación directa case-insensitive
+                        if fm_value is None or str(fm_value).lower() != str(expected).lower():
+                            skip = True
+                            break
+                if skip:
+                    continue
+
+            results.append(note)
+        return results
+
+    return await asyncio.to_thread(_scan)
+
+
 async def get_note_index(vault_path: Path) -> dict[str, Path]:
     """Construye índice {stem → path} de todos los .md del vault.
 

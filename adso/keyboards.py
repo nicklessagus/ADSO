@@ -33,6 +33,13 @@ from adso.constants import (
     CB_OCR,
     CB_READ_STATUS_READ,
     CB_READ_STATUS_UNREAD,
+    CB_REPORT_HEALTH,
+    CB_REPORT_IDEAS,
+    CB_REPORT_IDEAS_PREFIX,
+    CB_REPORT_READING,
+    CB_REPORT_READING_PREFIX,
+    CB_REPORT_SCOPE,
+    CB_REPORT_SCOPE_PREFIX,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
@@ -319,3 +326,73 @@ def build_arxiv_duplicate_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Crear igual", callback_data=CB_ARXIV_CREATE_ANYWAY),
         ]
     ])
+
+
+def build_report_type_keyboard() -> InlineKeyboardMarkup:
+    """Teclado de selección del tipo de reporte.
+
+    Returns:
+        InlineKeyboardMarkup con los 4 tipos de reporte disponibles.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Proyecto/Área", callback_data=CB_REPORT_SCOPE),
+            InlineKeyboardButton("Ideas", callback_data=CB_REPORT_IDEAS),
+        ],
+        [
+            InlineKeyboardButton("Salud del vault", callback_data=CB_REPORT_HEALTH),
+            InlineKeyboardButton("Cola de lectura", callback_data=CB_REPORT_READING),
+        ],
+    ])
+
+
+def build_report_scope_keyboard(
+    projects: list[dict],
+    areas: list[dict],
+    include_all: bool = False,
+    prefix: str = CB_REPORT_SCOPE_PREFIX,
+    inbox_label: str | None = "Inbox",
+) -> InlineKeyboardMarkup:
+    """Teclado para seleccionar el scope de un reporte (proyecto, área, inbox, todo).
+
+    Trunca nombres a 32 caracteres para respetar el límite de 64 bytes de callback_data.
+
+    Args:
+        projects: Lista de dicts {name, description}.
+        areas: Lista de dicts {name, description}.
+        include_all: Si True, agrega botón [Todo] en vez de [Inbox].
+        prefix: Prefijo del callback_data (varía según tipo de reporte).
+        inbox_label: Etiqueta del botón extra. None = no mostrar.
+
+    Returns:
+        InlineKeyboardMarkup.
+    """
+    _MAX_NAME = 32  # max chars para que el callback_data quede dentro de 64 bytes
+
+    def _truncate(name: str) -> str:
+        return name[:_MAX_NAME]
+
+    buttons: list[InlineKeyboardButton] = []
+
+    for p in projects:
+        name = _truncate(p["name"])
+        buttons.append(
+            InlineKeyboardButton(name, callback_data=f"{prefix}p:{name}")
+        )
+    for a in areas:
+        name = _truncate(a["name"])
+        buttons.append(
+            InlineKeyboardButton(name, callback_data=f"{prefix}a:{name}")
+        )
+
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+
+    extra: list[InlineKeyboardButton] = []
+    if include_all:
+        extra.append(InlineKeyboardButton("Todo", callback_data=f"{prefix}all"))
+    elif inbox_label:
+        extra.append(InlineKeyboardButton(inbox_label, callback_data=f"{prefix}inbox"))
+    extra.append(InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL))
+    rows.append(extra)
+
+    return InlineKeyboardMarkup(rows)

@@ -131,6 +131,8 @@ Las ideas (`type: idea`) viven en su proyecto o área correspondiente, igual que
 Nota con `type: idea` en área → Proyecto activo → Archivo → (borrado con doble confirmación)
 Las áreas no tienen ciclo de vida.
 
+Una idea tiene tres estados: `raw` (capturada, sin procesar), `implemented` (se hizo algo con ella — se convirtió en proyecto, tarea, o se aplicó), `discarded` (descartada conscientemente). No hay presión de "desarrollarla": puede quedarse en `raw` indefinidamente hasta que el usuario tome una decisión.
+
 ### Frontmatter mínimo requerido
 ```yaml
 ---
@@ -242,18 +244,16 @@ Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el 
 
 ## Fases de desarrollo
 
-| Fase | Funcionalidad |
-|---|---|
-| 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) |
-| 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
-| 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto |
-| 4 | Imágenes y capturas (OCR + Gemini Vision) |
-| 5 | Integraciones externas (arXiv) |
-| 6 | Google Calendar + Google Tasks |
-| 7 | Consultas RAG en lenguaje natural |
-| 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
-
-Implementar en orden. No saltar fases.
+| Fase | Funcionalidad | Estado |
+|---|---|---|
+| 1 | Captura de texto, clasificación, confirmación, escritura al vault + búsqueda estructural (backlinks, tags, frontmatter) | ✅ |
+| 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) | ✅ |
+| 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto | ✅ |
+| 4 | Imágenes y capturas (OCR + Gemini Vision) | ✅ |
+| 5 | Integraciones externas (arXiv) | ✅ |
+| 6 | Google Calendar + Google Tasks | ⏸ diferida — diseño pendiente |
+| 7 | Consultas RAG en lenguaje natural | — |
+| 8 | Análisis del vault: reportes a pedido (scope, ideas, salud, cola de lectura), scoring de papers, detección de gaps | 🔄 parcial — reportes implementados |
 
 ### Fase 5 — arXiv
 

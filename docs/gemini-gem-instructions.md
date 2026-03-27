@@ -147,7 +147,7 @@ status: active                         # valores dependen del type
 |---|---|---|---|
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
 | `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
-| `idea` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
+| `idea` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `raw`, `implemented`, `discarded`, `pending-classification` | `raw` |
 | `draft` | `00-Inbox/` | `draft`, `pending-classification` | `pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed`, `archived` | `active` |
 

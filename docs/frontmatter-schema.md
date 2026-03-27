@@ -84,7 +84,7 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 |---|---|---|
 | `reference` | `active`, `pending-classification` | `active` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
-| `idea` | `raw`, `developing`, `mature`, `pending-classification` | `raw` |
+| `idea` | `raw`, `implemented`, `discarded`, `pending-classification` | `raw` |
 | `draft` | `draft`, `pending-classification` | `pending-classification` |
 | `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
 | `area-index` | — (sin ciclo de vida) | — |
@@ -204,7 +204,7 @@ related: ["[[otra-nota]]"]             # links siempre entre comillas dobles den
 ```yaml
 ---
 type: idea
-status: raw                             # Text enum — raw | developing | mature
+status: raw                             # Text enum — raw | implemented | discarded
 project: tesis                          # Text plano — opcional, determina carpeta destino (01-Projects/{proyecto}/)
 section: brainstorm                     # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
 area: investigacion                     # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)

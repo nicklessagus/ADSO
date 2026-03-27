@@ -108,6 +108,14 @@ async def handle_text(
         await _handle_manage_missing_fields(update, context, text)
         return
 
+    # Corrección de preview pendiente (pending_note): texto libre modifica frontmatter
+    if context.user_data.get("pending_note"):
+        from adso.handlers.capture import _handle_text_correction
+        await _handle_text_correction(
+            update, context, text, context.user_data["pending_note"]
+        )
+        return
+
     # Bloquear si hay cualquier teclado pendiente de resolución
     if _has_pending_keyboard(context):
         ids = context.user_data.setdefault("block_msg_ids", [])

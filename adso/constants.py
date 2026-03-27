@@ -46,6 +46,23 @@ CB_BACK = "back"
 # Keywords de gestión para detección sin LLM
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Report callback constants
+# ---------------------------------------------------------------------------
+
+CB_REPORT_MENU = "rpt:menu"
+CB_REPORT_SCOPE = "rpt:scope"
+CB_REPORT_IDEAS = "rpt:ideas"
+CB_REPORT_HEALTH = "rpt:health"
+CB_REPORT_READING = "rpt:reading"
+CB_REPORT_SCOPE_PREFIX = "rpt:s:"    # + "p:name" | "a:name" | "inbox"
+CB_REPORT_IDEAS_PREFIX = "rpt:i:"   # + "p:name" | "a:name" | "all"
+CB_REPORT_READING_PREFIX = "rpt:r:" # + "p:name" | "a:name" | "all"
+
+# ---------------------------------------------------------------------------
+# Keywords de gestión para detección sin LLM
+# ---------------------------------------------------------------------------
+
 MANAGE_KEYWORDS: dict[str, set[str]] = {
     "project": {"proyecto", "project"},
     "area":    {"área", "area"},

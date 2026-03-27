@@ -37,6 +37,14 @@ from adso.constants import (
     CB_OCR,
     CB_READ_STATUS_READ,
     CB_READ_STATUS_UNREAD,
+    CB_REPORT_HEALTH,
+    CB_REPORT_IDEAS,
+    CB_REPORT_IDEAS_PREFIX,
+    CB_REPORT_MENU,
+    CB_REPORT_READING,
+    CB_REPORT_READING_PREFIX,
+    CB_REPORT_SCOPE,
+    CB_REPORT_SCOPE_PREFIX,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
@@ -61,6 +69,7 @@ from adso.keyboards import (
     build_capture_keyboard,
     build_project_selector,
 )
+from adso.handlers.reports import handle_report_callback
 from adso.security import authorized
 
 logger = logging.getLogger(__name__)
@@ -202,6 +211,13 @@ async def handle_callback(
 
     elif data == CB_ARXIV_CREATE_ANYWAY:
         await _cb_arxiv_create_anyway(update, context)
+
+    elif data in (CB_REPORT_MENU, CB_REPORT_SCOPE, CB_REPORT_IDEAS, CB_REPORT_HEALTH, CB_REPORT_READING) or (
+        data.startswith(CB_REPORT_SCOPE_PREFIX)
+        or data.startswith(CB_REPORT_IDEAS_PREFIX)
+        or data.startswith(CB_REPORT_READING_PREFIX)
+    ):
+        await handle_report_callback(query, context, data)
 
 
 _PDF_SCAN_PAGES = 2  # páginas a procesar en OCR y Vision para PDFs escaneados

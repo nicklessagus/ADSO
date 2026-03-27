@@ -61,7 +61,7 @@ VALID_TYPES = {"reference", "task", "idea", "draft", "project-index", "area-inde
 VALID_STATUS: dict[str, set[str]] = {
     "reference": {"active", "pending-classification"},
     "task": {"pending", "in-progress", "done", "pending-classification"},
-    "idea": {"raw", "developing", "mature", "pending-classification"},
+    "idea": {"raw", "implemented", "discarded", "pending-classification"},
     "draft": {"pending-classification"},
     "project-index": {"active", "on-hold", "completed", "archived"},
     "area-index": set(),

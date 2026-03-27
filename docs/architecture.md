@@ -186,6 +186,16 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 
 **Pendiente (Fase 7/8) — limpieza de embeddings huérfanos:** si el usuario borra una nota directamente desde Obsidian (no via bot), ChromaDB conserva el embedding sin referencia válida. La solución prevista es ampliar el cron existente para comparar IDs en ChromaDB contra los `.md` del vault y eliminar los huérfanos. No se implementa file watcher — innecesario para uso personal. Las búsquedas RAG no fallan por huérfanos (ChromaDB los devuelve pero el bot verifica existencia del archivo antes de mostrar), pero degradan la relevancia de los resultados.
 
+### `reporters.py` — Reportes a pedido (Fase 8)
+- Genera reportes en Markdown enviados como documento `.md` en Telegram.
+- **`scope_report(project, area, inbox)`** — todo lo que hay en un proyecto/área/inbox agrupado por tipo (referencias, tareas por estado, ideas por estado, papers sin leer) con última actividad.
+- **`ideas_report(project, area)`** — todas las ideas del vault agrupadas por estado (`raw` / `implemented` / `discarded`), con filtro opcional por proyecto/área.
+- **`health_report(stale_days)`** — proyectos/áreas sin actividad en N días, tareas vencidas, ideas `raw`, inbox acumulado.
+- **`reading_queue(project, area)`** — papers con `read_status: unread` ordenados por prioridad (high → medium → low), agrupados por proyecto/área.
+- Cada reporte incluye header ASCII estándar + síntesis LLM de 2-3 oraciones (no bloqueante — si Gemini falla, el reporte se genera igual).
+- Links `obsidian://` a cada nota para apertura directa en Obsidian.
+- Trigger: `/reporte` command → teclado inline con los 4 tipos.
+
 ### `vault_search.py` — Búsqueda estructural (Fase 1)
 - **Complementa a `knowledge_query.py`.** Busca por datos exactos en el vault: wikilinks, tags, properties del frontmatter.
 - Parsea archivos `.md` del vault extrayendo `[[wikilinks]]`, tags (`#tag`), y YAML frontmatter.
@@ -916,7 +926,7 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 - `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
 - `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos adaptativos (cuota diaria → degradado inmediato; RPM → retryDelay de la API; otros → backoff fijo), modo degradado (inbox + `pending-classification`)
 - `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()`, `update_wikilinks()` — routing por tipo/proyecto/área/sección
-- `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`
+- `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`, `scan_notes()`
 - Gestión básica: crear proyecto, crear área, crear sección (modo `manage` del JSON schema)
 - Git backup con debounce configurable
 - Validación del vault al startup (estructura de carpetas)
@@ -1046,7 +1056,7 @@ Todo es configurable en `config.yaml` via `weekly_report`: se puede deshabilitar
 - `papers_queue` — papers con `read_status: unread`, ordenados por prioridad
 - `inbox_suggestion` — ítem del inbox más relevante según la actividad reciente de la semana
 - `tasks_summary` — tasks ADSO completadas vs pendientes de la semana
-- `stale_ideas` — ideas con `status: raw` hace más de 60 días
+- `stale_ideas` — ideas con `status: raw` (sin límite de tiempo — visibilidad, sin alarma)
 - `paper_suggestion` — sugerencia de paper a leer basada en similitud con actividad reciente
 
 ### Scoring compuesto de papers
