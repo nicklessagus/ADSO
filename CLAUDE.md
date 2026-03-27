@@ -187,7 +187,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` *(Fase 7)* |
 | **Fallback OCR sin texto** | `[Gemini Vision]` / `[Cancelar]` `[Describir]` — OCR no encontró texto, sin botón OCR |
-| **`/reporte` — tipo** | `[Proyecto/Área]` `[Ideas]` / `[Salud del vault]` `[Cola de lectura]` / `[Cancelar]` — tres filas |
+| **`/reporte` — tipo** | `[Proyecto/Área/Inbox]` `[Ideas]` / `[Salud del vault]` `[Cola de lectura]` / `[Cancelar]` — tres filas |
 | **`/reporte` — categoría** | `[Proyectos]` `[Áreas]` / `[Cancelar]` `[Inbox\|Todas\|Toda la cola]` — dos filas |
 | **`/reporte` — lista de items** | botones de items en pares / `[Cancelar]` `[← Volver]` — última fila fija |
 
@@ -315,6 +315,7 @@ VAULT_PATH                 # default: /vault
 - **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `reference`, `task`, `idea`, `draft`, `project-index`, `area-index`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `reference` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
 
 - **Destino en preview (`build_preview`):** project → `01-Projects/...`; area → `02-Areas/...`; `type: draft` sin project ni area → `00-Inbox` (tanto cuando el usuario elige Inbox explícitamente como en modo degradado — ambos terminan en Inbox); cualquier otro tipo sin destino → "por definir" (el usuario debe elegir antes de confirmar).
+- **Routing de destino (`_resolve_dest_dir`):** todos los tipos (`reference`, `task`, `idea`) siguen el mismo orden: project > area > Inbox/None. `task` con project va a `01-Projects/{project}/` aunque tenga area seteada.
 - **Creación de proyecto/área desde bot:** `_extract_name_from_command()` parsea el nombre directamente con regex para patrones simples (`crear proyecto "X"`, `nuevo proyecto X`). Solo llama al LLM cuando el patrón no es reconocible (ej: "quiero un proyecto para mi tesis"). El intent ya viene confirmado por el botón, solo hace falta el nombre.
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.
 - **Google Calendar y Tasks:** sync cada 30 min (configurable via `sync.interval_minutes`). Calendar y Tasks se reconcilian en el mismo cron. Fuentes de verdad: contenido y estructura de la nota → vault; `scheduled`, `due_date`, `status: done` y título de tarea → bidireccional (gana el último cambio). Borrar una task en Google Tasks mueve la nota a `00-Inbox/` con `status: pending-classification`.
