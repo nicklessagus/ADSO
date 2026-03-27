@@ -36,10 +36,16 @@ from adso.constants import (
     CB_REPORT_HEALTH,
     CB_REPORT_IDEAS,
     CB_REPORT_IDEAS_PREFIX,
+    CB_REPORT_IDEAS_SHOW_A,
+    CB_REPORT_IDEAS_SHOW_P,
     CB_REPORT_READING,
     CB_REPORT_READING_PREFIX,
+    CB_REPORT_READING_SHOW_A,
+    CB_REPORT_READING_SHOW_P,
     CB_REPORT_SCOPE,
     CB_REPORT_SCOPE_PREFIX,
+    CB_REPORT_SCOPE_SHOW_A,
+    CB_REPORT_SCOPE_SHOW_P,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
@@ -346,53 +352,69 @@ def build_report_type_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_report_scope_keyboard(
-    projects: list[dict],
-    areas: list[dict],
-    include_all: bool = False,
-    prefix: str = CB_REPORT_SCOPE_PREFIX,
-    inbox_label: str | None = "Inbox",
+def build_report_category_keyboard(
+    show_p_cb: str,
+    show_a_cb: str,
+    extra_cb: str,
+    extra_label: str,
 ) -> InlineKeyboardMarkup:
-    """Teclado para seleccionar el scope de un reporte (proyecto, área, inbox, todo).
-
-    Trunca nombres a 32 caracteres para respetar el límite de 64 bytes de callback_data.
+    """Paso intermedio: elige entre Proyectos, Áreas, o una opción extra (Inbox / Todo).
 
     Args:
-        projects: Lista de dicts {name, description}.
-        areas: Lista de dicts {name, description}.
-        include_all: Si True, agrega botón [Todo] en vez de [Inbox].
-        prefix: Prefijo del callback_data (varía según tipo de reporte).
-        inbox_label: Etiqueta del botón extra. None = no mostrar.
+        show_p_cb: callback_data para mostrar lista de proyectos.
+        show_a_cb: callback_data para mostrar lista de áreas.
+        extra_cb: callback_data para la opción extra (inbox o all).
+        extra_label: Etiqueta de la opción extra.
 
     Returns:
         InlineKeyboardMarkup.
     """
-    _MAX_NAME = 32  # max chars para que el callback_data quede dentro de 64 bytes
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Proyectos", callback_data=show_p_cb),
+            InlineKeyboardButton("Áreas", callback_data=show_a_cb),
+        ],
+        [
+            InlineKeyboardButton(extra_label, callback_data=extra_cb),
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        ],
+    ])
 
-    def _truncate(name: str) -> str:
-        return name[:_MAX_NAME]
 
-    buttons: list[InlineKeyboardButton] = []
+def build_report_items_keyboard(
+    items: list[dict],
+    is_project: bool,
+    prefix: str,
+    back_cb: str,
+) -> InlineKeyboardMarkup:
+    """Lista de proyectos o áreas para seleccionar el scope final de un reporte.
 
-    for p in projects:
-        name = _truncate(p["name"])
-        buttons.append(
-            InlineKeyboardButton(name, callback_data=f"{prefix}p:{name}")
+    Trunca nombres a 32 caracteres para respetar el límite de 64 bytes de callback_data.
+
+    Args:
+        items: Lista de dicts {name, description}.
+        is_project: True = proyectos (prefijo p:), False = áreas (prefijo a:).
+        prefix: Prefijo del callback_data final (ej: "rpt:s:").
+        back_cb: callback_data del botón [← Volver].
+
+    Returns:
+        InlineKeyboardMarkup.
+    """
+    _MAX_NAME = 32
+    item_type = "p" if is_project else "a"
+
+    buttons = [
+        InlineKeyboardButton(
+            item["name"][:_MAX_NAME],
+            callback_data=f"{prefix}{item_type}:{item['name'][:_MAX_NAME]}",
         )
-    for a in areas:
-        name = _truncate(a["name"])
-        buttons.append(
-            InlineKeyboardButton(name, callback_data=f"{prefix}a:{name}")
-        )
+        for item in items
+    ]
 
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-
-    extra: list[InlineKeyboardButton] = []
-    if include_all:
-        extra.append(InlineKeyboardButton("Todo", callback_data=f"{prefix}all"))
-    elif inbox_label:
-        extra.append(InlineKeyboardButton(inbox_label, callback_data=f"{prefix}inbox"))
-    extra.append(InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL))
-    rows.append(extra)
+    rows.append([
+        InlineKeyboardButton("← Volver", callback_data=back_cb),
+        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+    ])
 
     return InlineKeyboardMarkup(rows)

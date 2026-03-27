@@ -58,6 +58,13 @@ CB_REPORT_READING = "rpt:reading"
 CB_REPORT_SCOPE_PREFIX = "rpt:s:"    # + "p:name" | "a:name" | "inbox"
 CB_REPORT_IDEAS_PREFIX = "rpt:i:"   # + "p:name" | "a:name" | "all"
 CB_REPORT_READING_PREFIX = "rpt:r:" # + "p:name" | "a:name" | "all"
+# Paso intermedio: muestra lista de proyectos o áreas según tipo de reporte
+CB_REPORT_SCOPE_SHOW_P = "rpt:sp"   # → lista de proyectos para scope
+CB_REPORT_SCOPE_SHOW_A = "rpt:sa"   # → lista de áreas para scope
+CB_REPORT_IDEAS_SHOW_P = "rpt:ip"   # → lista de proyectos para ideas
+CB_REPORT_IDEAS_SHOW_A = "rpt:ia"   # → lista de áreas para ideas
+CB_REPORT_READING_SHOW_P = "rpt:rp" # → lista de proyectos para lectura
+CB_REPORT_READING_SHOW_A = "rpt:ra" # → lista de áreas para lectura
 
 # ---------------------------------------------------------------------------
 # Keywords de gestión para detección sin LLM

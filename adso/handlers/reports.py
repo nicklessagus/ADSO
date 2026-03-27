@@ -1,8 +1,10 @@
 """Handlers para reportes a pedido del vault.
 
-/reporte o keywords "reporte"/"resumen"/"informe" disparan un menú de tipos.
-El usuario elige el tipo, luego el scope (si aplica), y el bot genera un
-archivo .md que envía como documento de Telegram.
+/reporte dispara un menú de tipos. El usuario elige el tipo, luego navega
+por una botonera de dos pasos para seleccionar el scope (categoría → item),
+y el bot genera un archivo .md que envía como documento de Telegram.
+
+Mientras el menú está activo, pending_report=True bloquea texto entrante.
 """
 
 from __future__ import annotations
@@ -23,24 +25,28 @@ from adso.constants import (
     CB_REPORT_HEALTH,
     CB_REPORT_IDEAS,
     CB_REPORT_IDEAS_PREFIX,
+    CB_REPORT_IDEAS_SHOW_A,
+    CB_REPORT_IDEAS_SHOW_P,
     CB_REPORT_MENU,
     CB_REPORT_READING,
     CB_REPORT_READING_PREFIX,
+    CB_REPORT_READING_SHOW_A,
+    CB_REPORT_READING_SHOW_P,
     CB_REPORT_SCOPE,
     CB_REPORT_SCOPE_PREFIX,
+    CB_REPORT_SCOPE_SHOW_A,
+    CB_REPORT_SCOPE_SHOW_P,
 )
 from adso.keyboards import (
     _esc,
-    build_report_scope_keyboard,
+    build_report_category_keyboard,
+    build_report_items_keyboard,
     build_report_type_keyboard,
 )
 from adso.reporters import health_report, ideas_report, reading_queue, scope_report
 from adso.security import authorized
 
 logger = logging.getLogger(__name__)
-
-# Keywords que disparan el menú de reportes en handle_text
-REPORT_KEYWORDS = {"reporte", "resumen", "informe"}
 
 
 @authorized
@@ -50,10 +56,13 @@ async def handle_reporte_command(
 ) -> None:
     """Handler de /reporte — muestra el menú de tipos de reporte.
 
+    Setea pending_report=True para bloquear texto mientras el menú está activo.
+
     Args:
         update: Telegram update.
         context: Bot context.
     """
+    context.user_data["pending_report"] = True
     await update.message.reply_text(
         "¿Qué reporte querés generar?",
         reply_markup=build_report_type_keyboard(),
@@ -65,17 +74,11 @@ async def handle_report_callback(
     context: ContextTypes.DEFAULT_TYPE,
     data: str,
 ) -> None:
-    """Maneja todos los callbacks CB_REPORT_*.
+    """Maneja todos los callbacks rpt:*.
 
-    Routing principal:
-    - rpt:menu        → muestra menú de tipos
-    - rpt:scope       → pide scope (proyecto/área/inbox)
-    - rpt:ideas       → pide scope (proyecto/área/todo)
-    - rpt:health      → genera reporte directamente
-    - rpt:reading     → pide scope (proyecto/área/todo)
-    - rpt:s:*         → genera reporte de scope con el destino elegido
-    - rpt:i:*         → genera reporte de ideas con el destino elegido
-    - rpt:r:*         → genera reporte de cola de lectura con el destino elegido
+    Flujo de dos pasos para scope/ideas/lectura:
+    1. Tipo → categoría (Proyectos / Áreas / extra)
+    2. Categoría → lista de items → genera reporte
 
     Args:
         query: CallbackQuery de Telegram.
@@ -87,112 +90,164 @@ async def handle_report_callback(
 
     # --- Menú inicial ---
     if data == CB_REPORT_MENU:
+        context.user_data["pending_report"] = True
         await query.edit_message_text(
             "¿Qué reporte querés generar?",
             reply_markup=build_report_type_keyboard(),
         )
         return
 
-    # --- Tipo: Proyecto/Área → pedir scope ---
+    # --- Tipo: Proyecto/Área → paso 1: elegir categoría ---
     if data == CB_REPORT_SCOPE:
-        projects, areas = await _get_existing_items(vault_path)
-        keyboard = build_report_scope_keyboard(
-            projects, areas,
-            include_all=False,
-            prefix=CB_REPORT_SCOPE_PREFIX,
-            inbox_label="Inbox",
-        )
         await query.edit_message_text(
-            "¿Scope del reporte?",
-            reply_markup=keyboard,
+            "¿Querés el reporte de un proyecto, un área o el inbox?",
+            reply_markup=build_report_category_keyboard(
+                show_p_cb=CB_REPORT_SCOPE_SHOW_P,
+                show_a_cb=CB_REPORT_SCOPE_SHOW_A,
+                extra_cb=f"{CB_REPORT_SCOPE_PREFIX}inbox",
+                extra_label="Inbox",
+            ),
         )
         return
 
-    # --- Tipo: Ideas → pedir scope ---
+    # --- Tipo: Ideas → paso 1: elegir categoría ---
     if data == CB_REPORT_IDEAS:
-        projects, areas = await _get_existing_items(vault_path)
-        keyboard = build_report_scope_keyboard(
-            projects, areas,
-            include_all=True,
-            prefix=CB_REPORT_IDEAS_PREFIX,
-            inbox_label=None,
-        )
         await query.edit_message_text(
-            "¿Filtrar ideas por scope?",
-            reply_markup=keyboard,
+            "¿Filtrar ideas por proyecto, área o ver todas?",
+            reply_markup=build_report_category_keyboard(
+                show_p_cb=CB_REPORT_IDEAS_SHOW_P,
+                show_a_cb=CB_REPORT_IDEAS_SHOW_A,
+                extra_cb=f"{CB_REPORT_IDEAS_PREFIX}all",
+                extra_label="Todas",
+            ),
         )
         return
 
-    # --- Tipo: Cola de lectura → pedir scope ---
+    # --- Tipo: Cola de lectura → paso 1: elegir categoría ---
     if data == CB_REPORT_READING:
-        projects, areas = await _get_existing_items(vault_path)
-        keyboard = build_report_scope_keyboard(
-            projects, areas,
-            include_all=True,
-            prefix=CB_REPORT_READING_PREFIX,
-            inbox_label=None,
-        )
         await query.edit_message_text(
-            "¿Filtrar cola de lectura por scope?",
-            reply_markup=keyboard,
+            "¿Filtrar la cola de lectura por proyecto, área o ver toda?",
+            reply_markup=build_report_category_keyboard(
+                show_p_cb=CB_REPORT_READING_SHOW_P,
+                show_a_cb=CB_REPORT_READING_SHOW_A,
+                extra_cb=f"{CB_REPORT_READING_PREFIX}all",
+                extra_label="Toda la cola",
+            ),
         )
+        return
+
+    # --- Paso 2: lista de proyectos o áreas ---
+    if data in (CB_REPORT_SCOPE_SHOW_P, CB_REPORT_SCOPE_SHOW_A,
+                CB_REPORT_IDEAS_SHOW_P, CB_REPORT_IDEAS_SHOW_A,
+                CB_REPORT_READING_SHOW_P, CB_REPORT_READING_SHOW_A):
+        await _show_items_keyboard(query, context, vault_path, data)
         return
 
     # --- Tipo: Salud del vault → generar directo ---
     if data == CB_REPORT_HEALTH:
         await query.edit_message_text("Generando reporte de salud del vault...")
         await _send_report(
-            query, context, vault_path,
+            query, context,
             report_bytes_coro=health_report(vault_path),
             filename=f"salud-vault-{date.today()}.md",
         )
         return
 
-    # --- Scope del reporte de proyecto/área/inbox ---
+    # --- Scope final: generar reporte de proyecto/área/inbox ---
     if data.startswith(CB_REPORT_SCOPE_PREFIX):
         suffix = data[len(CB_REPORT_SCOPE_PREFIX):]
         project, area, inbox = _parse_scope_suffix(suffix)
-        await query.edit_message_text("Generando reporte de scope...")
+        await query.edit_message_text("Generando reporte...")
         await _send_report(
-            query, context, vault_path,
+            query, context,
             report_bytes_coro=scope_report(vault_path, project=project, area=area, inbox=inbox),
             filename=f"scope-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
 
-    # --- Scope del reporte de ideas ---
+    # --- Scope final: generar reporte de ideas ---
     if data.startswith(CB_REPORT_IDEAS_PREFIX):
         suffix = data[len(CB_REPORT_IDEAS_PREFIX):]
         project, area, _ = _parse_scope_suffix(suffix)
         await query.edit_message_text("Generando reporte de ideas...")
         await _send_report(
-            query, context, vault_path,
+            query, context,
             report_bytes_coro=ideas_report(vault_path, project=project, area=area),
             filename=f"ideas-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
 
-    # --- Scope del reporte de cola de lectura ---
+    # --- Scope final: generar cola de lectura ---
     if data.startswith(CB_REPORT_READING_PREFIX):
         suffix = data[len(CB_REPORT_READING_PREFIX):]
         project, area, _ = _parse_scope_suffix(suffix)
         await query.edit_message_text("Generando cola de lectura...")
         await _send_report(
-            query, context, vault_path,
+            query, context,
             report_bytes_coro=reading_queue(vault_path, project=project, area=area),
             filename=f"lectura-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
 
 
+async def _show_items_keyboard(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    vault_path: Path,
+    data: str,
+) -> None:
+    """Muestra la lista de proyectos o áreas según el callback recibido.
+
+    Args:
+        query: CallbackQuery.
+        context: Bot context.
+        vault_path: Path del vault.
+        data: callback_data que indica tipo de reporte y categoría.
+    """
+    projects, areas = await _get_existing_items(vault_path)
+
+    # Determinar si es proyectos o áreas, el prefijo final y el back_cb
+    if data == CB_REPORT_SCOPE_SHOW_P:
+        items, is_project, prefix, back_cb = projects, True, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE
+        label = "¿Qué proyecto?"
+    elif data == CB_REPORT_SCOPE_SHOW_A:
+        items, is_project, prefix, back_cb = areas, False, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE
+        label = "¿Qué área?"
+    elif data == CB_REPORT_IDEAS_SHOW_P:
+        items, is_project, prefix, back_cb = projects, True, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS
+        label = "¿Ideas de qué proyecto?"
+    elif data == CB_REPORT_IDEAS_SHOW_A:
+        items, is_project, prefix, back_cb = areas, False, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS
+        label = "¿Ideas de qué área?"
+    elif data == CB_REPORT_READING_SHOW_P:
+        items, is_project, prefix, back_cb = projects, True, CB_REPORT_READING_PREFIX, CB_REPORT_READING
+        label = "¿Cola de lectura de qué proyecto?"
+    else:  # CB_REPORT_READING_SHOW_A
+        items, is_project, prefix, back_cb = areas, False, CB_REPORT_READING_PREFIX, CB_REPORT_READING
+        label = "¿Cola de lectura de qué área?"
+
+    if not items:
+        tipo = "proyectos" if is_project else "áreas"
+        await query.edit_message_text(
+            f"No hay {tipo} en el vault todavía.",
+            reply_markup=build_report_type_keyboard(),
+        )
+        return
+
+    await query.edit_message_text(
+        label,
+        reply_markup=build_report_items_keyboard(items, is_project, prefix, back_cb),
+    )
+
+
 def _parse_scope_suffix(suffix: str) -> tuple[Optional[str], Optional[str], bool]:
     """Parsea el sufijo del callback_data de scope.
 
     Formatos:
-    - "p:nombre"   → project="nombre", area=None, inbox=False
-    - "a:nombre"   → project=None, area="nombre", inbox=False
-    - "inbox"      → project=None, area=None, inbox=True
-    - "all"        → project=None, area=None, inbox=False
+    - "p:nombre"  → project="nombre", area=None, inbox=False
+    - "a:nombre"  → project=None, area="nombre", inbox=False
+    - "inbox"     → project=None, area=None, inbox=True
+    - "all"       → project=None, area=None, inbox=False
 
     Args:
         suffix: Parte del callback_data después del prefijo.
@@ -214,19 +269,17 @@ def _parse_scope_suffix(suffix: str) -> tuple[Optional[str], Optional[str], bool
 async def _send_report(
     query,
     context: ContextTypes.DEFAULT_TYPE,
-    vault_path: Path,
     report_bytes_coro,
     filename: str,
 ) -> None:
-    """Genera un reporte y lo envía como documento .md.
+    """Genera un reporte y lo envía como documento .md. Limpia pending_report al terminar.
 
-    Si el reporte está vacío (menos de 200 bytes de contenido real), notifica
-    en el chat en vez de enviar un archivo vacío.
+    Si el reporte está vacío (menos de 400 bytes), notifica en el chat
+    en vez de enviar un archivo vacío.
 
     Args:
         query: CallbackQuery para editar el mensaje de progreso.
         context: Bot context.
-        vault_path: Path del vault (usado para obtener chat_id).
         report_bytes_coro: Coroutine que retorna bytes del reporte.
         filename: Nombre del archivo .md a enviar.
     """
@@ -237,19 +290,23 @@ async def _send_report(
         report_bytes = await report_bytes_coro
     except Exception as e:
         logger.exception("Error generando reporte '%s': %s", filename, e)
+        context.user_data.pop("pending_report", None)
         try:
             await query.edit_message_text(f"Error al generar el reporte: {_esc(str(e))}")
         except Exception:
             pass
         return
 
-    # Detectar reportes vacíos: menos de 400 bytes sugiere solo el header
+    # Reporte vacío: solo tiene el header
     if len(report_bytes) < 400:
+        context.user_data.pop("pending_report", None)
         try:
             await query.edit_message_text("No encontré notas para este scope.")
         except Exception:
             pass
         return
+
+    context.user_data.pop("pending_report", None)
 
     try:
         doc = io.BytesIO(report_bytes)
@@ -259,7 +316,6 @@ async def _send_report(
             document=doc,
             filename=filename,
         )
-        # Limpiar el mensaje de "generando..."
         try:
             await query.delete_message()
         except Exception:

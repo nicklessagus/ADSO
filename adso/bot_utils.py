@@ -35,6 +35,8 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     if ud.get("pending_fallback_pdf"):
         return True
+    if ud.get("pending_report"):
+        return True
     return False
 
 
@@ -111,7 +113,7 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_raw_content", "pending_transcript",
             "pending_extraction", "pending_description",
             "pending_read_status", "pending_fallback_pdf",
-            "pending_arxiv", "manage_missing_fields",
+            "pending_arxiv", "manage_missing_fields", "pending_report",
         )
 
     for key in keys:
