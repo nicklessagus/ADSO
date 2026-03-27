@@ -111,7 +111,7 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_raw_content", "pending_transcript",
             "pending_extraction", "pending_description",
             "pending_read_status", "pending_fallback_pdf",
-            "manage_missing_fields",
+            "pending_arxiv", "manage_missing_fields",
         )
 
     for key in keys:

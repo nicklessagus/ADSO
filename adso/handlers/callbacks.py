@@ -13,6 +13,7 @@ from telegram.ext import ContextTypes
 from adso.bot_utils import _has_destination
 from adso.config import Settings
 from adso.constants import (
+    CB_ARXIV_CREATE_ANYWAY,
     CB_BACK,
     CB_CANCEL,
     CB_CHOOSE_AREA,
@@ -198,6 +199,9 @@ async def handle_callback(
 
     elif data == CB_CLASIFICAR_INBOX:
         await handle_clasificar(update, context)
+
+    elif data == CB_ARXIV_CREATE_ANYWAY:
+        await _cb_arxiv_create_anyway(update, context)
 
 
 _PDF_SCAN_PAGES = 2  # páginas a procesar en OCR y Vision para PDFs escaneados
@@ -389,6 +393,32 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         parse_mode="HTML",
     )
     context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
+
+
+async def _cb_arxiv_create_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """El usuario eligió crear la nota a pesar de que el paper ya existe en el vault.
+
+    Lee el estado guardado en ``pending_arxiv`` y retoma el flujo normal de
+    clasificación y preview, editando el mensaje de aviso de duplicado.
+    """
+    query = update.callback_query
+    pending = context.user_data.pop("pending_arxiv", None)
+    if not pending:
+        await query.answer("No hay paper pendiente.", show_alert=True)
+        return
+
+    from adso.handlers.capture import _classify_and_preview_arxiv
+
+    await query.edit_message_text(
+        f"<b>{_esc(pending['metadata']['title'])}</b>\nClasificando...",
+        parse_mode="HTML",
+    )
+    await _classify_and_preview_arxiv(
+        update, context,
+        metadata=pending["metadata"],
+        url=pending["url"],
+        reply_msg=query.message,
+    )
 
 
 def _build_fallback_keyboard_without_ocr():

@@ -10,6 +10,7 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from adso.constants import (
+    CB_ARXIV_CREATE_ANYWAY,
     CB_BACK,
     CB_CANCEL,
     CB_CHOOSE_AREA,
@@ -307,4 +308,14 @@ def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
             InlineKeyboardButton("Describir", callback_data=CB_DESCRIBE),
         ],
+    ])
+
+
+def build_arxiv_duplicate_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para cuando el paper de arXiv ya existe en el vault."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+            InlineKeyboardButton("Crear igual", callback_data=CB_ARXIV_CREATE_ANYWAY),
+        ]
     ])

@@ -190,6 +190,32 @@ async def _handle_arxiv(
         return
 
     canonical_url = metadata.get("source_url") or url
+
+    # Chequear duplicados en el vault (por source_url y por doi)
+    settings: Settings = context.bot_data["settings"]
+    vault_path = settings.vault_path
+    from adso.vault_search import find_by_property
+    existing = await find_by_property("source_url", canonical_url, vault_path)
+    if not existing and metadata.get("doi"):
+        existing = await find_by_property("doi", metadata["doi"], vault_path)
+
+    if existing:
+        from adso.keyboards import build_arxiv_duplicate_keyboard
+        note = existing[0]
+        rel_path = note.path.relative_to(vault_path)
+        context.user_data["pending_arxiv"] = {
+            "metadata": metadata,
+            "url": canonical_url,
+        }
+        await status_msg.edit_text(
+            f"Este paper ya existe en el vault:\n<code>{rel_path}</code>\n\n"
+            "¿Querés crear una nota igual de todas formas?",
+            reply_markup=build_arxiv_duplicate_keyboard(),
+            parse_mode="HTML",
+        )
+        context.user_data.pop("pending_raw_content", None)
+        return
+
     await status_msg.edit_text(
         f"<b>{_esc(metadata['title'])}</b>\nClasificando...",
         parse_mode="HTML",
@@ -198,6 +224,12 @@ async def _handle_arxiv(
     # Pasar el status_msg para que _classify_and_preview_arxiv lo edite con el preview
     # en vez de enviar un mensaje nuevo.
     await _classify_and_preview_arxiv(update, context, metadata, canonical_url, reply_msg=status_msg)
+
+    # pending_raw_content ya no es necesario: pending_note (seteado por
+    # _classify_and_preview_arxiv) se encarga del bloqueo. Si lo dejamos,
+    # el card de vista previa que Telegram genera para la URL (que puede
+    # llegar como update de foto separado) dispara "Hay una acción pendiente".
+    context.user_data.pop("pending_raw_content", None)
 
 
 @authorized
