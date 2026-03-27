@@ -349,6 +349,9 @@ def build_report_type_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Salud del vault", callback_data=CB_REPORT_HEALTH),
             InlineKeyboardButton("Cola de lectura", callback_data=CB_REPORT_READING),
         ],
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        ],
     ])
 
 
@@ -371,12 +374,14 @@ def build_report_category_keyboard(
     """
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        ],
+        [
             InlineKeyboardButton("Proyectos", callback_data=show_p_cb),
             InlineKeyboardButton("Áreas", callback_data=show_a_cb),
         ],
         [
             InlineKeyboardButton(extra_label, callback_data=extra_cb),
-            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
         ],
     ])
 
@@ -413,8 +418,8 @@ def build_report_items_keyboard(
 
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton("← Volver", callback_data=back_cb),
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("← Volver", callback_data=back_cb),
     ])
 
     return InlineKeyboardMarkup(rows)
