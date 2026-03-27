@@ -342,7 +342,7 @@ def build_report_type_keyboard() -> InlineKeyboardMarkup:
     """
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Proyecto/Área", callback_data=CB_REPORT_SCOPE),
+            InlineKeyboardButton("Proyecto/Área/Inbox", callback_data=CB_REPORT_SCOPE),
             InlineKeyboardButton("Ideas", callback_data=CB_REPORT_IDEAS),
         ],
         [
