@@ -49,8 +49,8 @@ class TestCaptureFlow:
         assert "CNN baseline" in note.body
 
     @pytest.mark.asyncio
-    async def test_task_to_area(self, vault: Path) -> None:
-        """Task → escrita en 02-Areas/{area}/."""
+    async def test_task_to_project(self, vault: Path) -> None:
+        """Task con project → escrita en 01-Projects/{project}/ (project > area)."""
         fixture = _load_fixture("classify_text_task.json")
         payload = fixture["payload"]
         fm = payload["frontmatter"]
@@ -60,8 +60,8 @@ class TestCaptureFlow:
         path = await create_note(fm, payload["body"], vault)
 
         assert path.exists()
-        assert "02-Areas" in str(path)
-        assert "investigacion" in str(path)
+        assert "01-Projects" in str(path)
+        assert "tesis" in str(path)
 
         note = await read_note(path)
         assert note.frontmatter["type"] == "task"

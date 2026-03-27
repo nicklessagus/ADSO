@@ -163,6 +163,11 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
         return None
 
     if note_type == "task":
+        if project:
+            base = vault_path / "01-Projects" / project
+            if section:
+                return base / section
+            return base
         if area:
             return vault_path / "02-Areas" / area
         return vault_path / "00-Inbox"
