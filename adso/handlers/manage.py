@@ -218,7 +218,11 @@ async def _cb_intent_task(
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(update, context, text, media_type="text", force_capture=True, forced_type="task")
+    await _classify_and_preview(
+        update, context, text, media_type="text", force_capture=True,
+        forced_type="task",
+        user_context="El usuario clasificó este contenido como tarea. Inferir prioridad, fecha límite y proyecto/área con ese foco.",
+    )
 
 
 async def _cb_intent_note(
@@ -234,7 +238,10 @@ async def _cb_intent_note(
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(update, context, text, media_type="text", force_capture=True)
+    await _classify_and_preview(
+        update, context, text, media_type="text", force_capture=True,
+        user_context="El usuario clasificó este contenido como nota (no es una tarea).",
+    )
 
 
 async def _cb_intent_create(
