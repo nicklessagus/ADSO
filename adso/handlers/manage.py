@@ -205,6 +205,38 @@ async def _cb_intent_save(
     await _classify_and_preview(update, context, text, media_type="text", force_capture=True)
 
 
+async def _cb_intent_task(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """El usuario eligió guardar como tarea — el LLM infiere título/tags/destino, type=task fijo."""
+    from adso.handlers.capture import _classify_and_preview
+
+    text = context.user_data.pop("pending_raw_content", None)
+    query = update.callback_query
+    if not text:
+        await query.edit_message_text("No hay contenido pendiente.")
+        return
+    await query.edit_message_text("Clasificando...")
+    await _classify_and_preview(update, context, text, media_type="text", force_capture=True, forced_type="task")
+
+
+async def _cb_intent_note(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """El usuario eligió guardar como nota — el LLM infiere tipo (reference/idea/draft) y resto."""
+    from adso.handlers.capture import _classify_and_preview
+
+    text = context.user_data.pop("pending_raw_content", None)
+    query = update.callback_query
+    if not text:
+        await query.edit_message_text("No hay contenido pendiente.")
+        return
+    await query.edit_message_text("Clasificando...")
+    await _classify_and_preview(update, context, text, media_type="text", force_capture=True)
+
+
 async def _cb_intent_create(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

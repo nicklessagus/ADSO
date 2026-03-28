@@ -140,13 +140,13 @@ async def handle_text(
 
     if check_injection_risk(text):
         logger.warning("Patrón de inyección detectado en mensaje")
-        from adso.constants import CB_CANCEL, CB_INTENT_SAVE
+        from adso.constants import CB_CANCEL, CB_INTENT_NOTE, CB_INTENT_TASK
         await update.message.reply_text(
-            "Detecté un patrón sospechoso en el contenido. "
-            "¿Querés procesarlo de todas formas?",
+            "Contenido con patrón sospechoso. ¿Guardar de todas formas?",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-                InlineKeyboardButton("Sí, procesar", callback_data=CB_INTENT_SAVE),
+                InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
+                InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
             ]]),
         )
         return
@@ -159,7 +159,7 @@ async def handle_text(
         )
     else:
         await update.message.reply_text(
-            "¿Guardar como nota?",
+            "¿Guardar como tarea o como nota?",
             reply_markup=build_save_keyboard(),
         )
 

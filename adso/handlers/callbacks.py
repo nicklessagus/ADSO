@@ -31,7 +31,9 @@ from adso.constants import (
     CB_EXTRACTION_OK,
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
+    CB_INTENT_NOTE,
     CB_INTENT_SAVE,
+    CB_INTENT_TASK,
     CB_MANAGE_CANCEL,
     CB_MANAGE_CONFIRM,
     CB_OCR,
@@ -68,7 +70,7 @@ from adso.handlers.capture import (
 from adso.bot_utils import _cleanup_pending
 from adso.handlers.commands import handle_clasificar
 from adso.handlers.input import _process_pdf_after_read_status
-from adso.handlers.manage import _cb_intent_create, _cb_intent_save, _cb_manage_confirm
+from adso.handlers.manage import _cb_intent_create, _cb_intent_note, _cb_intent_save, _cb_intent_task, _cb_manage_confirm
 from adso.keyboards import (
     _esc,
     build_area_selector,
@@ -142,6 +144,12 @@ async def handle_callback(
 
     elif data == CB_INTENT_SAVE:
         await _cb_intent_save(update, context)
+
+    elif data == CB_INTENT_TASK:
+        await _cb_intent_task(update, context)
+
+    elif data == CB_INTENT_NOTE:
+        await _cb_intent_note(update, context)
 
     elif data == CB_INTENT_CREATE_PROJECT:
         await _cb_intent_create(update, context, "create_project")

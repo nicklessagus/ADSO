@@ -40,6 +40,7 @@ async def _classify_and_preview(
     user_context: Optional[str] = None,
     force_capture: bool = False,
     preserve_body: bool = False,
+    forced_type: Optional[str] = None,
 ) -> None:
     """Clasifica texto extraído y muestra preview.
 
@@ -60,6 +61,8 @@ async def _classify_and_preview(
         preserve_body: Si True, usa `text` como body verbatim sin importar el media_type.
             Activar cuando el texto proviene del usuario directamente (descripción manual,
             OCR confirmado) y no debe ser reescrito por el LLM.
+        forced_type: Si se provee ('task' o None), sobreescribe el type inferido por el LLM.
+            El LLM sigue clasificando título, tags, proyecto y área, pero el type queda fijo.
     """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
@@ -178,6 +181,12 @@ async def _classify_and_preview(
     fm["date_modified"] = now
     fm["source"] = "telegram"
     fm["media_type"] = media_type
+
+    # El usuario eligió explícitamente el tipo — ignorar lo que infirió el LLM
+    if forced_type:
+        fm["type"] = forced_type
+        if forced_type == "task":
+            fm["status"] = "pending"
 
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body:

@@ -27,7 +27,9 @@ from adso.constants import (
     CB_EXTRACTION_OK,
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
+    CB_INTENT_NOTE,
     CB_INTENT_SAVE,
+    CB_INTENT_TASK,
     CB_MANAGE_CANCEL,
     CB_MANAGE_CONFIRM,
     CB_OCR,
@@ -294,16 +296,18 @@ def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
     rows = [manage_buttons[i:i+2] for i in range(0, len(manage_buttons), 2)] if manage_buttons else []
     rows.append([
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
+        InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
+        InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
     ])
     return InlineKeyboardMarkup(rows)
 
 
 def build_save_keyboard() -> InlineKeyboardMarkup:
-    """Teclado mínimo: guardar como nota o cancelar."""
+    """Teclado de elección: tarea o nota."""
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("Guardar como nota", callback_data=CB_INTENT_SAVE),
+        InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
+        InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
     ]])
 
 
