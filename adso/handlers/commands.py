@@ -166,7 +166,7 @@ async def handle_clasificar(
     orig_fm = note.frontmatter
 
     if not note.body or not note.body.strip():
-        await reply(f"Nota {ref.path.name} sin contenido, saltando. Volvé a intentar.")
+        await reply(f"Nota {ref.path.name} sin contenido, saltando. Reintentar más tarde.")
         return
 
     projects, areas = await _get_existing_items(vault_path)

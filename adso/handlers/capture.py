@@ -118,7 +118,7 @@ async def _classify_and_preview(
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn(
             "⚠️ No pude clasificar bien — guardado en Inbox como borrador. "
-            "Podés confirmar, corregir o cancelar.\n\n" + preview,
+            "Confirmar, corregir o cancelar.\n\n" + preview,
             reply_markup=keyboard,
             parse_mode="HTML",
         )
@@ -511,7 +511,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             if remaining > 0:
                 await query.message.reply_text(
                     f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
-                    "Mandá /clasificar para continuar."
+                    "Usar /clasificar para continuar."
                 )
         except Exception as e:
             logger.warning("Error calculando notas pendientes tras confirmar: %s", e)

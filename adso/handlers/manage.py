@@ -263,7 +263,7 @@ async def _cb_intent_create(
     desc_line = f"\n<b>Descripción:</b> {_esc(description)}" if description else ""
     await query.edit_message_text(
         f"<b>Crear {type_label}:</b> {_esc(name)}{desc_line}\n\n"
-        f"Corregí por texto libre (<i>Nombre — Descripción</i>) o confirmá.",
+        f"Corregir por texto libre (<i>Nombre — Descripción</i>) o confirmar.",
         reply_markup=build_manage_keyboard(),
         parse_mode="HTML",
     )

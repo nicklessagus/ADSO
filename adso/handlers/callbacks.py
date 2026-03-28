@@ -177,7 +177,7 @@ async def handle_callback(
             snippet = pt["text"][:500] + ("..." if len(pt["text"]) > 500 else "")
             await query.edit_message_text(
                 f"<b>Transcripción actual:</b>\n\n<code>{_esc(snippet)}</code>\n\n"
-                "Enviá el texto corregido:",
+                "Texto corregido (escribir a continuación):",
                 parse_mode="HTML",
             )
 
@@ -203,7 +203,7 @@ async def handle_callback(
         if pdf_info:
             context.user_data["pending_description"] = pdf_info
             await query.edit_message_text(
-                "Describí el contenido del archivo para clasificarlo:"
+                "Describir el contenido del archivo para clasificarlo:"
             )
 
     elif data == CB_OCR:
@@ -311,7 +311,7 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not text.strip():
             await query.edit_message_text(
-                "OCR no encontró texto. Podés intentar con Gemini Vision o describir el contenido.",
+                "OCR no encontró texto. Intentar con Gemini Vision o describir el contenido.",
                 reply_markup=_build_fallback_keyboard_without_ocr(),
             )
             return

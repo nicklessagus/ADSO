@@ -193,7 +193,7 @@ async def _handle_arxiv(
         logger.warning("Error consultando arXiv API para %s: %s", arxiv_id, e)
         await status_msg.edit_text(
             "No pude obtener la metadata de arXiv. "
-            "¿Guardás el link como nota genérica?",
+            "¿Guardar el link como nota genérica?",
             reply_markup=build_save_keyboard(),
         )
         return
@@ -389,7 +389,7 @@ async def handle_document(
             await msg.reply_text(
                 f"<b>Contenido de {_esc(filename)}:</b>\n\n"
                 f"<code>{_esc(snippet)}</code>\n\n"
-                "Confirmá para clasificar o mandá texto corregido.",
+                "Confirmar, o enviar texto corregido.",
                 reply_markup=build_extraction_keyboard(),
                 parse_mode="HTML",
             )
@@ -407,8 +407,7 @@ async def handle_document(
         }
         await msg.reply_text(
             f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
-            "No puedo leer este formato. Describí el contenido para clasificarlo, "
-            "o cancelá.",
+            "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
             ]),
