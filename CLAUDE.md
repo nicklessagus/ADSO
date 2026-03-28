@@ -159,6 +159,19 @@ El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task,
 
 ---
 
+## Tono y estilo de mensajes
+
+Los mensajes que el bot envía al usuario por Telegram usan **infinitivo impersonal**.
+
+- ✅ `Confirmar, corregir o cancelar.`
+- ✅ `Usar /clasificar para continuar.`
+- ✅ `¿Guardar como tarea o como nota?`
+- ❌ voseo: `Confirmá`, `Mandá`, `Podés`
+- ❌ primera persona del bot: `Puedo`, `No pude`
+- ❌ ustedeo: `Confirme`, `Cancele`
+
+---
+
 ## Modelo de interacción
 
 El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
