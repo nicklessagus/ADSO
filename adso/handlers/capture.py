@@ -602,7 +602,8 @@ async def _cb_transcript_ok(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """Confirma transcripción y clasifica el texto."""
+    """Confirma transcripción — para audio muestra [Tarea]/[Nota], para otros clasifica directo."""
+    from adso.keyboards import build_save_keyboard
     pt = context.user_data.pop("pending_transcript", None)
     if not pt:
         await update.callback_query.edit_message_text("No hay transcripción pendiente.")
@@ -614,17 +615,27 @@ async def _cb_transcript_ok(
     resource_file = pt.get("resource_file")
 
     if temp_path and not resource_file:
-        # Audio: borrar el temp. Para imagen/doc el temp es el recurso — lo borra _cb_confirm.
         Path(temp_path).unlink(missing_ok=True)
 
-    await update.callback_query.edit_message_text("Clasificando...")
-
-    await _classify_and_preview(
-        update, context, text,
-        media_type=media_type,
-        resource_file=resource_file,
-        preserve_body=True,
-    )
+    if media_type == "audio":
+        context.user_data["pending_raw_content"] = text
+        context.user_data["pending_capture_ctx"] = {
+            "media_type": "audio",
+            "preserve_body": True,
+            "resource_file": resource_file,
+        }
+        await update.callback_query.edit_message_text(
+            "¿Guardar como tarea o como nota?",
+            reply_markup=build_save_keyboard(),
+        )
+    else:
+        await update.callback_query.edit_message_text("Clasificando...")
+        await _classify_and_preview(
+            update, context, text,
+            media_type=media_type,
+            resource_file=resource_file,
+            preserve_body=True,
+        )
 
 
 async def _cb_extraction_ok(

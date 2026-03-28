@@ -189,6 +189,17 @@ async def _cb_manage_confirm(
         await query.edit_message_text(f"Error: {e}")
 
 
+def _pop_pending_content(context: ContextTypes.DEFAULT_TYPE) -> tuple[str | None, dict]:
+    """Extrae texto pendiente y contexto de captura (media_type, preserve_body, resource_file).
+
+    Soporta texto libre (pending_raw_content solo) y audio/otros medios
+    que además guardan pending_capture_ctx.
+    """
+    text = context.user_data.pop("pending_raw_content", None)
+    ctx = context.user_data.pop("pending_capture_ctx", {})
+    return text, ctx
+
+
 async def _cb_intent_save(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -196,13 +207,18 @@ async def _cb_intent_save(
     """El usuario eligió guardar como nota — clasifica con LLM y muestra preview."""
     from adso.handlers.capture import _classify_and_preview  # evitar circular en módulo-nivel
 
-    text = context.user_data.pop("pending_raw_content", None)
+    text, ctx = _pop_pending_content(context)
     query = update.callback_query
     if not text:
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(update, context, text, media_type="text", force_capture=True)
+    await _classify_and_preview(
+        update, context, text, force_capture=True,
+        media_type=ctx.get("media_type", "text"),
+        preserve_body=ctx.get("preserve_body", False),
+        resource_file=ctx.get("resource_file"),
+    )
 
 
 async def _cb_intent_task(
@@ -212,14 +228,17 @@ async def _cb_intent_task(
     """El usuario eligió guardar como tarea — el LLM infiere título/tags/destino, type=task fijo."""
     from adso.handlers.capture import _classify_and_preview
 
-    text = context.user_data.pop("pending_raw_content", None)
+    text, ctx = _pop_pending_content(context)
     query = update.callback_query
     if not text:
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
     await _classify_and_preview(
-        update, context, text, media_type="text", force_capture=True,
+        update, context, text, force_capture=True,
+        media_type=ctx.get("media_type", "text"),
+        preserve_body=ctx.get("preserve_body", False),
+        resource_file=ctx.get("resource_file"),
         forced_type="task",
         user_context="El usuario clasificó este contenido como tarea. Inferir prioridad, fecha límite y proyecto/área con ese foco.",
     )
@@ -232,14 +251,17 @@ async def _cb_intent_note(
     """El usuario eligió guardar como nota — el LLM infiere tipo (reference/idea/draft) y resto."""
     from adso.handlers.capture import _classify_and_preview
 
-    text = context.user_data.pop("pending_raw_content", None)
+    text, ctx = _pop_pending_content(context)
     query = update.callback_query
     if not text:
         await query.edit_message_text("No hay contenido pendiente.")
         return
     await query.edit_message_text("Clasificando...")
     await _classify_and_preview(
-        update, context, text, media_type="text", force_capture=True,
+        update, context, text, force_capture=True,
+        media_type=ctx.get("media_type", "text"),
+        preserve_body=ctx.get("preserve_body", False),
+        resource_file=ctx.get("resource_file"),
         user_context="El usuario clasificó este contenido como nota (no es una tarea).",
         prevent_task=True,
     )
