@@ -241,6 +241,7 @@ async def _cb_intent_note(
     await _classify_and_preview(
         update, context, text, media_type="text", force_capture=True,
         user_context="El usuario clasificó este contenido como nota (no es una tarea).",
+        prevent_task=True,
     )
 
 
