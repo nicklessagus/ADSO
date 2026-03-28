@@ -37,6 +37,12 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     if ud.get("pending_report"):
         return True
+    if ud.get("pending_read_status"):
+        return True
+    if ud.get("pending_arxiv"):
+        return True
+    if ud.get("pending_operation"):
+        return True
     return False
 
 

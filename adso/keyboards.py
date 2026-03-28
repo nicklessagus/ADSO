@@ -229,6 +229,7 @@ def build_read_status_keyboard() -> InlineKeyboardMarkup:
     """Teclado para marcar si ya se leyó un PDF/link."""
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
             InlineKeyboardButton("Ya lo leí", callback_data=CB_READ_STATUS_READ),
             InlineKeyboardButton("Lo quiero leer", callback_data=CB_READ_STATUS_UNREAD),
         ]
