@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from adso import __version__ as ADSO_VERSION
 from adso.vault_search import scan_notes
 from adso.vault_writer import NoteData
 
@@ -36,10 +37,8 @@ _ASCII_HEADER = """\
  _|_
 /   \\    Autonomous Data Structuring Orchestrator
 |>_ |
-\\___/    \U0001d634\U0001d636\U0001d631\U0001d631\U0001d62d\U0001d62e\U0001d631\U0001d631\U0001d636\U0001d626\U0001d62e \U0001d633\U0001d636\U0001d622\U0001d636\U0001d629\U0001d622\U0001d62c\U0001d626
-"""
+\\___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦"""
 
-ADSO_VERSION = "0.1"
 
 # Priority ordering for sort
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2, None: 3, "": 3}
@@ -96,12 +95,13 @@ def _obsidian_link(vault_path: Path, note_path: Path) -> str:
     return f"obsidian://open?vault={vault_name}&file={file_encoded}"
 
 
-def _report_header(title: str, today: Optional[date] = None) -> str:
+def _report_header(title: str, today: Optional[date] = None, full: bool = False) -> str:
     """Genera el header estándar del reporte.
 
     Args:
         title: Título del reporte.
         today: Fecha del reporte. Default: hoy.
+        full: True si es un reporte full (incluye cuerpo completo de cada nota).
 
     Returns:
         String con el header formateado.
@@ -109,7 +109,8 @@ def _report_header(title: str, today: Optional[date] = None) -> str:
     if today is None:
         today = date.today()
     date_str = today.strftime("%d/%m/%Y")
-    return f"{_ASCII_HEADER}\n---\n\n# {title}\n\n**Fecha:** {date_str}  |  **ADSO** v{ADSO_VERSION}\n\n"
+    full_badge = "  |  **reporte full**" if full else ""
+    return f"```\n{_ASCII_HEADER}\n```\n\n---\n\n# {title}\n\n**Fecha:** {date_str}  |  **ADSO** v{ADSO_VERSION}{full_badge}\n\n"
 
 
 def _priority_key(note: NoteData) -> int:
@@ -314,7 +315,7 @@ async def scope_report(
 
     # --- Construir documento ---
     _render = _note_block if full else _note_line
-    lines: list[str] = [_report_header(title)]
+    lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
         lines.append(f"> {synthesis}\n")
@@ -438,7 +439,7 @@ async def ideas_report(
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
     _render = _note_block if full else _note_line
-    lines: list[str] = [_report_header(title)]
+    lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
         lines.append(f"> {synthesis}\n")
@@ -599,7 +600,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
 
     _render = _note_block if full else _note_line
     title = f"Salud del vault (umbral: {stale_days} días)"
-    lines: list[str] = [_report_header(title)]
+    lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
         lines.append(f"> {synthesis}\n")
@@ -722,7 +723,7 @@ async def reading_queue(
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
     _render = _note_block if full else _note_line
-    lines: list[str] = [_report_header(title)]
+    lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
         lines.append(f"> {synthesis}\n")
