@@ -313,11 +313,12 @@ class TestHandleTextModes:
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_no_keywords_shows_save_keyboard(self, make_update, mock_context) -> None:
-        """Texto sin keywords → teclado guardar/cancelar."""
+        """Texto sin keywords → teclado tarea/nota."""
         update = make_update(text="qué tengo sobre transformers?")
         await handle_text(update, mock_context)
         call_args = str(update.message.reply_text.call_args)
-        assert "intent:save" in call_args
+        assert "intent:task" in call_args
+        assert "intent:note" in call_args
         assert "pending_raw_content" in mock_context.user_data
 
     @pytest.mark.asyncio

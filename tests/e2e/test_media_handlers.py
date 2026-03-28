@@ -312,9 +312,10 @@ class TestTranscriptCallbacks:
     @pytest.mark.asyncio
     @AUTH
     @patch("adso.handlers.capture._classify_and_preview", new_callable=AsyncMock)
-    async def test_transcript_ok_classifies(
+    async def test_transcript_ok_shows_task_note_keyboard(
         self, mock_classify, make_callback_query, mock_context,
     ) -> None:
+        """Para audio, confirmar transcripción muestra [Tarea]/[Nota] en vez de clasificar directo."""
         mock_context.user_data["pending_transcript"] = {
             "text": "Texto transcripto",
             "temp_path": "/tmp/nonexistent.ogg",
@@ -324,8 +325,13 @@ class TestTranscriptCallbacks:
         update = make_callback_query(CB_TRANSCRIPT_OK)
         await handle_callback(update, mock_context)
 
-        mock_classify.assert_called_once()
+        mock_classify.assert_not_called()
         assert "pending_transcript" not in mock_context.user_data
+        assert mock_context.user_data.get("pending_raw_content") == "Texto transcripto"
+        assert mock_context.user_data.get("pending_capture_ctx", {}).get("media_type") == "audio"
+        call_args = str(update.callback_query.edit_message_text.call_args)
+        assert "intent:task" in call_args
+        assert "intent:note" in call_args
 
     @pytest.mark.asyncio
     @AUTH

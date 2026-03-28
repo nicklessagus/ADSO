@@ -177,7 +177,7 @@ Los mensajes que el bot envía al usuario por Telegram usan **infinitivo imperso
 El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
 
 ### Estado default: captura
-El usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
+El usuario manda contenido (texto, audio, link, imagen, documento). Para texto y audio el bot pregunta primero `[Tarea]` o `[Nota]` — el LLM nunca decide el type en estos casos. Para PDFs, imágenes y links el type se infiere del contenido. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
 
 ### Estado transiente: consulta
 El usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado (inline o como archivo `.md` con links `obsidian://`) y vuelve al estado default.
@@ -187,11 +187,12 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 
 | Momento | Botones |
 |---|---|
-| **PDF recibido** | `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter; aplica a cualquier PDF/documento |
+| **Texto / audio recibido** | `[Cancelar]` `[Tarea]` `[Nota]` — el usuario elige el tipo; el LLM infiere el resto |
+| **PDF recibido** | `[Cancelar]` `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
 | **Resultado OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` — dos filas; Gemini Vision descarta el OCR y reprocesa |
 | **Resultado Gemini Vision** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
-| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
+| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` → al confirmar: `[Cancelar]` `[Tarea]` `[Nota]` |
 | **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
 | **Reubicar destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
