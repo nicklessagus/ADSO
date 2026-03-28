@@ -31,7 +31,8 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     pt = ud.get("pending_transcript", {})
     if pt and not pt.get("awaiting_correction"):
         return True
-    if ud.get("pending_extraction"):
+    pe = ud.get("pending_extraction")
+    if pe and not pe.get("awaiting_correction"):
         return True
     if ud.get("pending_fallback_pdf"):
         return True

@@ -24,6 +24,7 @@ from adso.constants import (
     CB_DISAMBIG_CAPTURE,
     CB_DISAMBIG_QUERY,
     CB_EXTRACTION_CANCEL,
+    CB_EXTRACTION_CORRECT,
     CB_EXTRACTION_OK,
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
@@ -237,10 +238,11 @@ def build_read_status_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_extraction_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para confirmar texto extraído de un documento."""
+    """Teclado para confirmar/corregir/cancelar texto extraído de un documento."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
+            InlineKeyboardButton("Corregir", callback_data=CB_EXTRACTION_CORRECT),
             InlineKeyboardButton("Confirmar", callback_data=CB_EXTRACTION_OK),
         ]
     ])

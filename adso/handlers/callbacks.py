@@ -28,6 +28,7 @@ from adso.constants import (
     CB_DISAMBIG_CAPTURE,
     CB_DISAMBIG_QUERY,
     CB_EXTRACTION_CANCEL,
+    CB_EXTRACTION_CORRECT,
     CB_EXTRACTION_OK,
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
@@ -201,6 +202,20 @@ async def handle_callback(
 
     elif data == CB_EXTRACTION_OK:
         await _cb_extraction_ok(update, context)
+
+    elif data == CB_EXTRACTION_CORRECT:
+        pe = context.user_data.get("pending_extraction")
+        if pe:
+            pe["awaiting_correction"] = True
+            pe["msg_id"] = query.message.message_id
+            snippet = pe.get("text", "")[:500]
+            if len(pe.get("text", "")) > 500:
+                snippet += "..."
+            await query.edit_message_text(
+                f"<b>Texto extraído:</b>\n\n<code>{_esc(snippet)}</code>\n\n"
+                "Texto corregido (escribir a continuación):",
+                parse_mode="HTML",
+            )
 
     elif data == CB_EXTRACTION_CANCEL:
         _cleanup_pending(context, "pending_extraction", "pending_description", "pending_fallback_pdf")

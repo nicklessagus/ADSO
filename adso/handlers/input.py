@@ -73,16 +73,26 @@ async def handle_text(
                 pass
         return
 
-    # Extracción pendiente: tratar como corrección del texto extraído
-    if context.user_data.get("pending_extraction"):
+    # Extracción pendiente esperando corrección inline
+    if context.user_data.get("pending_extraction", {}).get("awaiting_correction"):
         pe = context.user_data["pending_extraction"]
         pe["text"] = text
+        pe["awaiting_correction"] = False
         pe.pop("classify_content", None)
-        await update.message.reply_text(
-            f"<b>Texto corregido.</b>\n\n<i>{_esc(text[:500])}</i>",
-            reply_markup=build_extraction_keyboard(),
-            parse_mode="HTML",
-        )
+        snippet = text[:500] + ("..." if len(text) > 500 else "")
+        msg_id = pe.get("msg_id")
+        if msg_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.message.chat_id,
+                    message_id=msg_id,
+                    text=f"<b>Texto corregido:</b>\n\n<code>{_esc(snippet)}</code>",
+                    reply_markup=build_extraction_keyboard(),
+                    parse_mode="HTML",
+                )
+                await update.message.delete()
+            except Exception:
+                pass
         return
 
     # Descripción de archivo binario

@@ -510,12 +510,15 @@ class TestTextCorrectionsInMediaFlows:
             "original_filename": "file.pdf",
             "media_type": "document",
             "metadata": {},
+            "awaiting_correction": True,
+            "msg_id": 999,
         }
 
         update = make_update(text="texto corregido")
         await handle_text(update, mock_context)
 
         assert mock_context.user_data["pending_extraction"]["text"] == "texto corregido"
+        assert not mock_context.user_data["pending_extraction"].get("awaiting_correction")
 
     @pytest.mark.asyncio
     @AUTH
