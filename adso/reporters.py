@@ -205,6 +205,32 @@ def _note_line(vault_path: Path, note: NoteData, extra: str = "") -> str:
     return base
 
 
+def _note_block(vault_path: Path, note: NoteData, extra: str = "") -> str:
+    """Genera un bloque completo de una nota con título, link, metadata y cuerpo.
+
+    Usado en reportes full para mostrar el contenido completo de cada nota.
+
+    Args:
+        vault_path: Raíz del vault.
+        note: NoteData de la nota.
+        extra: Información adicional (status, priority, etc.).
+
+    Returns:
+        Bloque Markdown con título como heading, metadata y cuerpo de la nota.
+    """
+    title = note.frontmatter.get("title") or note.path.stem
+    link = _obsidian_link(vault_path, note.path)
+    parts = [f"#### [{title}]({link})"]
+    if extra:
+        parts.append(f"_{extra}_")
+    body = (note.body or "").strip()
+    if body:
+        parts.append("")
+        parts.append(body)
+    parts.append("")
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Reporte por scope (proyecto / área / inbox)
 # ---------------------------------------------------------------------------
@@ -215,6 +241,7 @@ async def scope_report(
     project: Optional[str] = None,
     area: Optional[str] = None,
     inbox: bool = False,
+    full: bool = False,
 ) -> bytes:
     """Genera un reporte de scope para un proyecto, área o el inbox.
 
@@ -226,6 +253,7 @@ async def scope_report(
         project: Nombre del proyecto (o None).
         area: Nombre del área (o None).
         inbox: True si el scope es el inbox (00-Inbox/).
+        full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
         Bytes del .md generado.
@@ -285,6 +313,7 @@ async def scope_report(
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
     # --- Construir documento ---
+    _render = _note_block if full else _note_line
     lines: list[str] = [_report_header(title)]
 
     if synthesis:
@@ -295,7 +324,7 @@ async def scope_report(
     lines.append(f"## Referencias activas ({len(active_refs)})\n")
     if active_refs:
         for n in sorted(active_refs, key=lambda x: x.frontmatter.get("title", "") or ""):
-            lines.append(_note_line(vault_path, n))
+            lines.append(_render(vault_path, n))
     else:
         lines.append("_Sin referencias activas._")
     lines.append("")
@@ -313,7 +342,7 @@ async def scope_report(
                 priority = n.frontmatter.get("priority") or ""
                 due = n.frontmatter.get("due_date") or ""
                 extra = " | ".join(x for x in [priority, str(due)] if x)
-                lines.append(_note_line(vault_path, n, extra))
+                lines.append(_render(vault_path, n, extra))
             lines.append("")
     if not has_tasks:
         lines.append("_Sin tareas._\n")
@@ -328,7 +357,7 @@ async def scope_report(
             has_ideas = True
             lines.append(f"### {st.capitalize()} ({len(group)})\n")
             for n in sorted(group, key=lambda x: x.frontmatter.get("title", "") or ""):
-                lines.append(_note_line(vault_path, n))
+                lines.append(_render(vault_path, n))
             lines.append("")
     if not has_ideas:
         lines.append("_Sin ideas._\n")
@@ -342,7 +371,7 @@ async def scope_report(
             extra = ", ".join(str(a) for a in authors[:2])
             if year:
                 extra = f"{extra} ({year})" if extra else str(year)
-            lines.append(_note_line(vault_path, n, extra))
+            lines.append(_render(vault_path, n, extra))
     else:
         lines.append("_Sin papers pendientes._")
     lines.append("")
@@ -364,6 +393,7 @@ async def ideas_report(
     vault_path: Path,
     project: Optional[str] = None,
     area: Optional[str] = None,
+    full: bool = False,
 ) -> bytes:
     """Genera un reporte de todas las ideas, opcionalmente filtradas por proyecto/área.
 
@@ -373,6 +403,7 @@ async def ideas_report(
         vault_path: Raíz del vault.
         project: Filtrar por proyecto (o None para todo el vault).
         area: Filtrar por área (o None).
+        full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
         Bytes del .md generado.
@@ -406,6 +437,7 @@ async def ideas_report(
             summary_parts.append(f"  {st}: {count}")
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
+    _render = _note_block if full else _note_line
     lines: list[str] = [_report_header(title)]
 
     if synthesis:
@@ -423,7 +455,7 @@ async def ideas_report(
             ar = n.frontmatter.get("area") or ""
             loc = proj or ar
             extra = f"_{loc}_" if loc else ""
-            lines.append(_note_line(vault_path, n, extra))
+            lines.append(_render(vault_path, n, extra))
         lines.append("")
 
     # Ideas sin status conocido
@@ -435,7 +467,7 @@ async def ideas_report(
     if orphan:
         lines.append(f"## Sin status ({len(orphan)})\n")
         for n in orphan:
-            lines.append(_note_line(vault_path, n))
+            lines.append(_render(vault_path, n))
         lines.append("")
 
     content = "\n".join(lines)
@@ -447,7 +479,7 @@ async def ideas_report(
 # ---------------------------------------------------------------------------
 
 
-async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
+async def health_report(vault_path: Path, stale_days: int = 30, full: bool = False) -> bytes:
     """Genera un reporte de salud del vault.
 
     Detecta:
@@ -459,6 +491,7 @@ async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
     Args:
         vault_path: Raíz del vault.
         stale_days: Umbral de inactividad en días (default 30).
+        full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
         Bytes del .md generado.
@@ -564,6 +597,7 @@ async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
     ]
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
+    _render = _note_block if full else _note_line
     title = f"Salud del vault (umbral: {stale_days} días)"
     lines: list[str] = [_report_header(title)]
 
@@ -578,7 +612,7 @@ async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
             due_str = str(fm.get("due_date") or "")
             priority = fm.get("priority") or ""
             extra = " | ".join(x for x in [due_str, priority] if x)
-            lines.append(_note_line(vault_path, n, extra))
+            lines.append(_render(vault_path, n, extra))
     else:
         lines.append("_Sin tareas vencidas._")
     lines.append("")
@@ -590,7 +624,7 @@ async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
         inbox_pending_sorted = sorted(inbox_pending, key=lambda x: -(x[1] or 0))
         for note, days_old in inbox_pending_sorted:
             age_str = f"{days_old}d" if days_old is not None else "?"
-            lines.append(_note_line(vault_path, note, f"en inbox hace {age_str}"))
+            lines.append(_render(vault_path, note, f"en inbox hace {age_str}"))
     else:
         lines.append("_Inbox sin acumulación pendiente._")
     lines.append("")
@@ -621,7 +655,7 @@ async def health_report(vault_path: Path, stale_days: int = 30) -> bytes:
             group = raw_ideas_by_scope[scope_key]
             lines.append(f"### {scope_key} ({len(group)})\n")
             for n in sorted(group, key=lambda x: x.frontmatter.get("title", "") or ""):
-                lines.append(_note_line(vault_path, n))
+                lines.append(_render(vault_path, n))
             lines.append("")
     else:
         lines.append("_Sin ideas raw en el vault._\n")
@@ -639,6 +673,7 @@ async def reading_queue(
     vault_path: Path,
     project: Optional[str] = None,
     area: Optional[str] = None,
+    full: bool = False,
 ) -> bytes:
     """Genera un reporte de la cola de lectura (papers con read_status: unread).
 
@@ -648,6 +683,7 @@ async def reading_queue(
         vault_path: Raíz del vault.
         project: Filtrar por proyecto (o None para todo el vault).
         area: Filtrar por área (o None).
+        full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
         Bytes del .md generado.
@@ -685,6 +721,7 @@ async def reading_queue(
     ]
     synthesis = await _llm_synthesis("\n".join(summary_parts))
 
+    _render = _note_block if full else _note_line
     lines: list[str] = [_report_header(title)]
 
     if synthesis:
@@ -717,7 +754,7 @@ async def reading_queue(
             if year:
                 author_str = f"{author_str} ({year})" if author_str else str(year)
             extra = " | ".join(x for x in [priority, author_str] if x)
-            lines.append(_note_line(vault_path, n, extra))
+            lines.append(_render(vault_path, n, extra))
         lines.append("")
 
     content = "\n".join(lines)

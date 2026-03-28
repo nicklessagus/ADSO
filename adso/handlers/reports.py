@@ -4,6 +4,10 @@
 por una botonera de dos pasos para seleccionar el scope (categoría → item),
 y el bot genera un archivo .md que envía como documento de Telegram.
 
+/reporte_full es idéntico pero genera reportes con el cuerpo completo de cada nota
+(usa _note_block en vez de _note_line en los reporters). El flag report_full se guarda
+en user_data y se lee en handle_report_callback para pasarlo a los reporters.
+
 Mientras el menú está activo, pending_report=True bloquea texto entrante.
 """
 
@@ -63,8 +67,30 @@ async def handle_reporte_command(
         context: Bot context.
     """
     context.user_data["pending_report"] = True
+    context.user_data["report_full"] = False
     await update.message.reply_text(
         "¿Qué reporte querés generar?",
+        reply_markup=build_report_type_keyboard(),
+    )
+
+
+@authorized
+async def handle_reporte_full_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /reporte_full — igual a /reporte pero con detalle completo de cada nota.
+
+    Setea report_full=True para que los reporters incluyan el cuerpo de cada nota.
+
+    Args:
+        update: Telegram update.
+        context: Bot context.
+    """
+    context.user_data["pending_report"] = True
+    context.user_data["report_full"] = True
+    await update.message.reply_text(
+        "¿Qué reporte querés generar? (modo completo — incluye contenido de cada nota)",
         reply_markup=build_report_type_keyboard(),
     )
 
@@ -143,12 +169,14 @@ async def handle_report_callback(
         await _show_items_keyboard(query, context, vault_path, data)
         return
 
+    full: bool = context.user_data.get("report_full", False)
+
     # --- Tipo: Salud del vault → generar directo ---
     if data == CB_REPORT_HEALTH:
         await query.edit_message_text("Generando reporte de salud del vault...")
         await _send_report(
             query, context,
-            report_bytes_coro=health_report(vault_path),
+            report_bytes_coro=health_report(vault_path, full=full),
             filename=f"salud-vault-{date.today()}.md",
         )
         return
@@ -160,7 +188,7 @@ async def handle_report_callback(
         await query.edit_message_text("Generando reporte...")
         await _send_report(
             query, context,
-            report_bytes_coro=scope_report(vault_path, project=project, area=area, inbox=inbox),
+            report_bytes_coro=scope_report(vault_path, project=project, area=area, inbox=inbox, full=full),
             filename=f"scope-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
@@ -172,7 +200,7 @@ async def handle_report_callback(
         await query.edit_message_text("Generando reporte de ideas...")
         await _send_report(
             query, context,
-            report_bytes_coro=ideas_report(vault_path, project=project, area=area),
+            report_bytes_coro=ideas_report(vault_path, project=project, area=area, full=full),
             filename=f"ideas-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
@@ -184,7 +212,7 @@ async def handle_report_callback(
         await query.edit_message_text("Generando cola de lectura...")
         await _send_report(
             query, context,
-            report_bytes_coro=reading_queue(vault_path, project=project, area=area),
+            report_bytes_coro=reading_queue(vault_path, project=project, area=area, full=full),
             filename=f"lectura-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return

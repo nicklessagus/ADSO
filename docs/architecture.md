@@ -693,7 +693,7 @@ El LLM sintetiza pero no agrega conocimiento propio — solo organiza y resume l
 
 #### Deduplicación
 
-Cuando múltiples fuentes (ChromaDB, backlinks, outgoing links) devuelven la misma nota, se deduplica por `note_id` (stem del archivo). Si una nota aparece tanto por similitud semántica como por backlink, se cuenta una vez. Se conserva la fuente de mayor relevancia (menor distancia coseno) para el ordenamiento del resultado.
+Cuando múltiples fuentes (ChromaDB, backlinks, outgoing links) devuelven la misma nota, se deduplica por `note_id` (ruta relativa al vault sin extensión, ej: `01-Projects/tesis/metodologia`). Si una nota aparece tanto por similitud semántica como por backlink, se cuenta una vez. Se conserva la fuente de mayor relevancia (menor distancia coseno) para el ordenamiento del resultado.
 
 ---
 
@@ -970,7 +970,9 @@ Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servi
 
 **Distinción importante — embedding vs metadata:**
 - **Texto embebido:** solo el body de la nota (`.content` del frontmatter parseado). Es lo que determina la similitud semántica entre notas.
-- **Metadata estructurada:** campos del frontmatter (`type`, `status`, `project`, `area`, `tags`, `media_type`, `title`, `path`). No influyen en el vector. Se usan exclusivamente para filtros `where` en consultas estructuradas (Fase 7).
+- **Metadata estructurada:** campos del frontmatter (`type`, `status`, `project`, `area`, `tags`, `media_type`, `title`, `path`) más `content_hash`. No influyen en el vector. Se usan para filtros `where` en consultas (Fase 7) y para detectar cambios en el reindex.
+
+**ID de documento en ChromaDB:** la ruta relativa al vault sin extensión — por ejemplo `01-Projects/tesis/metodologia`. Esto evita colisiones entre archivos con el mismo nombre en distintos directorios. El stem del archivo no es suficientemente único.
 
 **Idioma de los tags:** siempre en inglés, independientemente del idioma de la nota. Los tags son metadata estructurada para filtros — necesitan consistencia. La búsqueda semántica en el body es multilingüe (el modelo de embeddings lo resuelve), pero los filtros por tag son comparaciones exactas de strings.
 
@@ -980,13 +982,19 @@ Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servi
 Nota nueva confirmada
     ├─→ Escribe .md al vault          (inmediato)
     └─→ Gemini Embedding API          (inmediato, async)
-        └─→ Guarda vector ChromaDB
+        └─→ Guarda vector ChromaDB (con content_hash en metadata)
 
-Cron nocturno
-    └─→ Re-indexa notas modificadas o sin embedding
+Cron nocturno (reindex_vault)
+    ├─→ Carga hashes existentes en ChromaDB (una sola llamada batch)
+    ├─→ Para cada .md del vault: compara md5(body) con hash almacenado
+    │       ├─→ Hash coincide → skip (sin llamada a Gemini)
+    │       └─→ Hash distinto o nota nueva → re-embede + actualiza hash
+    └─→ IDs en ChromaDB sin archivo en disco → borra (huérfanos)
 ```
 
-**Falla del Embedding API:** si Gemini Embedding API no responde al indexar una nota nueva, la nota se escribe correctamente al vault pero queda sin embedding. El bot loguea el error y notifica al usuario que la nota no estará disponible en búsquedas semánticas hasta que se re-indexe. El cron nocturno detecta notas sin embedding y reintenta. La nota sigue siendo encontrable por búsqueda estructural (`vault_search.py`).
+**Eficiencia:** el cron solo llama a Gemini Embedding API para notas nuevas o modificadas. Un vault estable con pocas modificaciones diarias casi no consume cuota. Archivos `.sync-conflict-*` generados por Syncthing se ignoran automáticamente.
+
+**Falla del Embedding API:** si Gemini Embedding API no responde al indexar una nota nueva, la nota se escribe correctamente al vault pero queda sin `content_hash` en ChromaDB. El cron nocturno detecta la ausencia del hash y reintenta. La nota sigue siendo encontrable por búsqueda estructural (`vault_search.py`).
 
 ### Pipeline de consulta
 

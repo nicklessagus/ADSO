@@ -143,7 +143,9 @@ class TestCaptureFlowWithEmbeddings:
 
     @pytest.mark.asyncio
     async def test_index_after_create(self, client, vault) -> None:
-        """Simula el flujo: crear nota → indexar embedding."""
+        """Simula el flujo: crear nota → indexar embedding con ID de ruta relativa."""
+        import hashlib
+
         async def fake_compute(content):
             return FAKE_EMBEDDING_ML
 
@@ -156,14 +158,15 @@ class TestCaptureFlowWithEmbeddings:
         body = "El baseline CNN dio accuracy 0.87."
         path = await create_note(fm, body, vault)
 
-        # Simular lo que bot.py haría
-        note_id = path.stem
-        rel_path = str(path.relative_to(vault))
+        # ID es ruta relativa sin .md (igual que _index_note_safe)
+        rel = path.relative_to(vault)
+        note_id = str(rel).replace(".md", "")
         metadata = {
-            "path": rel_path,
+            "path": str(rel),
             "type": fm["type"],
             "tags": fm["tags"],
             "project": fm.get("project", ""),
+            "content_hash": hashlib.md5(body.encode()).hexdigest(),
         }
         await client.index_note(note_id, body, metadata)
 

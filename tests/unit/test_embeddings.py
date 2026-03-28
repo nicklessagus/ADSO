@@ -372,6 +372,123 @@ class TestReindexVault:
         stats = await client.reindex_vault(vault)
         assert stats["indexed"] == 0
 
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_id_is_relative_path(self, mock_embed, client, tmp_path) -> None:
+        """El ID en ChromaDB debe ser la ruta relativa sin .md, no el stem."""
+        mock_embed.return_value = FAKE_EMBEDDING
+
+        vault = tmp_path / "vault"
+        (vault / "01-Projects" / "tesis").mkdir(parents=True)
+        import frontmatter as fm_lib
+        post = fm_lib.Post("Contenido.", title="Nota", type="reference")
+        (vault / "01-Projects" / "tesis" / "nota.md").write_text(
+            fm_lib.dumps(post), encoding="utf-8"
+        )
+
+        await client.reindex_vault(vault)
+
+        all_docs = client._collection.get(include=[])
+        assert "01-Projects/tesis/nota" in all_docs["ids"]
+        assert "nota" not in all_docs["ids"]
+
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_no_id_collision_same_stem(self, mock_embed, client, tmp_path) -> None:
+        """Dos notas con el mismo nombre en distintos directorios no se pisan."""
+        mock_embed.return_value = FAKE_EMBEDDING
+
+        vault = tmp_path / "vault"
+        (vault / "01-Projects" / "tesis").mkdir(parents=True)
+        (vault / "02-Areas" / "docencia").mkdir(parents=True)
+        import frontmatter as fm_lib
+
+        for subdir in ["01-Projects/tesis", "02-Areas/docencia"]:
+            post = fm_lib.Post("Contenido.", title="Metodologia", type="reference")
+            (vault / subdir / "metodologia.md").write_text(
+                fm_lib.dumps(post), encoding="utf-8"
+            )
+
+        stats = await client.reindex_vault(vault)
+        assert stats["indexed"] == 2
+        assert client.count() == 2
+
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_skips_sync_conflict_files(self, mock_embed, client, tmp_path) -> None:
+        """Archivos .sync-conflict-* de Syncthing se ignoran."""
+        mock_embed.return_value = FAKE_EMBEDDING
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        import frontmatter as fm_lib
+        post = fm_lib.Post("Contenido.", title="Conflicto", type="reference")
+        (vault / "nota.sync-conflict-20250101-123456-ABC.md").write_text(
+            fm_lib.dumps(post), encoding="utf-8"
+        )
+
+        stats = await client.reindex_vault(vault)
+        assert stats["indexed"] == 0
+
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_skips_unchanged_notes(self, mock_embed, client, tmp_path) -> None:
+        """Segunda pasada no re-embede notas sin cambios (hash coincide)."""
+        mock_embed.return_value = FAKE_EMBEDDING
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        import frontmatter as fm_lib
+        post = fm_lib.Post("Contenido estable.", title="Nota", type="reference")
+        (vault / "nota.md").write_text(fm_lib.dumps(post), encoding="utf-8")
+
+        stats1 = await client.reindex_vault(vault)
+        assert stats1["indexed"] == 1
+        assert stats1["skipped"] == 0
+
+        # Segunda pasada: misma nota sin cambios
+        stats2 = await client.reindex_vault(vault)
+        assert stats2["indexed"] == 0
+        assert stats2["skipped"] == 1
+        assert mock_embed.call_count == 1  # Solo se llamó en la primera pasada
+
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_reembeds_modified_notes(self, mock_embed, client, tmp_path) -> None:
+        """Nota modificada se re-embede en el siguiente reindex."""
+        mock_embed.return_value = FAKE_EMBEDDING
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        import frontmatter as fm_lib
+        note_path = vault / "nota.md"
+
+        post = fm_lib.Post("Contenido original.", title="Nota", type="reference")
+        note_path.write_text(fm_lib.dumps(post), encoding="utf-8")
+
+        await client.reindex_vault(vault)
+        assert mock_embed.call_count == 1
+
+        # Modificar la nota
+        post2 = fm_lib.Post("Contenido modificado.", title="Nota", type="reference")
+        note_path.write_text(fm_lib.dumps(post2), encoding="utf-8")
+
+        stats = await client.reindex_vault(vault)
+        assert stats["indexed"] == 1
+        assert stats["skipped"] == 0
+        assert mock_embed.call_count == 2  # Re-embede la nota modificada
+
+    @pytest.mark.asyncio
+    @patch("adso.embeddings.EmbeddingsClient._compute_embedding")
+    async def test_reindex_stats_has_skipped_key(self, mock_embed, client, tmp_path) -> None:
+        """Stats siempre incluye la clave 'skipped'."""
+        mock_embed.return_value = FAKE_EMBEDDING
+        vault = tmp_path / "vault"
+        vault.mkdir()
+
+        stats = await client.reindex_vault(vault)
+        assert "skipped" in stats
+
 
 class TestLazyInit:
 

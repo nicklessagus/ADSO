@@ -403,11 +403,13 @@ async def _index_note_safe(
     vault_path: Path,
 ) -> None:
     """Indexa embedding de forma segura (no propaga errores)."""
+    import hashlib
+
     try:
-        note_id = note_path.stem
-        rel_path = str(note_path.relative_to(vault_path))
+        rel = note_path.relative_to(vault_path)
+        note_id = str(rel).replace(".md", "")
         metadata = {
-            "path": rel_path,
+            "path": str(rel),
             "type": fm.get("type", ""),
             "status": fm.get("status", ""),
             "project": fm.get("project", ""),
@@ -415,6 +417,7 @@ async def _index_note_safe(
             "tags": fm.get("tags", []),
             "media_type": fm.get("media_type", ""),
             "title": fm.get("title", ""),
+            "content_hash": hashlib.md5(body.encode()).hexdigest(),
         }
         await embeddings.index_note(note_id, body, metadata)
     except Exception as e:

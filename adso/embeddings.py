@@ -8,6 +8,7 @@ No importa vault_writer ni vault_search — bot.py orquesta.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -325,14 +326,21 @@ class EmbeddingsClient:
         vault_path: Path,
         exclude_dirs: Optional[list[str]] = None,
     ) -> dict[str, int]:
-        """Reconciliación completa: indexa todas las notas y borra huérfanos.
+        """Reconciliación completa: indexa notas nuevas/modificadas y borra huérfanos.
+
+        El ID de cada nota es su ruta relativa al vault sin extensión
+        (ej: "01-Projects/tesis/metodologia"). Esto evita colisiones entre
+        archivos con el mismo nombre en distintos directorios.
+
+        Solo re-embede notas cuyo contenido cambió (via content_hash en metadata).
+        Archivos .sync-conflict-* de Syncthing se ignoran.
 
         Args:
             vault_path: Raíz del vault.
             exclude_dirs: Directorios a excluir.
 
         Returns:
-            Stats: {"indexed": N, "removed": M, "errors": K}
+            Stats: {"indexed": N, "skipped": M, "removed": K, "errors": J}
         """
         self._ensure_initialized()
 
@@ -341,22 +349,42 @@ class EmbeddingsClient:
 
         import frontmatter
 
-        stats = {"indexed": 0, "removed": 0, "errors": 0}
+        stats = {"indexed": 0, "skipped": 0, "removed": 0, "errors": 0}
+
+        # Cargar hashes existentes en una sola llamada batch
+        existing_hashes: dict[str, str] = {}
+        try:
+            existing_docs = await asyncio.to_thread(
+                self._collection.get,
+                include=["metadatas"],
+            )
+            for doc_id, meta in zip(
+                existing_docs["ids"], existing_docs["metadatas"] or []
+            ):
+                existing_hashes[doc_id] = (meta or {}).get("content_hash", "")
+        except Exception as e:
+            logger.warning("No se pudo cargar hashes existentes: %s", e)
 
         # Escanear vault
         vault_note_ids: set[str] = set()
         md_files = sorted(vault_path.rglob("*.md"))
 
         for md_path in md_files:
-            # Filtrar por exclude_dirs
             rel = md_path.relative_to(vault_path)
+
+            # Filtrar por exclude_dirs
             if any(part in exclude_dirs for part in rel.parts):
                 continue
 
-            note_id = md_path.stem
+            # Ignorar archivos de conflicto de Syncthing
+            if ".sync-conflict-" in md_path.name:
+                continue
+
+            # ID: ruta relativa sin extensión (ej: "01-Projects/tesis/nota")
+            note_id = str(rel).replace(".md", "")
 
             # Skip _index.md
-            if note_id == "_index":
+            if md_path.stem == "_index":
                 continue
 
             vault_note_ids.add(note_id)
@@ -374,6 +402,12 @@ class EmbeddingsClient:
                 if not body.strip():
                     continue
 
+                # Comparar hash para evitar re-embeds innecesarios
+                content_hash = hashlib.md5(body.encode()).hexdigest()
+                if existing_hashes.get(note_id) == content_hash:
+                    stats["skipped"] += 1
+                    continue
+
                 metadata = {
                     "path": str(rel),
                     "type": fm.get("type", ""),
@@ -383,6 +417,7 @@ class EmbeddingsClient:
                     "tags": fm.get("tags", []),
                     "media_type": fm.get("media_type", ""),
                     "title": fm.get("title", ""),
+                    "content_hash": content_hash,
                 }
 
                 await self.index_note(note_id, body, metadata)
@@ -395,7 +430,7 @@ class EmbeddingsClient:
                 logger.warning("Error indexando %s: %s", md_path, e)
                 stats["errors"] += 1
 
-        # Detectar huérfanos en ChromaDB
+        # Detectar huérfanos en ChromaDB (notas borradas del vault)
         try:
             all_docs = await asyncio.to_thread(
                 self._collection.get,
@@ -416,8 +451,8 @@ class EmbeddingsClient:
             logger.warning("Error detectando huérfanos: %s", e)
 
         logger.info(
-            "Reindex completo: %d indexados, %d removidos, %d errores",
-            stats["indexed"], stats["removed"], stats["errors"],
+            "Reindex completo: %d indexados, %d sin cambios, %d removidos, %d errores",
+            stats["indexed"], stats["skipped"], stats["removed"], stats["errors"],
         )
         return stats
 
