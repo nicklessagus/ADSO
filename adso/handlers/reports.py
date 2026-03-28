@@ -69,7 +69,7 @@ async def handle_reporte_command(
     context.user_data["pending_report"] = True
     context.user_data["report_full"] = False
     await update.message.reply_text(
-        "¿Qué reporte querés generar?",
+        "¿Qué reporte generar?",
         reply_markup=build_report_type_keyboard(),
     )
 
@@ -90,7 +90,7 @@ async def handle_reporte_full_command(
     context.user_data["pending_report"] = True
     context.user_data["report_full"] = True
     await update.message.reply_text(
-        "¿Qué reporte querés generar? (modo completo — incluye contenido de cada nota)",
+        "¿Qué reporte generar? (modo completo — incluye contenido de cada nota)",
         reply_markup=build_report_type_keyboard(),
     )
 
@@ -118,7 +118,7 @@ async def handle_report_callback(
     if data == CB_REPORT_MENU:
         context.user_data["pending_report"] = True
         await query.edit_message_text(
-            "¿Qué reporte querés generar?",
+            "¿Qué reporte generar?",
             reply_markup=build_report_type_keyboard(),
         )
         return
@@ -126,7 +126,7 @@ async def handle_report_callback(
     # --- Tipo: Proyecto/Área → paso 1: elegir categoría ---
     if data == CB_REPORT_SCOPE:
         await query.edit_message_text(
-            "¿Querés el reporte de un proyecto, un área o el inbox?",
+            "¿Reporte de un proyecto, un área o el inbox?",
             reply_markup=build_report_category_keyboard(
                 show_p_cb=CB_REPORT_SCOPE_SHOW_P,
                 show_a_cb=CB_REPORT_SCOPE_SHOW_A,

@@ -154,7 +154,7 @@ async def handle_text(
     intents = _detect_manage_keywords(text)
     if intents:
         await update.message.reply_text(
-            "¿Qué querés hacer?",
+            "¿Qué hacer?",
             reply_markup=build_intent_keyboard(intents),
         )
     else:
@@ -218,7 +218,7 @@ async def _handle_arxiv(
         }
         await status_msg.edit_text(
             f"Este paper ya existe en el vault:\n<code>{rel_path}</code>\n\n"
-            "¿Querés crear una nota igual de todas formas?",
+            "¿Crear una nota igual de todas formas?",
             reply_markup=build_arxiv_duplicate_keyboard(),
             parse_mode="HTML",
         )
@@ -459,7 +459,7 @@ async def handle_photo(
     }
 
     await msg.reply_text(
-        "Imagen recibida. ¿Cómo querés extraer el contenido?",
+        "Imagen recibida. ¿Cómo extraer el contenido?",
         reply_markup=build_fallback_pdf_keyboard(),
     )
 
@@ -544,7 +544,7 @@ async def _process_pdf_after_read_status(
 
         await query.edit_message_text(
             f"<b>PDF extraído:</b>\n\n{preview_text}\n\n"
-            "Confirmá para clasificar o mandá texto corregido.",
+            "Confirmar, o enviar texto corregido.",
             reply_markup=build_extraction_keyboard(),
             parse_mode="HTML",
         )
