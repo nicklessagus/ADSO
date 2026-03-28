@@ -100,6 +100,7 @@ async def handle_text(
             media_type=pd["media_type"],
             resource_file=resource_info,
             extra_fm=extra_fm or None,
+            preserve_body=True,
         )
         return
 

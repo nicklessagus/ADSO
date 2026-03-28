@@ -203,7 +203,7 @@ async def handle_callback(
         if pdf_info:
             context.user_data["pending_description"] = pdf_info
             await query.edit_message_text(
-                "Describí el contenido del PDF para clasificarlo:"
+                "Describí el contenido del archivo para clasificarlo:"
             )
 
     elif data == CB_OCR:

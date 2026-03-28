@@ -97,7 +97,7 @@ def build_preview(
         lines.append(f"<b>Destino:</b> {dest}")
     elif fm.get("area"):
         lines.append(f"<b>Destino:</b> 02-Areas/{fm['area']}")
-    elif fm.get("type") == "draft":
+    elif fm.get("type") in ("draft", "task"):
         lines.append("<b>Destino:</b> 00-Inbox")
     else:
         lines.append("<b>Destino:</b> por definir")

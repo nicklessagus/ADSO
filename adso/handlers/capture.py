@@ -39,6 +39,7 @@ async def _classify_and_preview(
     extra_fm: Optional[dict] = None,
     user_context: Optional[str] = None,
     force_capture: bool = False,
+    preserve_body: bool = False,
 ) -> None:
     """Clasifica texto extraído y muestra preview.
 
@@ -56,6 +57,9 @@ async def _classify_and_preview(
             usarlo al reclasificar.
         force_capture: Si True, ignora el mode del LLM y fuerza flujo de captura.
             Usar cuando el usuario eligió explícitamente guardar como nota.
+        preserve_body: Si True, usa `text` como body verbatim sin importar el media_type.
+            Activar cuando el texto proviene del usuario directamente (descripción manual,
+            OCR confirmado) y no debe ser reescrito por el LLM.
     """
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
@@ -160,8 +164,10 @@ async def _classify_and_preview(
         return
     suggested_links: list[str] = []
 
-    # Para texto libre y audio el body es siempre el texto original del usuario
-    if media_type in ("text", "audio"):
+    # Para texto libre y audio el body es siempre el texto original del usuario.
+    # preserve_body extiende esto a imágenes/documentos cuando el texto viene
+    # directamente del usuario (descripción manual, OCR confirmado).
+    if media_type in ("text", "audio") or preserve_body:
         body = text
         payload["body"] = text
     else:
@@ -602,6 +608,7 @@ async def _cb_transcript_ok(
         update, context, text,
         media_type=media_type,
         resource_file=resource_file,
+        preserve_body=True,
     )
 
 
