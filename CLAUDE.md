@@ -298,15 +298,27 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 
 ---
 
-## Variables de entorno requeridas
+## Variables de entorno
 
 ```bash
+# Requeridas
 TELEGRAM_TOKEN
 TELEGRAM_ALLOWED_USER_ID
 GEMINI_API_KEY
-ANTHROPIC_API_KEY          # opcional
-GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks) — default: /credentials/google-oauth.json
+GROQ_API_KEY               # fallback LLM cuando Gemini no responde; sin esta key el bot funciona pero sin fallback
+
+# Opcionales
+ANTHROPIC_API_KEY          # LLM secundario alternativo
+LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
+
+# Paths (defaults para Docker)
 VAULT_PATH                 # default: /vault
+CHROMA_DATA_DIR            # default: /app/data/chroma
+GOOGLE_CALENDAR_CREDS      # path al JSON OAuth (Calendar + Tasks) — default: /credentials/google-oauth.json
+
+# Permisos Docker
+ADSO_UID                   # UID del usuario del host — default: 1000
+ADSO_GID                   # GID del usuario del host — default: 1000
 ```
 
 ---

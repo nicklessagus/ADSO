@@ -43,6 +43,14 @@ Para obtener tu `TELEGRAM_ALLOWED_USER_ID`:
 2. "Get API key" → "Create API key"
 3. Copiá la key
 
+### API key de Groq (fallback LLM)
+
+Groq se usa como LLM de respaldo cuando Gemini no responde. Sin esta key el bot igual funciona, pero no tiene fallback ante fallos de la API primaria.
+
+1. Registrate en [console.groq.com](https://console.groq.com)
+2. API Keys → "Create API Key"
+3. Copiá la key
+
 ---
 
 ## 2. Configurar el proyecto
@@ -58,10 +66,26 @@ cp .env.example .env
 Editá `.env`:
 
 ```bash
+# ─── Requeridas ───────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN=<token del BotFather>
 TELEGRAM_ALLOWED_USER_ID=<tu ID numérico>
 GEMINI_API_KEY=<tu API key de Gemini>
-VAULT_PATH=/ruta/a/tu/vault        # directorio local donde se guardarán las notas
+GROQ_API_KEY=<tu API key de Groq>       # fallback LLM cuando Gemini no responde
+
+# ─── Opcionales ───────────────────────────────────────────────────────────────
+# ANTHROPIC_API_KEY=                    # LLM secundario alternativo
+# LOG_LEVEL=INFO                        # DEBUG | INFO | WARNING | ERROR
+
+# ─── Paths (defaults para Docker) ─────────────────────────────────────────────
+# VAULT_PATH=/vault                     # directorio local de las notas
+# CHROMA_DATA_DIR=/app/data/chroma      # persistencia de ChromaDB
+# GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json  # Fase 6
+
+# ─── Permisos de archivos (Docker) ────────────────────────────────────────────
+# El contenedor corre con este UID/GID para que los archivos del vault
+# sean del usuario del host (no root). Obtener con: id -u && id -g
+# ADSO_UID=1000
+# ADSO_GID=1000
 ```
 
 ```bash
