@@ -68,6 +68,7 @@ Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, im
 - Docker y docker-compose-v2 (`sudo apt install docker-compose-v2`)
 - Token de bot de Telegram (via @BotFather)
 - API key de Gemini (Google AI Studio — free tier, sin tarjeta de crédito)
+- API key de Groq (free tier — fallback LLM cuando Gemini no responde)
 - Google OAuth credentials (para Calendar + Tasks — Fase 6)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
 
