@@ -191,18 +191,22 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path) -> str:
     if fm.get("priority"):
         parts.append(f"Prioridad: {fm['priority']}")
 
-    if fm.get("scheduled"):
-        scheduled = fm["scheduled"]
-        # Formatear datetime a algo legible: "30/03/2026 13:00"
+    # Mostrar hora si está en `scheduled` o en `due_date` con componente horario
+    _time_source = fm.get("scheduled") or fm.get("due_date")
+    if _time_source:
         try:
-            if hasattr(scheduled, "strftime"):
-                scheduled = scheduled.strftime("%d/%m/%Y %H:%M")
+            from datetime import datetime as _dt, date as _date
+            if hasattr(_time_source, "strftime"):
+                dt = _time_source
             else:
-                from datetime import datetime as _dt
-                scheduled = _dt.fromisoformat(str(scheduled)).strftime("%d/%m/%Y %H:%M")
+                dt = _dt.fromisoformat(str(_time_source))
+            # Solo mostrar si tiene hora no-medianoche
+            if isinstance(dt, _dt) and not isinstance(dt, _date) or (
+                hasattr(dt, "hour") and (dt.hour != 0 or dt.minute != 0)
+            ):
+                parts.append(f"Horario: {dt.strftime('%d/%m/%Y %H:%M')}")
         except Exception:
-            scheduled = str(scheduled)
-        parts.append(f"Horario: {scheduled}")
+            pass
 
     # Link obsidian:// a la nota (ruta absoluta URL-encoded)
     abs_path = str(note_path.resolve())
