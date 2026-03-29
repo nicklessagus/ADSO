@@ -75,6 +75,7 @@ class SyncConfig:
 
 @dataclass
 class BackupConfig:
+    enabled: bool = True
     debounce_seconds: int = 30
 
 

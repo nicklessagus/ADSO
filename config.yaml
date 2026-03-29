@@ -37,6 +37,8 @@ vault:
 # ─── Transcripción (Fase 3) ────────────────────────────────────────────────
 whisper:
   model: base                      # tiny | base — modelos recomendados para RPi4 (< 200MB RAM)
+  model_dir: /app/data/whisper     # directorio de descarga/caché del modelo (debe ser escribible)
+  language: es                     # idioma fijo (evita detección automática, más rápido)
 
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
@@ -49,7 +51,7 @@ sync:
 
 # ─── Backup (Git) ─────────────────────────────────────────────────────────
 backup:
-  enabled: true                  # false para deshabilitar completamente el backup git
+  enabled: false                 # activar cuando el vault tenga repo git dedicado con remote configurado
   debounce_seconds: 30           # esperar N segundos sin nuevas escrituras antes de commit+push
 
 # ─── LLM ────────────────────────────────────────────────────────────────────

@@ -55,8 +55,10 @@ def create_application(settings: Optional[Settings] = None) -> Application:
 
     # Bot data compartida
     app.bot_data["settings"] = settings
-    app.bot_data["git_backup"] = GitBackup(
-        settings.vault_path, settings.backup.debounce_seconds
+    app.bot_data["git_backup"] = (
+        GitBackup(settings.vault_path, settings.backup.debounce_seconds)
+        if settings.backup.enabled
+        else None
     )
     app.bot_data["embeddings"] = EmbeddingsClient(
         chroma_data_dir=settings.chroma_data_dir,
