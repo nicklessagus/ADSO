@@ -710,7 +710,8 @@ class GitBackup:
 
             # Check if there are changes to commit
             if repo.is_dirty(untracked_files=True):
-                repo.index.commit(message)
+                author = git.Actor("ADSO", "adso@localhost")
+                repo.index.commit(message, author=author, committer=author)
                 logger.info("Git commit: %s", message)
 
                 # Push (puede fallar si no hay remote)
