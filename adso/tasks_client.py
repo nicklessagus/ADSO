@@ -192,7 +192,17 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path) -> str:
         parts.append(f"Prioridad: {fm['priority']}")
 
     if fm.get("scheduled"):
-        parts.append(f"Horario: {fm['scheduled']}")
+        scheduled = fm["scheduled"]
+        # Formatear datetime a algo legible: "30/03/2026 13:00"
+        try:
+            if hasattr(scheduled, "strftime"):
+                scheduled = scheduled.strftime("%d/%m/%Y %H:%M")
+            else:
+                from datetime import datetime as _dt
+                scheduled = _dt.fromisoformat(str(scheduled)).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            scheduled = str(scheduled)
+        parts.append(f"Horario: {scheduled}")
 
     # Link obsidian:// a la nota (ruta absoluta URL-encoded)
     abs_path = str(note_path.resolve())
