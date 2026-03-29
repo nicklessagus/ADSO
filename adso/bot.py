@@ -21,6 +21,7 @@ from telegram.ext import (
 from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.callbacks import handle_callback
+from adso.tasks_client import TasksClient
 from adso.handlers.commands import handle_clasificar, handle_help, handle_start, handle_status
 from adso.handlers.reports import handle_reporte_command, handle_reporte_full_command
 from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
@@ -61,6 +62,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
         chroma_data_dir=settings.chroma_data_dir,
         gemini_api_key=settings.gemini_api_key,
     )
+    app.bot_data["tasks_client"] = TasksClient(settings.google_calendar_creds)
 
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))

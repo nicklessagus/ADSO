@@ -51,6 +51,34 @@ Groq se usa como LLM de respaldo cuando Gemini no responde. Sin esta key el bot 
 2. API Keys → "Create API Key"
 3. Copiá la key
 
+### Google Tasks (opcional)
+
+Sin esto el bot funciona normalmente — solo no sincroniza tareas con Google Tasks.
+
+1. Ir a [console.cloud.google.com](https://console.cloud.google.com)
+2. Crear proyecto → APIs & Services → Enable APIs → habilitar **Tasks API**
+3. APIs & Services → Credentials → Create Credentials → **OAuth 2.0 Client ID** → tipo *Desktop app*
+4. Descargar el JSON y guardarlo (ej: `/credentials/google-oauth.json`)
+5. Correr el script de autenticación una vez (requiere browser):
+
+```bash
+# En tu máquina de desarrollo:
+python scripts/auth_google_tasks.py --creds /ruta/al/google-oauth.json
+
+# Si estás directo en la RPi4:
+# El script intenta abrir el browser; si falla, usa el flujo por consola
+# (muestra URL para pegar manualmente en el browser de otra máquina).
+```
+
+6. El script genera `token_tasks.json` en el mismo directorio que el JSON de credenciales.
+7. Configurar en `.env`:
+
+```bash
+GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
+```
+
+8. Montar el directorio de credenciales en `docker-compose.yml` (ver sección de volúmenes).
+
 ---
 
 ## 2. Configurar el proyecto
@@ -175,4 +203,4 @@ docker compose down
 | `VAULT_PATH` (host) | Notas Markdown — el vault de Obsidian |
 | `adso-data` (Docker) | ChromaDB + modelos Whisper descargados |
 | `./config.yaml` (host) | Configuración del bot (montado read-only) |
-| `GOOGLE_CALENDAR_CREDS` (host) | Credenciales OAuth de Google (Fase 6) |
+| directorio de credenciales Google (host) | `google-oauth.json` + `token_tasks.json` — montado en `/credentials/` |

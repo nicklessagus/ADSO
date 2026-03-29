@@ -28,9 +28,12 @@ El bot tiene que interpretar el intent, encontrar los ítems relevantes del vaul
 - Interpreta expresiones temporales ("esta semana", "el jueves", "los próximos 3 días")
 - Puede rankear candidatos semánticamente dado un query
 
+**Implementado (parcial Fase 6):**
+- `tasks_client.py` — Google Tasks API ✅ — push automático al confirmar tarea; lista ADSO dedicada; si no hay token configurado el bot sigue funcionando sin Tasks
+
 **Pendiente (Fase 6):**
 - `calendar_client.py` — Google Calendar API
-- `tasks_client.py` — Google Tasks API
+- Cron de reconciliación bidireccional vault ↔ Tasks
 
 ---
 

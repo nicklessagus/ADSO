@@ -17,6 +17,8 @@ dependencies = [
     "chromadb~=0.5",
     "faster-whisper>=1.0",
     "pymupdf>=1.23",
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.0",
 ]
 
 [project.optional-dependencies]

@@ -26,6 +26,7 @@ from adso.keyboards import (
 )
 from adso.llm_client import VALID_TYPES, classify
 from adso.vault_search import find_by_property
+from adso.tasks_client import TasksClient, build_task_notes
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
 
 logger = logging.getLogger(__name__)
@@ -608,6 +609,21 @@ async def _index_note_safe(
         logger.warning("Error indexando embedding para %s: %s", note_path, e)
 
 
+async def _push_task_safe(
+    tasks_client: TasksClient,
+    fm: dict,
+    note_path: Path,
+    vault_path: Path,
+) -> None:
+    """Crea la tarea en Google Tasks de forma segura (no propaga errores)."""
+    notes = build_task_notes(fm, note_path, vault_path)
+    await tasks_client.create_task(
+        title=fm.get("title", "Sin título"),
+        notes=notes,
+        due_date=fm.get("due_date"),
+    )
+
+
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
     """Confirma y escribe la nota al vault."""
     pending = context.user_data.pop("pending_note", None)
@@ -647,6 +663,13 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         fm["status"] = _STATUS_CONFIRMED.get(fm.get("type", ""), "active")
 
     path = await create_note(fm, body, vault_path)
+
+    if fm.get("type") == "task":
+        tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
+        if tasks_client:
+            asyncio.create_task(
+                _push_task_safe(tasks_client, fm, path, vault_path)
+            )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     if git_backup:
