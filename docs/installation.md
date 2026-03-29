@@ -55,29 +55,34 @@ Groq se usa como LLM de respaldo cuando Gemini no responde. Sin esta key el bot 
 
 Sin esto el bot funciona normalmente — solo no sincroniza tareas con Google Tasks.
 
-1. Ir a [console.cloud.google.com](https://console.cloud.google.com)
-2. Crear proyecto → APIs & Services → Enable APIs → habilitar **Tasks API**
-3. APIs & Services → Credentials → Create Credentials → **OAuth 2.0 Client ID** → tipo *Desktop app*
-4. Descargar el JSON y guardarlo (ej: `/credentials/google-oauth.json`)
-5. Correr el script de autenticación una vez (requiere browser):
+1. Ir a [console.cloud.google.com](https://console.cloud.google.com) → crear un proyecto (ej: `ADSO`)
+2. APIs & Services → Library → buscar **Google Tasks API** → habilitar
+3. APIs & Services → Credentials → **Create Credentials** → en el wizard:
+   - API: `Google Tasks API`
+   - Tipo de datos: `Datos de los usuarios` → Siguiente
+   - Completar pantalla de consentimiento (nombre de app, email) → Guardar y continuar
+   - Permisos: dejar vacío → Guardar y continuar
+   - Tipo de aplicación: **Aplicación de escritorio** → Crear
+4. Descargar el JSON de credenciales → guardarlo como `google-oauth.json` en un directorio local (ej: `./credentials/`)
+5. En la pantalla de consentimiento OAuth → sección **Test users** → agregar tu cuenta de Google. Sin este paso el script de auth falla con `access_denied`.
+6. Correr el script de autenticación una vez:
 
 ```bash
-# En tu máquina de desarrollo:
-python scripts/auth_google_tasks.py --creds /ruta/al/google-oauth.json
+python scripts/auth_google_tasks.py --creds /ruta/al/directorio/credentials/google-oauth.json
 
-# Si estás directo en la RPi4:
-# El script intenta abrir el browser; si falla, usa el flujo por consola
-# (muestra URL para pegar manualmente en el browser de otra máquina).
+# Si la RPi4 no tiene browser: el script imprime una URL, abrirla en otra máquina,
+# autorizar, pegar el código de vuelta en la terminal.
 ```
 
-6. El script genera `token_tasks.json` en el mismo directorio que el JSON de credenciales.
-7. Configurar en `.env`:
+7. El script genera `token_tasks.json` en el mismo directorio que el JSON de credenciales.
+8. Configurar en `.env` — apuntar al **directorio** (no al archivo):
 
 ```bash
-GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
+GOOGLE_CALENDAR_CREDS=/ruta/al/directorio/credentials
 ```
 
-8. Montar el directorio de credenciales en `docker-compose.yml` (ver sección de volúmenes).
+El docker-compose monta ese directorio como `/credentials/` dentro del contenedor.
+Si no usás Docker, la variable también funciona con la ruta local del directorio.
 
 ---
 
@@ -107,7 +112,7 @@ GROQ_API_KEY=<tu API key de Groq>       # fallback LLM cuando Gemini no responde
 # ─── Paths (defaults para Docker) ─────────────────────────────────────────────
 # VAULT_PATH=/vault                     # directorio local de las notas
 # CHROMA_DATA_DIR=/app/data/chroma      # persistencia de ChromaDB
-# GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json  # Fase 6
+# GOOGLE_CALENDAR_CREDS=/ruta/al/directorio/credentials  # directorio con google-oauth.json + token_tasks.json
 
 # ─── Permisos de archivos (Docker) ────────────────────────────────────────────
 # El contenedor corre con este UID/GID para que los archivos del vault
