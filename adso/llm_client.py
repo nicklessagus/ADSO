@@ -261,9 +261,26 @@ def validate_llm_response(response_json: dict) -> dict:
     return response_json
 
 
+_ACCENT_MAP = str.maketrans(
+    "áàäâéèëêíìïîóòöôúùüûñçÁÀÄÂÉÈËÊÍÌÏÎÓÒÖÔÚÙÜÛÑÇ",
+    "aaaaeeeeiiiioooouuuuncAAAAEEEEIIIIOOOOUUUUNC",
+)
+
+# Tags that duplicate frontmatter fields — filtered out regardless of model
+_TYPE_TAGS = frozenset({
+    "task", "tarea", "note", "nota", "idea", "draft", "reference",
+    "paper", "document", "audio", "image", "link",
+})
+
+
 def _to_kebab(tag: str) -> str:
-    """Normalize a tag to kebab-case (lowercase, spaces→hyphens, strip invalid chars)."""
+    """Normalize a tag to kebab-case (lowercase, spaces→hyphens, strip invalid chars).
+
+    Transliterates accented/Spanish characters before stripping so that
+    e.g. 'mañana' → 'manana' instead of 'maana'.
+    """
     tag = tag.lower().strip()
+    tag = tag.translate(_ACCENT_MAP)            # ñ→n, á→a, etc.
     tag = re.sub(r"[\s_]+", "-", tag)          # spaces and underscores → hyphens
     tag = re.sub(r"[^a-z0-9\-]", "", tag)      # remove anything else
     tag = re.sub(r"-{2,}", "-", tag)            # collapse consecutive hyphens
@@ -302,10 +319,13 @@ def _validate_capture_payload(payload: dict) -> None:
     if priority is not None and priority not in VALID_PRIORITY:
         raise LLMResponseError(f"Invalid priority: {priority!r}")
 
-    # Normalize tags to kebab-case regardless of model
+    # Normalize tags to kebab-case and remove type-duplicating tags
     tags = fm.get("tags")
     if isinstance(tags, list):
-        fm["tags"] = [t for t in (_to_kebab(str(tag)) for tag in tags) if t]
+        fm["tags"] = [
+            t for t in (_to_kebab(str(tag)) for tag in tags)
+            if t and t not in _TYPE_TAGS
+        ]
     elif tags is None:
         fm["tags"] = []
 

@@ -271,3 +271,46 @@ class TestBuildSystemPrompt:
     def test_empty_lists(self) -> None:
         prompt = build_system_prompt([], [])
         assert "(none)" in prompt.lower()
+
+
+class TestToKebab:
+
+    def test_spanish_n_tilde(self) -> None:
+        from adso.llm_client import _to_kebab
+        assert _to_kebab("mañana") == "manana"
+
+    def test_accented_vowels(self) -> None:
+        from adso.llm_client import _to_kebab
+        assert _to_kebab("canción") == "cancion"
+        assert _to_kebab("análisis") == "analisis"
+
+    def test_regular_kebab(self) -> None:
+        from adso.llm_client import _to_kebab
+        assert _to_kebab("machine learning") == "machine-learning"
+
+    def test_type_tags_filtered(self) -> None:
+        """Tags que duplican el type son eliminados en post-procesado."""
+        import json
+        data = {
+            "mode": "capture",
+            "payload": {
+                "frontmatter": {
+                    "title": "Hacer algo",
+                    "type": "task",
+                    "tags": ["tarea", "task", "manana", "productividad"],
+                    "priority": "medium",
+                },
+                "body": "contenido",
+            },
+        }
+        from adso.llm_client import validate_llm_response
+        result = validate_llm_response(data)
+        tags = result["payload"]["frontmatter"]["tags"]
+        assert "tarea" not in tags
+        assert "task" not in tags
+        assert "productividad" in tags
+
+    def test_type_tags_filtered_note_types(self) -> None:
+        from adso.llm_client import _to_kebab, _TYPE_TAGS
+        for bad_tag in ["tarea", "task", "nota", "note", "idea", "paper"]:
+            assert bad_tag in _TYPE_TAGS
