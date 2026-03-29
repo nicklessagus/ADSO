@@ -5,8 +5,11 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from adso.handlers.input import handle_text
+from adso.handlers.input import handle_text, handle_audio, handle_document, handle_photo
 from adso.handlers.callbacks import handle_callback
+from adso.handlers.capture import _parse_date_from_text, _apply_task_corrections
+from adso.bot_utils import _is_awaiting_text_input
+from adso.constants import CB_NOTE_CORRECT
 from adso.keyboards import (
     build_preview,
     build_capture_keyboard,
@@ -260,12 +263,26 @@ class TestTextCorrectionExtra:
     @pytest.mark.asyncio
     @patch("adso.handlers.capture.classify")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
-    async def test_type_nota_correction(self, mock_classify, make_update, mock_context) -> None:
+    async def test_task_text_blocked_without_lock(self, mock_classify, make_update, mock_context) -> None:
+        """Texto en tarea sin awaiting_correction → bloqueado, tipo no cambia."""
         _setup_pending_note(mock_context, note_type="task")
         update = make_update(text="tipo nota")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
-        assert fm["type"] == "reference"
+        assert fm["type"] == "task"  # no cambió
+
+    @pytest.mark.asyncio
+    @patch("adso.handlers.capture.classify")
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_task_text_correction_with_lock(self, mock_classify, make_update, mock_context) -> None:
+        """Texto en tarea con awaiting_correction=True → aplica corrección."""
+        _setup_pending_note(mock_context, note_type="task")
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
+        update = make_update(text="prioridad alta")
+        await handle_text(update, mock_context)
+        fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
+        assert fm["priority"] == "high"
 
     @pytest.mark.asyncio
     @patch("adso.handlers.capture.classify")
@@ -426,6 +443,154 @@ class TestManageOperations:
         await handle_callback(update, mock_context)
         call_args = str(update.callback_query.edit_message_text.call_args)
         assert "próxima versión" in call_args
+
+
+class TestParseDateFromText:
+    """Tests unitarios para _parse_date_from_text."""
+
+    def test_iso_date(self) -> None:
+        result = _parse_date_from_text("2026-04-15")
+        assert result == "2026-04-15"
+
+    def test_slash_date(self) -> None:
+        result = _parse_date_from_text("15/04/2026")
+        assert result == "2026-04-15"
+
+    def test_manana(self) -> None:
+        from datetime import datetime, timedelta, timezone
+        expected = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+        assert _parse_date_from_text("mañana") == expected
+
+    def test_hoy(self) -> None:
+        from datetime import datetime, timezone
+        expected = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        assert _parse_date_from_text("hoy") == expected
+
+    def test_pasado_manana(self) -> None:
+        from datetime import datetime, timedelta, timezone
+        expected = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d")
+        assert _parse_date_from_text("pasado mañana") == expected
+
+    def test_with_time_hs(self) -> None:
+        result = _parse_date_from_text("mañana 15hs")
+        assert result is not None
+        assert "T15:00:00" in result
+
+    def test_with_time_colon(self) -> None:
+        result = _parse_date_from_text("2026-04-15 09:30")
+        assert result is not None
+        assert "T09:30:00" in result
+
+    def test_no_date(self) -> None:
+        assert _parse_date_from_text("prioridad alta") is None
+
+    def test_weekday_returns_future(self) -> None:
+        from datetime import datetime, timezone
+        result = _parse_date_from_text("el viernes")
+        assert result is not None
+        parsed_date = datetime.strptime(result, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        assert parsed_date > datetime.now(timezone.utc)
+        assert parsed_date.weekday() == 4  # viernes
+
+
+class TestApplyTaskCorrections:
+    """Tests para _apply_task_corrections."""
+
+    def test_date_updates_due_date(self) -> None:
+        fm = {"title": "T", "type": "task", "priority": "medium"}
+        _apply_task_corrections(fm, "2026-04-15", "2026-04-15")
+        assert fm["due_date"] == "2026-04-15"
+
+    def test_priority_alta(self) -> None:
+        fm = {"title": "T", "type": "task", "priority": "medium"}
+        _apply_task_corrections(fm, "prioridad alta", "prioridad alta")
+        assert fm["priority"] == "high"
+
+    def test_priority_baja(self) -> None:
+        fm = {"title": "T", "type": "task"}
+        _apply_task_corrections(fm, "prioridad baja", "prioridad baja")
+        assert fm["priority"] == "low"
+
+    def test_title_prefix(self) -> None:
+        fm = {"title": "old", "type": "task"}
+        _apply_task_corrections(fm, "título nuevo título", "título nuevo título")
+        assert fm["title"] == "nuevo título"
+
+    def test_fallback_sets_title(self) -> None:
+        fm = {"title": "old", "type": "task"}
+        _apply_task_corrections(fm, "Tarea de ejemplo", "tarea de ejemplo")
+        assert fm["title"] == "Tarea de ejemplo"
+
+    def test_date_and_priority_combined(self) -> None:
+        fm = {"title": "T", "type": "task", "priority": "medium"}
+        _apply_task_corrections(fm, "el viernes, prioridad alta", "el viernes, prioridad alta")
+        assert fm["priority"] == "high"
+        assert fm.get("due_date") is not None
+
+
+class TestTaskCorrectionLock:
+    """Tests para el flujo de corrección con lock en tareas."""
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_cb_note_correct_sets_lock(self, make_callback_query, mock_context) -> None:
+        """CB_NOTE_CORRECT activa awaiting_correction en pending_note."""
+        _setup_pending_note(mock_context, note_type="task")
+        update = make_callback_query(data=CB_NOTE_CORRECT)
+        await handle_callback(update, mock_context)
+        assert mock_context.user_data["pending_note"]["awaiting_correction"] is True
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_is_awaiting_text_input_transcript(self, mock_context) -> None:
+        """_is_awaiting_text_input detecta awaiting_correction en pending_transcript."""
+        mock_context.user_data["pending_transcript"] = {"awaiting_correction": True, "text": "x"}
+        assert _is_awaiting_text_input(mock_context) is True
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_is_awaiting_text_input_extraction(self, mock_context) -> None:
+        """_is_awaiting_text_input detecta awaiting_correction en pending_extraction."""
+        mock_context.user_data["pending_extraction"] = {"awaiting_correction": True, "text": "x"}
+        assert _is_awaiting_text_input(mock_context) is True
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_audio_blocked_during_transcript_correction(self, mock_context) -> None:
+        """Audio bloqueado cuando pending_transcript tiene awaiting_correction=True."""
+        mock_context.user_data["pending_transcript"] = {
+            "awaiting_correction": True, "text": "x", "msg_id": 1,
+        }
+        msg = MagicMock()
+        msg.voice = MagicMock(file_size=100)
+        msg.audio = None
+        msg.reply_text = AsyncMock()
+        msg.message_id = 1
+        update = MagicMock()
+        update.message = msg
+        update.effective_user = MagicMock(id=42)
+        await handle_audio(update, mock_context)
+        msg.reply_text.assert_called_once()
+        assert "pendiente" in msg.reply_text.call_args[0][0]
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_audio_blocked_during_extraction_correction(self, mock_context) -> None:
+        """Audio bloqueado cuando pending_extraction tiene awaiting_correction=True."""
+        mock_context.user_data["pending_extraction"] = {
+            "awaiting_correction": True, "text": "x", "msg_id": 1,
+        }
+        msg = MagicMock()
+        msg.voice = MagicMock(file_size=100)
+        msg.audio = None
+        msg.reply_text = AsyncMock()
+        msg.message_id = 1
+        update = MagicMock()
+        update.message = msg
+        update.effective_user = MagicMock(id=42)
+        await handle_audio(update, mock_context)
+        msg.reply_text.assert_called_once()
+        assert "pendiente" in msg.reply_text.call_args[0][0]
 
 
 class TestChooseSelectors:

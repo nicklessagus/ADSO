@@ -47,6 +47,23 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     return False
 
 
+def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True si hay un flujo esperando texto de corrección (awaiting_correction=True).
+
+    Complementa _has_pending_keyboard: mientras que esa función devuelve False
+    cuando awaiting_correction=True (para permitir texto), esta devuelve True para
+    bloquear audio, fotos, documentos y comandos en esos mismos estados.
+    """
+    ud = context.user_data
+    if ud.get("pending_transcript", {}).get("awaiting_correction"):
+        return True
+    if ud.get("pending_extraction", {}).get("awaiting_correction"):
+        return True
+    if ud.get("pending_note", {}).get("awaiting_correction"):
+        return True
+    return False
+
+
 def _has_destination(fm: dict) -> bool:
     """Determina si el frontmatter tiene un destino claro."""
     if fm.get("type") in ("draft", "task"):

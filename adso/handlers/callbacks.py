@@ -54,6 +54,7 @@ from adso.constants import (
     CB_REPORT_SCOPE_PREFIX,
     CB_REPORT_SCOPE_SHOW_A,
     CB_REPORT_SCOPE_SHOW_P,
+    CB_NOTE_CORRECT,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
@@ -65,6 +66,7 @@ from adso.handlers.capture import (
     _cb_correct,
     _cb_dest,
     _cb_extraction_ok,
+    _cb_note_correct,
     _cb_transcript_ok,
     _handle_capture_from_callback,
 )
@@ -116,6 +118,9 @@ async def handle_callback(
 
     elif data == CB_CORRECT:
         await _cb_correct(query, context, vault_path)
+
+    elif data == CB_NOTE_CORRECT:
+        await _cb_note_correct(query, context)
 
     elif data == CB_DEST_INBOX:
         await _cb_dest(query, context, dest_type="inbox")

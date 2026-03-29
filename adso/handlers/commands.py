@@ -8,7 +8,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags, _has_pending_keyboard
+from adso.bot_utils import _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_CLASIFICAR_INBOX
 from adso.keyboards import _esc, build_capture_keyboard, build_preview
@@ -58,6 +58,9 @@ async def handle_status(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Handler de /status — muestra estado del sistema."""
+    if _is_awaiting_text_input(context):
+        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
+        return
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
@@ -123,10 +126,15 @@ async def handle_clasificar(
 ) -> None:
     """Handler de /clasificar — procesa notas de Inbox sin destino asignado (Caso B).
 
+    Guard: bloquea si hay corrección de texto pendiente.
+
     Toma la primera nota pendiente sin project/area, llama al LLM y muestra el
     preview para confirmación del usuario (mismo flujo que captura normal).
     Si hay más notas pendientes, avisa al usuario para que vuelva a invocar el comando.
     """
+    if _is_awaiting_text_input(context):
+        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
+        return
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 

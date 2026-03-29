@@ -150,12 +150,15 @@ status: active     # valores dependen del type — ver docs/frontmatter-schema.m
 Los tipos `project-index` y `area-index` se generan automáticamente al crear proyecto/área (no por clasificación del LLM). Ambos requieren `description` — el bot la pide obligatoriamente en la creación. Schema completo en `docs/frontmatter-schema.md`.
 
 ### Regla de confirmación
-Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard (`[Confirmar]` `[Reubicar]` `[Cancelar]`).
+Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard.
 
-`[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Para corregir cualquier otro campo (título, tags, tipo, prioridad), el usuario manda texto libre antes de confirmar — el bot actualiza el frontmatter y regenera el preview.
+- **Notas** (`reference`, `idea`, `draft`): `[Confirmar]` `[Reubicar]` `[Cancelar]`. El usuario puede mandar texto libre en cualquier momento para corregir título, prioridad, tags o tipo — el bot actualiza el frontmatter y regenera el preview.
+- **Tareas** (`task`): primera fila `[Cancelar]` `[Corregir]` `[Confirmar]`, segunda fila `[Reubicar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar fecha límite (lenguaje natural), prioridad y título.
 
-### Prioridad inferida
-El LLM infiere `priority` del lenguaje del mensaje para tipos accionables (task, idea). Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar, como cualquier otro campo.
+`[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
+
+### Prioridad y fecha inferidas
+El LLM infiere `priority` y `due_date` del lenguaje del mensaje para tareas. El prompt incluye la fecha actual (UTC) para que el LLM resuelva expresiones relativas ("el viernes", "mañana") correctamente. Si no hay señal de prioridad, usa `medium`. Ambos campos aparecen en el preview y el usuario puede corregirlos con `[Corregir]`.
 
 ---
 
@@ -193,9 +196,11 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Resultado OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` — dos filas; Gemini Vision descarta el OCR y reprocesa |
 | **Resultado Gemini Vision** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
 | **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` → al confirmar: `[Cancelar]` `[Tarea]` `[Nota]` |
-| **Captura** (destino claro) | `[Confirmar]` `[Reubicar]` `[Cancelar]` |
+| **Captura nota** (destino claro) | `[Cancelar]` `[Reubicar]` `[Confirmar]` |
+| **Captura nota** (sin destino) | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` |
+| **Captura tarea** (destino claro) | `[Cancelar]` `[Corregir]` `[Confirmar]` / `[Reubicar]` — dos filas |
+| **Captura tarea** (sin destino) | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` `[Corregir]` |
 | **Reubicar destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
-| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
 | **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |

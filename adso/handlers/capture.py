@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -194,6 +195,11 @@ async def _classify_and_preview(
         fm["type"] = "reference"
         fm["status"] = "active"
 
+    # due_date y scheduled solo son relevantes para tareas
+    if fm.get("type") != "task":
+        fm.pop("due_date", None)
+        fm.pop("scheduled", None)
+
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body:
         try:
@@ -295,21 +301,167 @@ async def _handle_degraded(
     )
 
 
+_WEEKDAYS_ES: dict[str, int] = {
+    "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2,
+    "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6,
+}
+
+
+def _parse_date_from_text(text: str) -> Optional[str]:
+    """Intenta extraer una fecha en español del texto. Retorna ISO 8601 o None.
+
+    Soporta:
+    - ISO: "2026-04-15" o "15/04/2026"
+    - Relativos: "hoy", "mañana", "pasado mañana"
+    - Días de semana: "el viernes", "el próximo lunes"
+    - Hora: "15hs", "15:30", "a las 15"
+
+    Args:
+        text: Texto en lenguaje natural (puede contener más cosas además de la fecha).
+
+    Returns:
+        String ISO 8601 (con hora si se detectó, solo fecha si no), o None.
+    """
+    t = text.lower()
+    now = datetime.now(timezone.utc)
+
+    # Hora: "15hs", "15h", "15:30", "a las 15"
+    time_m = re.search(r'\b(\d{1,2}):(\d{2})\b', t) or \
+             re.search(r'\b(\d{1,2})\s*hs?\b', t) or \
+             re.search(r'a las\s+(\d{1,2})\b', t)
+    hour, minute, has_time = 0, 0, False
+    if time_m:
+        hour = int(time_m.group(1))
+        minute = int(time_m.group(2)) if time_m.lastindex and time_m.lastindex >= 2 else 0
+        has_time = True
+
+    target: Optional[datetime] = None
+
+    # ISO: "2026-04-15"
+    iso_m = re.search(r'\b(\d{4})-(\d{2})-(\d{2})\b', t)
+    if iso_m:
+        try:
+            target = datetime(
+                int(iso_m.group(1)), int(iso_m.group(2)), int(iso_m.group(3)),
+                hour, minute, tzinfo=timezone.utc,
+            )
+        except ValueError:
+            pass
+
+    # DD/MM/YYYY
+    if not target:
+        slash_m = re.search(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', t)
+        if slash_m:
+            try:
+                target = datetime(
+                    int(slash_m.group(3)), int(slash_m.group(2)), int(slash_m.group(1)),
+                    hour, minute, tzinfo=timezone.utc,
+                )
+            except ValueError:
+                pass
+
+    # Relativos
+    if not target:
+        if "pasado mañana" in t or "pasado manana" in t:
+            base = now + timedelta(days=2)
+            target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        elif "mañana" in t or "manana" in t:
+            base = now + timedelta(days=1)
+            target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        elif "hoy" in t:
+            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    # Día de semana
+    if not target:
+        for name, weekday in _WEEKDAYS_ES.items():
+            if re.search(r'\b' + name + r'\b', t):
+                days_ahead = weekday - now.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                base = now + timedelta(days=days_ahead)
+                target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                break
+
+    if target is None:
+        return None
+    if has_time:
+        return target.strftime("%Y-%m-%dT%H:%M:%S")
+    return target.strftime("%Y-%m-%d")
+
+
+def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
+    """Aplica correcciones a un frontmatter de tarea desde texto libre.
+
+    Detecta fecha, prioridad, tags y título en el mismo texto, en cualquier orden.
+    Retorna True si se modificó al menos un campo.
+    """
+    changed = False
+
+    # Fecha: "fecha X" o texto que contiene expresión de fecha
+    date_input = text_lower
+    if date_input.startswith("fecha "):
+        date_input = date_input[6:].strip()
+    date_str = _parse_date_from_text(date_input)
+    if date_str:
+        fm["due_date"] = date_str
+        changed = True
+
+    # Prioridad
+    prio_m = re.search(r'\bprioridad\s+(alta|high|media|medium|baja|low)\b', text_lower)
+    if prio_m:
+        prio_map = {
+            "alta": "high", "high": "high",
+            "media": "medium", "medium": "medium",
+            "baja": "low", "low": "low",
+        }
+        fm["priority"] = prio_map[prio_m.group(1)]
+        changed = True
+
+    # Tag
+    tag_m = re.search(r'\bagregar\s+tag\s+(\S+)', text_lower) or \
+            re.search(r'\btag\s+(\S+)', text_lower)
+    if tag_m:
+        tag = tag_m.group(1).replace(" ", "-")
+        if not fm.get("tags"):
+            fm["tags"] = []
+        fm["tags"].append(tag)
+        changed = True
+
+    # Título explícito
+    title_m = re.match(r'^t[ií]tulo\s+(.+)$', text_lower)
+    if title_m:
+        fm["title"] = text.split(" ", 1)[1].strip()
+        changed = True
+
+    # Fallback: actualizar título
+    if not changed:
+        fm["title"] = text.strip()
+
+    return changed
+
+
 async def _handle_text_correction(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     text: str,
     pending: dict,
+    locked_msg_id: Optional[int] = None,
 ) -> None:
-    """Interpreta texto libre como corrección del preview pendiente."""
+    """Interpreta texto libre como corrección del preview pendiente.
+
+    Args:
+        locked_msg_id: Si se provee, edita ese mensaje con el preview actualizado
+            y elimina el mensaje del usuario (flujo con lock, como en audio).
+            Si es None, envía un reply nuevo (flujo libre para notas no-tarea).
+    """
     payload = pending["payload"]
     fm = payload["frontmatter"]
-
     text_lower = text.lower().strip()
 
-    if text_lower.startswith("titulo ") or text_lower.startswith("título "):
-        new_title = text.split(" ", 1)[1].strip()
-        fm["title"] = new_title
+    if fm.get("type") == "task":
+        _apply_task_corrections(fm, text, text_lower)
+    elif text_lower.startswith("titulo ") or text_lower.startswith("título "):
+        fm["title"] = text.split(" ", 1)[1].strip()
     elif text_lower.startswith("prioridad "):
         prio = text_lower.split(" ", 1)[1].strip()
         if prio in ("alta", "high"):
@@ -320,7 +472,7 @@ async def _handle_text_correction(
             fm["priority"] = "low"
     elif text_lower.startswith("tag ") or text_lower.startswith("agregar tag "):
         tag = text_lower.split("tag ", 1)[1].strip().replace(" ", "-")
-        if "tags" not in fm or fm["tags"] is None:
+        if not fm.get("tags"):
             fm["tags"] = []
         fm["tags"].append(tag)
     elif text_lower.startswith("tipo ") or text_lower.startswith("type "):
@@ -342,11 +494,22 @@ async def _handle_text_correction(
     preview = build_preview(fm, body, suggested_links)
     keyboard = build_capture_keyboard(fm, has_dest)
 
-    await update.message.reply_text(
-        preview,
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
+    if locked_msg_id:
+        pending["awaiting_correction"] = False
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.message.chat_id,
+                message_id=locked_msg_id,
+                text=preview,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+            await update.message.delete()
+        except Exception:
+            # Si el edit falla, al menos enviar el preview actualizado
+            await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def _handle_capture_from_callback(
@@ -543,6 +706,24 @@ async def _cb_correct(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     """Muestra selector de destino."""
     keyboard = build_destination_keyboard()
     await query.edit_message_reply_markup(reply_markup=keyboard)
+
+
+async def _cb_note_correct(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Activa modo corrección para la nota de tarea pendiente.
+
+    Bloquea el mensaje con lock (msg_id) y espera texto del usuario para
+    corregir campos: fecha, prioridad, tags, título.
+    """
+    pending = context.user_data.get("pending_note")
+    if not pending:
+        await query.answer("No hay nota pendiente.")
+        return
+    pending["awaiting_correction"] = True
+    pending["msg_id"] = query.message.message_id
+    await query.edit_message_text(
+        query.message.text_html + "\n\n<i>Escribir corrección (fecha, prioridad, título, tags):</i>",
+        parse_mode="HTML",
+    )
 
 
 async def _cb_dest(

@@ -22,7 +22,7 @@ from typing import Optional
 from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items
+from adso.bot_utils import _get_existing_items, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import (
     CB_CANCEL,
@@ -66,6 +66,9 @@ async def handle_reporte_command(
         update: Telegram update.
         context: Bot context.
     """
+    if _is_awaiting_text_input(context):
+        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
+        return
     context.user_data["pending_report"] = True
     context.user_data["report_full"] = False
     await update.message.reply_text(
@@ -87,6 +90,9 @@ async def handle_reporte_full_command(
         update: Telegram update.
         context: Bot context.
     """
+    if _is_awaiting_text_input(context):
+        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
+        return
     context.user_data["pending_report"] = True
     context.user_data["report_full"] = True
     await update.message.reply_text(

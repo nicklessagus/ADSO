@@ -38,6 +38,9 @@ CB_VISION = "vision"
 # arXiv
 CB_ARXIV_CREATE_ANYWAY = "arxiv:create_anyway"
 
+# Corrección de nota (tarea)
+CB_NOTE_CORRECT = "note:correct"
+
 # Prefijos
 CB_DEST_AREA_PREFIX = "dest:area:"
 CB_DEST_PROJECT_PREFIX = "dest:project:"

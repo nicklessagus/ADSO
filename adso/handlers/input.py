@@ -12,7 +12,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _cleanup_pending, _detect_manage_keywords, _has_destination, _has_pending_keyboard
+from adso.bot_utils import _cleanup_pending, _detect_manage_keywords, _has_destination, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_EXTRACTION_CANCEL
 from adso.document_extractor import (
@@ -119,12 +119,27 @@ async def handle_text(
         await _handle_manage_missing_fields(update, context, text)
         return
 
-    # Corrección de preview pendiente (pending_note): texto libre modifica frontmatter
+    # Corrección de preview pendiente (pending_note)
     if context.user_data.get("pending_note"):
-        from adso.handlers.capture import _handle_text_correction
-        await _handle_text_correction(
-            update, context, text, context.user_data["pending_note"]
-        )
+        pn = context.user_data["pending_note"]
+        fm = pn["payload"]["frontmatter"]
+        if fm.get("type") == "task":
+            if pn.get("awaiting_correction"):
+                from adso.handlers.capture import _handle_text_correction
+                await _handle_text_correction(
+                    update, context, text, pn,
+                    locked_msg_id=pn.get("msg_id"),
+                )
+            else:
+                ids = context.user_data.setdefault("block_msg_ids", [])
+                ids.append(update.message.message_id)
+                sent = await update.message.reply_text(
+                    "Usar botón Corregir para modificar la tarea."
+                )
+                ids.append(sent.message_id)
+        else:
+            from adso.handlers.capture import _handle_text_correction
+            await _handle_text_correction(update, context, text, pn)
         return
 
     # Bloquear si hay cualquier teclado pendiente de resolución
@@ -260,7 +275,7 @@ async def handle_audio(
     settings: Settings = context.bot_data["settings"]
     msg = update.message
 
-    if _has_pending_keyboard(context):
+    if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(
@@ -334,7 +349,7 @@ async def handle_document(
     msg = update.message
     doc = msg.document
 
-    if _has_pending_keyboard(context):
+    if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(
@@ -434,7 +449,7 @@ async def handle_photo(
     settings: Settings = context.bot_data["settings"]
     msg = update.message
 
-    if _has_pending_keyboard(context):
+    if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(

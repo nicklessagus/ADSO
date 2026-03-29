@@ -49,6 +49,7 @@ from adso.constants import (
     CB_REPORT_SCOPE_PREFIX,
     CB_REPORT_SCOPE_SHOW_A,
     CB_REPORT_SCOPE_SHOW_P,
+    CB_NOTE_CORRECT,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
     CB_TRANSCRIPT_OK,
@@ -138,7 +139,20 @@ def build_capture_keyboard(
     Returns:
         InlineKeyboardMarkup.
     """
+    is_task = frontmatter.get("type") == "task"
+
     if has_destination:
+        if is_task:
+            return InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+                    InlineKeyboardButton("Corregir", callback_data=CB_NOTE_CORRECT),
+                    InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
+                ],
+                [
+                    InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
+                ],
+            ])
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
@@ -147,6 +161,20 @@ def build_capture_keyboard(
             ]
         ])
     else:
+        if is_task:
+            return InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Inbox", callback_data=CB_DEST_INBOX),
+                ],
+                [
+                    InlineKeyboardButton("Elegir área", callback_data=CB_CHOOSE_AREA),
+                    InlineKeyboardButton("Elegir proyecto", callback_data=CB_CHOOSE_PROJECT),
+                ],
+                [
+                    InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+                    InlineKeyboardButton("Corregir", callback_data=CB_NOTE_CORRECT),
+                ],
+            ])
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Inbox", callback_data=CB_DEST_INBOX),
