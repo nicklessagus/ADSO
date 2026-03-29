@@ -28,6 +28,10 @@ dev = [
     "pytest-cov~=6.0",
 ]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["adso*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
