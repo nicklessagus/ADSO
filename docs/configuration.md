@@ -84,6 +84,7 @@ sync:
 
 # ─── Backup (Git) ─────────────────────────────────────────────────────────
 backup:
+  enabled: true                  # false para deshabilitar — útil si el vault no tiene repo git con remote
   debounce_seconds: 30           # esperar N segundos sin nuevas escrituras antes de commit+push
 
 # ─── Documentos adjuntos ──────────────────────────────────────────────────

@@ -50,6 +50,7 @@ reindex:
 sync:
   interval_minutes: 15
 backup:
+  enabled: true
   debounce_seconds: 60
 documents:
   max_size_mb: 10
@@ -74,6 +75,7 @@ weekly_report:
         assert s.reindex.enabled is False
         assert s.sync.interval_minutes == 15
         assert s.backup.debounce_seconds == 60
+        assert s.backup.enabled is True
         assert s.documents.max_size_mb == 10
         assert s.llm.disambiguation_threshold == 0.8
         assert s.llm.degraded_retry_minutes == 15
@@ -88,7 +90,19 @@ weekly_report:
         assert s.rag.max_results == 10
         assert s.links.similarity_threshold == 0.82
         assert s.backup.debounce_seconds == 30
+        assert s.backup.enabled is True  # default
         assert s.llm.disambiguation_threshold == 0.7
+
+    def test_backup_disabled(self, config_dir: Path) -> None:
+        """backup.enabled: false deshabilita el git backup."""
+        path = _write_config(config_dir, """
+backup:
+  enabled: false
+  debounce_seconds: 30
+""")
+        s = load_settings(path)
+        assert s.backup.enabled is False
+        assert s.backup.debounce_seconds == 30
 
     def test_partial_config_merges_defaults(self, config_dir: Path) -> None:
         """Config parcial → se completa con defaults."""
