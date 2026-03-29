@@ -68,7 +68,7 @@ async def _create_notes(vault: Path) -> dict[str, Path]:
     )
 
     notes["inbox-1"] = await create_note(
-        {"title": "Sin clasificar", "type": "draft",
+        {"title": "Sin clasificar", "type": "idea",
          "status": "pending-classification"},
         "Algo que no se clasificó.",
         vault,
@@ -251,7 +251,7 @@ class TestGetWikilinks:
     async def test_no_duplicates(self, vault: Path) -> None:
         # Crear nota con links duplicados
         path = await create_note(
-            {"title": "Dupes", "type": "draft"},
+            {"title": "Dupes", "type": "idea"},
             "[[x]] y [[x]] y [[x]]",
             vault,
         )

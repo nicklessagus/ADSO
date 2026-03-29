@@ -64,7 +64,7 @@ class TestFrontmatterGeneration:
             {"title": "Nota", "type": "reference", "project": "tesis"},
             {"title": "Tarea", "type": "task", "status": "pending", "area": "investigacion"},
             {"title": "Idea", "type": "idea", "status": "raw", "area": "investigacion"},
-            {"title": "Inbox", "type": "draft", "status": "pending-classification"},
+            {"title": "Inbox", "type": "idea", "status": "pending-classification"},
         ]
         for fm_input in cases:
             path = await create_note(fm_input, "Body", vault)
@@ -110,7 +110,7 @@ class TestFrontmatterGeneration:
             "Comillas 'simples' y \"dobles\"",
         ]
         for title in titles:
-            fm = {"title": title, "type": "draft"}
+            fm = {"title": title, "type": "idea"}
             path = await create_note(fm, "Body", vault)
             note = await read_note(path)
             assert note.frontmatter["title"] == title
@@ -136,7 +136,7 @@ class TestFrontmatterGeneration:
     async def test_source_telegram_vs_system(self, vault: Path) -> None:
         # Default: telegram
         path1 = await create_note(
-            {"title": "User", "type": "draft"}, "Body", vault
+            {"title": "User", "type": "idea"}, "Body", vault
         )
         n1 = await read_note(path1)
         assert n1.frontmatter["source"] == "telegram"

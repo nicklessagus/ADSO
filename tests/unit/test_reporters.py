@@ -178,7 +178,7 @@ class TestScopeReport:
             inbox / "borrador.md",
             {
                 "title": "Borrador sin clasificar",
-                "type": "draft",
+                "type": "idea",
                 "status": "pending-classification",
                 "source": "telegram",
                 "media_type": "text",
@@ -378,7 +378,7 @@ class TestHealthReport:
             inbox / "pendiente.md",
             {
                 "title": "Nota pendiente",
-                "type": "draft",
+                "type": "idea",
                 "status": "pending-classification",
                 "source": "telegram",
                 "media_type": "text",

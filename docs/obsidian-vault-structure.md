@@ -156,7 +156,7 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 | `reference` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o el bot pregunta destino si no tiene proyecto ni área | Contenido de referencia. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
 | `task` | `02-Areas/{area}/` + Google Tasks | Tarea sin proyecto activo — el área determina la carpeta destino |
 | `idea` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
-| `draft` | `00-Inbox/` | Bot no pudo clasificar con confianza |
+| `idea` (sin destino) | `00-Inbox/` | Bot no pudo clasificar con confianza — `status: pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 

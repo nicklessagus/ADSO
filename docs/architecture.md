@@ -137,7 +137,7 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
   **Caso A — nota con destino ya asignado** (`project` o `area` en frontmatter): el cron llama al LLM silenciosamente, preserva el destino del usuario (nunca lo sobreescribe), genera tags/summary/body limpio, mueve la nota al directorio correcto y manda una notificación breve: `"✓ Nota clasificada: {título} → {destino}"`. No hay preview — la escritura es directa.
 
   **Caso B — nota sin destino:** el cron no hace nada. El usuario debe invocar `/clasificar` para procesarlas de a una, con preview y confirmación. `/status` muestra el desglose (con/sin destino) y ofrece el botón `[Clasificar inbox]` cuando hay notas Caso B pendientes.
-- **Normalización de status:** si el LLM devuelve valores de `status` no canónicos (ej: `todo`, `open`, `new`, `draft`), el bot los normaliza automáticamente al valor más cercano antes de validar.
+- **Normalización de status:** si el LLM devuelve valores de `status` no canónicos (ej: `todo`, `open`, `new`), el bot los normaliza automáticamente al valor más cercano antes de validar.
 - **Schema de frontmatter estricto en el prompt:** el system prompt define explícitamente cada campo con su tipo y valores válidos. El body siempre se genera en español. Campos académicos con nombres fijos: `authors` (lista), `year`, `journal`, `doi`, `read_status`.
 - **Obsidian Skills como referencia:** el LLM usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como parte del system prompt para generar contenido compatible con Obsidian. Son documentos de referencia (no ejecutables) que definen la sintaxis correcta. Se incorporan al prompt de clasificación/generación, no al código. Se actualizan independientemente del bot.
 

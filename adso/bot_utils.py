@@ -66,8 +66,8 @@ def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 def _has_destination(fm: dict) -> bool:
     """Determina si el frontmatter tiene un destino claro."""
-    if fm.get("type") in ("draft", "task"):
-        return True  # draft va a inbox, task va a su área
+    if fm.get("type") == "task":
+        return True  # task va a inbox si no tiene destino
     if fm.get("project") or fm.get("area"):
         return True
     return False

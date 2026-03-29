@@ -45,7 +45,7 @@ class TestValidateResponse:
     def test_valid_capture_inbox(self) -> None:
         data = _load("classify_text_inbox.json")
         result = validate_llm_response(data)
-        assert result["payload"]["frontmatter"]["type"] == "draft"
+        assert result["payload"]["frontmatter"]["type"] == "idea"
 
     def test_valid_manage_create_project(self) -> None:
         data = _load("manage_create_project.json")

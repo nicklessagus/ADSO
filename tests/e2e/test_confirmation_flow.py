@@ -97,17 +97,19 @@ class TestConfirmation:
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})
-    async def test_dest_inbox_changes_type(
+    async def test_dest_inbox_clears_destination(
         self, make_callback_query, mock_context
     ) -> None:
-        """Elegir Inbox → destino cambiado a inbox."""
+        """Elegir Inbox → project/area se limpian, type se preserva."""
         _setup_pending_note(mock_context)
 
         update = make_callback_query(data=CB_DEST_INBOX)
         await handle_callback(update, mock_context)
 
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
-        assert fm["type"] == "draft"
+        assert fm["type"] == "reference"  # tipo original preservado
+        assert not fm.get("project")
+        assert not fm.get("area")
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})

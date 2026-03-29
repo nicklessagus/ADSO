@@ -133,7 +133,7 @@ Los resources no tienen ciclo de vida (referencia permanente). Las áreas no tie
 title: "Título descriptivo de la nota"
 date_created: "2025-01-15T14:30:00"   # ISO 8601, generado por el bot
 date_modified: "2025-01-15T14:30:00"  # ISO 8601, actualizado en cada edición
-type: reference                        # reference | task | idea | draft | project-index | area-index
+type: reference                        # reference | task | idea | project-index | area-index
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: text                       # text | audio | image | link | document
@@ -148,14 +148,14 @@ status: active                         # valores dependen del type
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `active`, `pending-classification` | `active` |
 | `task` | `02-Areas/{area}/` (siempre, independiente del proyecto) | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o bot pregunta destino | `raw`, `implemented`, `discarded`, `pending-classification` | `raw` |
-| `draft` | `00-Inbox/` | `draft`, `pending-classification` | `pending-classification` |
+
 | `project-index` | `01-Projects/{proyecto}/` | `active`, `on-hold`, `completed`, `archived` | `active` |
 
 `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor.
 
 `area-index` no tiene status — las áreas no tienen ciclo de vida.
 
-`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado) o no pudo asignar destino. El sistema intentará reclasificarlo automáticamente. Para `type: draft`, `status: draft` indica que el usuario envió la nota explícitamente al Inbox — no se reclasifica automáticamente.
+`pending-classification` está disponible para todos los tipos: indica que el LLM no respondió (modo degradado). El bot intentará reclasificar automáticamente. Cuando el LLM no puede clasificar con confianza, usa `type: idea` con `status: pending-classification`.
 
 ### Campos adicionales por tipo
 

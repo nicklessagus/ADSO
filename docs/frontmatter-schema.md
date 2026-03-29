@@ -85,13 +85,10 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 | `reference` | `active`, `pending-classification` | `active` |
 | `task` | `pending`, `in-progress`, `done`, `pending-classification` | `pending` |
 | `idea` | `raw`, `implemented`, `discarded`, `pending-classification` | `raw` |
-| `draft` | `draft`, `pending-classification` | `pending-classification` |
 | `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
 | `area-index` | — (sin ciclo de vida) | — |
 
-Para `type: draft`, la distinción entre los dos valores:
-- `status: pending-classification` — el LLM no respondió (modo degradado) o no pudo asignar destino. El sistema intentará reclasificar automáticamente.
-- `status: draft` — el usuario envió la nota explícitamente al Inbox. No se reclasifica automáticamente.
+`pending-classification` está disponible para todos los tipos: indica que el LLM no respondió (modo degradado). El bot intentará reclasificar automáticamente.
 
 ---
 
@@ -102,7 +99,7 @@ Para `type: draft`, la distinción entre los dos valores:
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
 | `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
-| `draft` | `00-Inbox/` | Sin clasificar, requiere revisión |
+
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 

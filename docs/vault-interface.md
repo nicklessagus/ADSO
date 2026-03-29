@@ -103,7 +103,6 @@ async def create_note(
 
 1. Calcula el nombre de archivo: `YYYY-MM-DD-{slug}.md` donde `slug` es el `title` del frontmatter pasado por `python-slugify` (kebab-case, sin caracteres especiales, máx. 60 chars del slug).
 2. Calcula el directorio destino a partir del frontmatter según estas reglas (en orden):
-   - `type: draft` → `{vault_path}/00-Inbox/`
    - `type: reference` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: reference` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
    - `type: reference` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`)
@@ -193,7 +192,7 @@ async def set_property(
 | Campo | Validación |
 |---|---|
 | `status` | Debe pertenecer al conjunto válido para el `type` de la nota |
-| `type` | Debe ser uno de: `reference`, `task`, `idea`, `draft`, `project-index`, `area-index` |
+| `type` | Debe ser uno de: `reference`, `task`, `idea`, `project-index`, `area-index` |
 | `priority` | Debe ser: `low`, `medium`, `high` |
 | `media_type` | Debe ser: `text`, `audio`, `image`, `link`, `document` |
 | `source` | Debe ser: `telegram`, `system` |
@@ -608,7 +607,7 @@ Cada documento en la colección tiene:
 | `id` | string | Stem del archivo (sin `.md`, sin path). Clave primaria. Ej: `2025-01-15-baseline-cnn` |
 | `document` | string | Texto completo usado para generar el embedding (contenido extraído, no el YAML) |
 | `metadata.path` | string | Path relativo al vault. Ej: `01-Projects/tesis/experimentos/2025-01-15-baseline-cnn.md` |
-| `metadata.type` | string | `reference`, `task`, `idea`, `draft`, `project-index`, `area-index` |
+| `metadata.type` | string | `reference`, `task`, `idea`, `project-index`, `area-index` |
 | `metadata.status` | string | Status actual de la nota |
 | `metadata.project` | string | Proyecto (vacío si no tiene) |
 | `metadata.area` | string | Área (vacío si no tiene) |

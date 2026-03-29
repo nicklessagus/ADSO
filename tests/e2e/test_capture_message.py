@@ -85,7 +85,7 @@ class TestCaptureMessage:
             "payload": {
                 "frontmatter": {
                     "title": "Sin clasificar",
-                    "type": "draft",
+                    "type": "idea",
                     "tags": [],
                     "status": "pending-classification",
                 },
@@ -106,7 +106,7 @@ class TestCaptureMessage:
         assert "pending_note" in mock_context.user_data
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
         assert fm["status"] == "pending-classification"
-        assert fm["type"] == "draft"
+        assert fm["type"] == "idea"
 
         # Confirmar → escribe al vault
         cb_confirm = make_callback_query(data=CB_CONFIRM)

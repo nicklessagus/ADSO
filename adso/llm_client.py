@@ -20,21 +20,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 VALID_MODES = {"capture", "query", "edit", "manage"}
-VALID_TYPES = {"reference", "task", "idea", "draft"}  # LLM proposes only these 4
+VALID_TYPES = {"reference", "task", "idea"}  # LLM proposes only these 3
 VALID_STATUS = {
     "reference": {"active", "pending-classification"},
     "task": {"pending", "in-progress", "done", "pending-classification"},
     "idea": {"raw", "implemented", "discarded", "pending-classification"},
-    "draft": {"pending-classification"},
 }
 # Aliases the LLM may return → canonical value
 STATUS_ALIASES: dict[str, str] = {
     "todo": "pending",
     "open": "pending",
     "new": "pending",
-    "draft": "active",
+    "draft": "raw",
     "published": "active",
-    "pending": "pending-classification",  # for draft
 }
 VALID_PRIORITY = {"low", "medium", "high"}
 VALID_OPERATIONS = {
@@ -268,7 +266,7 @@ _ACCENT_MAP = str.maketrans(
 
 # Tags that duplicate frontmatter fields — filtered out regardless of model
 _TYPE_TAGS = frozenset({
-    "task", "tarea", "note", "nota", "idea", "draft", "reference",
+    "task", "tarea", "note", "nota", "idea", "reference",
     "paper", "document", "audio", "image", "link",
 })
 
@@ -304,16 +302,13 @@ def _validate_capture_payload(payload: dict) -> None:
     if status is not None:
         valid = VALID_STATUS.get(note_type, set())
         if valid and status not in valid:
-            if note_type == "draft":
-                fm["status"] = "pending-classification"
+            normalized = STATUS_ALIASES.get(status)
+            if normalized and normalized in valid:
+                fm["status"] = normalized
             else:
-                normalized = STATUS_ALIASES.get(status)
-                if normalized and normalized in valid:
-                    fm["status"] = normalized
-                else:
-                    raise LLMResponseError(
-                        f"Invalid status '{status}' for type '{note_type}'"
-                    )
+                raise LLMResponseError(
+                    f"Invalid status '{status}' for type '{note_type}'"
+                )
 
     priority = fm.get("priority")
     if priority is not None and priority not in VALID_PRIORITY:
@@ -415,11 +410,10 @@ Today is {today} ({weekday}). Use this as reference to resolve relative date exp
 ## Classification rules:
 - type=reference: information, content, references, papers
 - type=task: actions to perform, pending items
-- type=idea: ideas without a defined project, exploratory thoughts
-- type=draft: if you cannot classify with confidence
+- type=idea: ideas, exploratory thoughts, or anything that doesn't clearly fit reference or task
 - priority: infer from language (urgent/important=high, normal=medium, low-priority=low). If no signal, use medium for task/idea
 - project/area: assign to the most relevant existing project/area. If none fits, use null
-- tags: kebab-case, always in English. Capture thematic/topical content (methods, domains, concepts). Prefer tags from the existing list when semantically applicable; only create new tags if no existing tag fits. NEVER tag with: note type (paper, reference, task, idea, draft), project name, area name, or any value already expressed by another frontmatter field
+- tags: kebab-case, always in English. Capture thematic/topical content (methods, domains, concepts). Prefer tags from the existing list when semantically applicable; only create new tags if no existing tag fits. NEVER tag with: note type (paper, reference, task, idea), project name, area name, or any value already expressed by another frontmatter field
 - If the user wants to create or manage projects/areas, use mode=manage
 - For everything else (including questions or thoughts the user wants to capture), use mode=capture
 - If a <user_context> block is present: use it to infer priority and relevance (do NOT treat it as content to classify)
@@ -429,9 +423,9 @@ Today is {today} ({weekday}). Use this as reference to resolve relative date exp
 
 ### frontmatter:
 - title: descriptive title based EXCLUSIVELY on the content inside <input>. Do NOT use existing tags, projects, areas, or any other context to infer the title — only what the content itself says. For papers: copy the TÍTULO field EXACTLY as given — never translate, never paraphrase
-- type: "reference" | "task" | "idea" | "draft"
+- type: "reference" | "task" | "idea"
 - tags: kebab-case list
-- status: depends on type — reference→"active", task→"pending", idea→"raw", draft→"pending-classification". For idea, valid values are: raw (default), implemented, discarded
+- status: depends on type — reference→"active", task→"pending", idea→"raw". For idea, valid values are: raw (default), implemented, discarded
 - project: name of the most relevant existing project, or null
 - section: subsection within the project, or null
 - area: name of the most relevant existing area (only when project is null), or null
@@ -605,8 +599,8 @@ async def classify(
         "needs_disambiguation": False,
         "payload": {
             "frontmatter": {
-                "title": "[Borrador] " + content[:60].strip() if content else "[Borrador]",
-                "type": "draft",
+                "title": "[Sin clasificar] " + content[:60].strip() if content else "[Sin clasificar]",
+                "type": "idea",
                 "tags": [],
                 "status": "pending-classification",
             },

@@ -56,13 +56,12 @@ DATE_FIELDS = {"date_created", "date_modified", "due_date", "scheduled"}
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
-VALID_TYPES = {"reference", "task", "idea", "draft", "project-index", "area-index"}
+VALID_TYPES = {"reference", "task", "idea", "project-index", "area-index"}
 
 VALID_STATUS: dict[str, set[str]] = {
     "reference": {"active", "pending-classification"},
     "task": {"pending", "in-progress", "done", "pending-classification"},
     "idea": {"raw", "implemented", "discarded", "pending-classification"},
-    "draft": {"pending-classification"},
     "project-index": {"active", "on-hold", "completed", "archived"},
     "area-index": set(),
 }
@@ -133,13 +132,10 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
         Path del directorio destino, o None si el destino no se puede resolver
         (nota sin proyecto ni área — el caller debe preguntar al usuario).
     """
-    note_type = fm.get("type", "draft")
+    note_type = fm.get("type", "idea")
     project = fm.get("project")
     section = fm.get("section")
     area = fm.get("area")
-
-    if note_type == "draft":
-        return vault_path / "00-Inbox"
 
     if note_type == "project-index":
         if project:

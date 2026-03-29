@@ -139,7 +139,7 @@ Una idea tiene tres estados: `raw` (capturada, sin procesar), `implemented` (se 
 title: ""
 date_created: ""   # ISO 8601
 date_modified: ""  # ISO 8601
-type: ""           # reference | task | idea | draft | project-index | area-index
+type: ""           # reference | task | idea | project-index | area-index
 tags: []           # siempre en inglés, kebab-case; el LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
 source: telegram   # "telegram" para notas de usuario, "system" para auto-generadas
 media_type: ""     # text | audio | image | link | document — automático
@@ -152,7 +152,7 @@ Los tipos `project-index` y `area-index` se generan automáticamente al crear pr
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard.
 
-- **Notas** (`reference`, `idea`, `draft`): `[Confirmar]` `[Reubicar]` `[Cancelar]`. El usuario puede mandar texto libre en cualquier momento para corregir título, prioridad, tags o tipo — el bot actualiza el frontmatter y regenera el preview.
+- **Notas** (`reference`, `idea`): `[Confirmar]` `[Reubicar]` `[Cancelar]`. El usuario puede mandar texto libre en cualquier momento para corregir título, prioridad, tags o tipo — el bot actualiza el frontmatter y regenera el preview.
 - **Tareas** (`task`): primera fila `[Cancelar]` `[Corregir]` `[Confirmar]`, segunda fila `[Reubicar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar fecha límite (lenguaje natural), prioridad y título.
 
 `[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
@@ -344,9 +344,9 @@ ADSO_GID                   # GID del usuario del host — default: 1000
 
 ## Decisiones clave
 
-- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `reference`, `task`, `idea`, `draft`, `project-index`, `area-index`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `reference` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
+- **Taxonomía de `type`:** `type` refleja propósito, no formato de origen. Los tipos son: `reference`, `task`, `idea`, `project-index`, `area-index`. No existe `type: draft` — cuando el LLM no puede clasificar con confianza usa `type: idea` con `status: pending-classification`. `project-index` y `area-index` son auto-generados por el bot (no por el LLM) y requieren `description` obligatoria al crear — el bot la pide y no permite omitirla. No existe `type: paper` — un paper es un `reference` con campos académicos opcionales (authors, year, doi, methods, etc.) que el pipeline de extracción popula. El lifecycle de lectura de papers se maneja con tasks (`"leer paper X"`). Los papers se identifican por tag `#paper` y/o presencia de campos académicos en frontmatter.
 
-- **Destino en preview (`build_preview`):** project → `01-Projects/...`; area → `02-Areas/...`; `type: draft` sin project ni area → `00-Inbox` (tanto cuando el usuario elige Inbox explícitamente como en modo degradado — ambos terminan en Inbox); cualquier otro tipo sin destino → "por definir" (el usuario debe elegir antes de confirmar).
+- **Destino en preview (`build_preview`):** project → `01-Projects/...`; area → `02-Areas/...`; `type: task` sin destino → `00-Inbox`; cualquier otro tipo sin destino → "por definir" (el usuario debe elegir antes de confirmar). Modo degradado: `type: idea` + `status: pending-classification` → inbox.
 - **Routing de destino (`_resolve_dest_dir`):** todos los tipos (`reference`, `task`, `idea`) siguen el mismo orden: project > area > Inbox/None. `task` con project va a `01-Projects/{project}/` aunque tenga area seteada.
 - **Creación de proyecto/área desde bot:** `_extract_name_from_command()` parsea el nombre directamente con regex para patrones simples (`crear proyecto "X"`, `nuevo proyecto X`). Solo llama al LLM cuando el patrón no es reconocible (ej: "quiero un proyecto para mi tesis"). El intent ya viene confirmado por el botón, solo hace falta el nombre.
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve.

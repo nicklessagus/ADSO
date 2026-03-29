@@ -153,7 +153,7 @@ async def _classify_and_preview(
             result["payload"]["frontmatter"] = {}
         fm_forced = result["payload"]["frontmatter"]
         if not fm_forced.get("type") or fm_forced["type"] not in VALID_TYPES:
-            fm_forced["type"] = "draft"
+            fm_forced["type"] = "idea"
         if not fm_forced.get("title"):
             fm_forced["title"] = text[:80].strip()
         if not result["payload"].get("body"):
@@ -531,7 +531,7 @@ async def _handle_capture_from_callback(
         payload = {
             "frontmatter": {
                 "title": original_text[:80].strip(),
-                "type": "draft",
+                "type": "idea",
                 "tags": [],
                 "status": "pending-classification",
             },
@@ -770,11 +770,9 @@ async def _cb_dest(
     fm = pending["payload"]["frontmatter"]
 
     if dest_type == "inbox":
-        fm["type"] = "draft"
         fm["project"] = None
         fm["section"] = None
         fm["area"] = None
-        fm["status"] = "draft"
     elif dest_type == "resources":
         fm["project"] = None
         fm["section"] = None
@@ -784,18 +782,14 @@ async def _cb_dest(
         fm["project"] = None
         fm["section"] = None
         fm["area"] = dest_name
-        if fm.get("type") == "draft":
-            fm["type"] = "reference"
         if fm.get("status") == "pending-classification":
-            fm["status"] = "active"
+            fm["status"] = "active" if fm.get("type") == "reference" else "raw"
     elif dest_type == "project":
         fm["project"] = dest_name
         fm["section"] = None
         fm["area"] = None
-        if fm.get("type") == "draft":
-            fm["type"] = "reference"
         if fm.get("status") == "pending-classification":
-            fm["status"] = "active"
+            fm["status"] = "active" if fm.get("type") == "reference" else "raw"
 
     body = pending["payload"].get("body", "")
     suggested_links = pending["payload"].get("suggested_links", [])

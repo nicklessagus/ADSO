@@ -248,7 +248,7 @@ async def _cb_intent_note(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """El usuario eligió guardar como nota — el LLM infiere tipo (reference/idea/draft) y resto."""
+    """El usuario eligió guardar como nota — el LLM infiere tipo (reference/idea) y resto."""
     from adso.handlers.capture import _classify_and_preview
 
     text, ctx = _pop_pending_content(context)

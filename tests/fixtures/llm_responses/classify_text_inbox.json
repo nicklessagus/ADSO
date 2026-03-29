@@ -4,9 +4,9 @@
   "payload": {
     "frontmatter": {
       "title": "Nota sin clasificar",
-      "type": "draft",
+      "type": "idea",
       "tags": [],
-      "status": "pending-classification",
+      "status": "raw",
       "project": null,
       "section": null,
       "area": null,

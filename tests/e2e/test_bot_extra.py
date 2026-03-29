@@ -75,7 +75,7 @@ class TestBuildPreview:
             "tags": ["ml", "cnn"],
             "due_date": "2025-06-15",
         }
-        preview = build_preview(fm, "Body contenido aquí.", ["Nota A", "Nota B"])
+        preview = build_preview(fm, "Body contenido aquí.", [{"note_id": "nota-a", "title": "Nota A"}, {"note_id": "nota-b", "title": "Nota B"}])
         assert "Mi nota" in preview
         assert "task" in preview
         assert "01-Projects/tesis/datos" in preview
@@ -116,8 +116,8 @@ class TestEsc:
 
 class TestHasDestination:
 
-    def test_inbox_has_destination(self) -> None:
-        assert _has_destination({"type": "draft"})
+    def test_task_inbox_has_destination(self) -> None:
+        assert _has_destination({"type": "task"})
 
     def test_task_has_destination(self) -> None:
         assert _has_destination({"type": "task"})
