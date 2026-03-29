@@ -16,6 +16,7 @@ services:
       - CONFIG_PATH=/app/config.yaml
       - ANONYMIZED_TELEMETRY=false
       - HF_HOME=/app/data/hf_cache
+      - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
     healthcheck:
       test: ["CMD", "find", "/tmp/adso_heartbeat", "-mmin", "-2"]
       interval: 60s

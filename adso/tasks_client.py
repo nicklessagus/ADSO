@@ -60,7 +60,9 @@ class TasksClient:
             creds_path: Path al JSON de credenciales OAuth (client_secrets).
                 El token persistido se guarda en el mismo directorio como token_tasks.json.
         """
-        self._creds_path = Path(creds_path)
+        _p = Path(creds_path)
+        # Tolerar que se pase el directorio en vez del archivo JSON
+        self._creds_path = _p / "google-oauth.json" if _p.is_dir() else _p
         self._token_path = self._creds_path.parent / "token_tasks.json"
         self._service = None
         self._list_id: Optional[str] = None
