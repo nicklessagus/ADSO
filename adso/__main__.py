@@ -13,6 +13,8 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("chromadb").setLevel(logging.WARNING)
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.WARNING)
 
 from adso.bot import run_bot  # noqa: E402
 

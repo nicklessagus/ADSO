@@ -191,6 +191,9 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path) -> str:
     if fm.get("priority"):
         parts.append(f"Prioridad: {fm['priority']}")
 
+    if fm.get("scheduled"):
+        parts.append(f"Horario: {fm['scheduled']}")
+
     # Link obsidian:// a la nota (ruta absoluta URL-encoded)
     abs_path = str(note_path.resolve())
     encoded = quote(abs_path, safe="")
