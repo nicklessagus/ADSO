@@ -170,7 +170,7 @@ async def _classify_and_preview(
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn("Respuesta inesperada del LLM. Intentá de nuevo.")
         return
-    suggested_links: list[str] = []
+    suggested_links: list[dict] = []
 
     # Para texto libre y audio el body es siempre el texto original del usuario.
     # preserve_body extiende esto a imágenes/documentos cuando el texto viene
@@ -210,7 +210,7 @@ async def _classify_and_preview(
                 threshold=settings.links.similarity_threshold,
             )
             if similar:
-                suggested_links = [s.note_id for s in similar]
+                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
         except Exception as e:
             logger.warning("Error buscando links similares: %s", e)
 
@@ -238,7 +238,7 @@ async def _handle_capture(
     payload = result["payload"]
     fm = payload["frontmatter"]
     body = payload.get("body", "")
-    suggested_links: list[str] = []
+    suggested_links: list[dict] = []
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fm["date_created"] = now
@@ -256,7 +256,7 @@ async def _handle_capture(
                 threshold=settings.links.similarity_threshold,
             )
             if similar:
-                suggested_links = [s.note_id for s in similar]
+                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
         except Exception as e:
             logger.warning("Error buscando links similares: %s", e)
 
@@ -543,7 +543,7 @@ async def _handle_capture_from_callback(
 
     fm = payload["frontmatter"]
     body = payload.get("body", "")
-    suggested_links: list[str] = payload.get("suggested_links", [])
+    suggested_links: list[dict] = payload.get("suggested_links", [])
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fm.setdefault("date_created", now)
@@ -562,7 +562,7 @@ async def _handle_capture_from_callback(
                     threshold=settings.links.similarity_threshold,
                 )
                 if similar:
-                    suggested_links = [s.note_id for s in similar]
+                    suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
             except Exception as e:
                 logger.warning("Error buscando links similares en callback: %s", e)
         payload["suggested_links"] = suggested_links
@@ -639,8 +639,14 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 
     suggested_links = payload.get("suggested_links", [])
     if suggested_links:
-        wikilinks = " ".join(f"[[{link}]]" for link in suggested_links)
-        body = body.rstrip() + f"\n\n## Ver también\n\n{wikilinks}"
+        link_lines = []
+        for lnk in suggested_links:
+            note_id = lnk["note_id"]
+            title = lnk.get("title", "").strip()
+            slug = note_id.rsplit("/", 1)[-1]
+            label = title if title else slug
+            link_lines.append(f"- [[{slug}]] — {label}")
+        body = body.rstrip() + "\n\n## Ver también\n\n" + "\n".join(link_lines)
 
     resource_file = pending.get("_resource_file")
     if resource_file:
@@ -993,7 +999,7 @@ async def _classify_and_preview_arxiv(
     fm["date_modified"] = now
     fm["source"] = "telegram"
 
-    suggested_links: list[str] = []
+    suggested_links: list[dict] = []
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and metadata.get("abstract"):
         try:
@@ -1003,7 +1009,7 @@ async def _classify_and_preview_arxiv(
                 threshold=settings.links.similarity_threshold,
             )
             if similar:
-                suggested_links = [s.note_id for s in similar]
+                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
         except Exception as e:
             logger.warning("Error buscando links similares: %s", e)
 

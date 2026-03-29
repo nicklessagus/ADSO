@@ -711,7 +711,7 @@ candidates = await query_similar(
     n_results=config.links.max_suggestions,
     threshold=config.links.similarity_threshold,
 )
-suggested_links = [f"[[{c.note_id}]]" for c in candidates]
+suggested_links = [{"note_id": c.note_id, "title": c.metadata.get("title", "")} for c in candidates]
 ```
 
 **Uso para consultas RAG (Fase 7):**

@@ -70,7 +70,7 @@ def _esc(text: str) -> str:
 def build_preview(
     frontmatter: dict,
     body: str,
-    suggested_links: list[str],
+    suggested_links: list[dict],
 ) -> str:
     """Construye texto de preview para mostrar al usuario.
 
@@ -116,7 +116,8 @@ def build_preview(
         lines.append(f"<b>Fecha límite:</b> {fm['due_date']}")
 
     if suggested_links:
-        lines.append(f"\n<b>Links sugeridos:</b> {', '.join(suggested_links)}")
+        link_labels = [lnk.get("title") or lnk["note_id"] for lnk in suggested_links]
+        lines.append(f"\n<b>Links sugeridos:</b> {', '.join(_esc(l) for l in link_labels)}")
 
     snippet = body[:200].strip()
     if len(body) > 200:

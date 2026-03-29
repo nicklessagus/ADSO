@@ -735,16 +735,17 @@ status: active
 media_type: text
 ```
 
-Si hay links sugeridos, se listan en el preview:
+Si hay links sugeridos, se listan en el preview con sus títulos:
 ```
-Links sugeridos: [[paper-referencia-metodologia]] [[dataset-imagenet]]
+Links sugeridos: Paper referencia metodología, Dataset ImageNet
 ```
 
-Al confirmar, los links se escriben en el `.md` bajo `## Ver también`:
+Al confirmar, los links se escriben en el `.md` bajo `## Ver también` como lista con bullets. El wikilink usa solo el nombre corto del archivo (sin ruta) para que Obsidian lo resuelva correctamente aunque la nota se mueva. El título viene de la metadata de ChromaDB:
 ```markdown
 ## Ver también
 
-[[paper-referencia-metodologia]] [[dataset-imagenet]]
+- [[paper-referencia-metodologia]] — Paper referencia metodología
+- [[dataset-imagenet]] — Dataset ImageNet
 ```
 
 **Correcciones por texto libre:** si antes de confirmar el usuario manda texto ("el título debería ser X", "agregá el tag #python"), el bot interpreta el texto como instrucción, actualiza el frontmatter y regenera el preview. `[Reubicar]` es exclusivamente para cambiar el destino — cualquier otro campo se corrige por texto libre.
@@ -1040,7 +1041,7 @@ Bot pregunta: ¿Querés generar un informe descargable con esto?
 - `rag.max_results` — máximo de notas a incluir en el contexto del LLM
 
 ### Links automáticos al escribir
-Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere `[[wikilinks]]` en el preview antes de confirmar. Al confirmar, los links sugeridos se escriben automáticamente en el cuerpo de la nota bajo una sección `## Ver también`.
+Al crear una nota nueva, el bot busca en ChromaDB las notas más similares del vault completo (sin importar proyecto) y sugiere links en el preview (con título de la nota) antes de confirmar. Al confirmar, los links sugeridos se escriben automáticamente en el cuerpo de la nota bajo una sección `## Ver también` como lista con bullets: wikilink por nombre corto + título de la nota. El título se extrae de la metadata de ChromaDB (campo `title`), sin necesidad de leer archivos del vault.
 
 Comportamiento configurable:
 - `links.similarity_threshold` — umbral mínimo de similitud para sugerir un link (en `config.yaml`)
