@@ -270,6 +270,20 @@ _TYPE_TAGS = frozenset({
     "paper", "document", "audio", "image", "link",
 })
 
+# Tags that are temporal expressions — not useful as long-term labels
+_TEMPORAL_TAGS = frozenset({
+    "lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "hoy", "manana", "today", "tomorrow", "proxima-semana", "next-week",
+})
+
+# Regex for stripping markdown heading markers and common label prefixes from titles
+_TITLE_CLEANUP_RE = re.compile(
+    r'^#+\s*'                           # markdown headings: ##, ###, etc.
+    r'|^(tarea|task|nota|note|recordar|reminder|idea)\s*:\s*',
+    re.IGNORECASE,
+)
+
 
 def _to_kebab(tag: str) -> str:
     """Normalize a tag to kebab-case (lowercase, spaces→hyphens, strip invalid chars).
@@ -291,8 +305,13 @@ def _validate_capture_payload(payload: dict) -> None:
     if not isinstance(fm, dict):
         raise LLMResponseError("capture.payload.frontmatter missing or not an object")
 
-    if not fm.get("title") or fm.get("title") == "Sin título":
+    title = fm.get("title", "")
+    # Strip markdown heading markers and label prefixes (e.g. "# Tarea: foo" → "foo")
+    title = _TITLE_CLEANUP_RE.sub("", title).strip()
+    if not title or title == "Sin título":
         fm["title"] = ""  # will be filled with content fallback in classify()
+    else:
+        fm["title"] = title
 
     note_type = fm.get("type")
     if note_type not in VALID_TYPES:
@@ -314,12 +333,12 @@ def _validate_capture_payload(payload: dict) -> None:
     if priority is not None and priority not in VALID_PRIORITY:
         raise LLMResponseError(f"Invalid priority: {priority!r}")
 
-    # Normalize tags to kebab-case and remove type-duplicating tags
+    # Normalize tags to kebab-case; remove type-duplicating and temporal tags
     tags = fm.get("tags")
     if isinstance(tags, list):
         fm["tags"] = [
             t for t in (_to_kebab(str(tag)) for tag in tags)
-            if t and t not in _TYPE_TAGS
+            if t and t not in _TYPE_TAGS and t not in _TEMPORAL_TAGS
         ]
     elif tags is None:
         fm["tags"] = []

@@ -200,6 +200,12 @@ async def _classify_and_preview(
     if fm.get("type") != "task":
         fm.pop("due_date", None)
         fm.pop("scheduled", None)
+    else:
+        # Override LLM date with local parser — more reliable for relative expressions
+        # ("el martes", "mañana", etc.) because the LLM often gets weekday arithmetic wrong.
+        local_date = _parse_date_from_text(text)
+        if local_date:
+            fm["due_date"] = local_date
 
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body:
