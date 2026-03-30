@@ -55,6 +55,7 @@ from adso.constants import (
     CB_TRANSCRIPT_OK,
     CB_VISION,
 )
+from adso.llm_client import extract_original_from_degraded
 from adso.vault_search import find_by_property
 
 
@@ -119,8 +120,9 @@ def build_preview(
         link_labels = [lnk.get("title") or lnk["note_id"] for lnk in suggested_links]
         lines.append(f"\n<b>Links sugeridos:</b> {', '.join(_esc(l) for l in link_labels)}")
 
-    snippet = body[:200].strip()
-    if len(body) > 200:
+    clean_body = extract_original_from_degraded(body)
+    snippet = clean_body[:200].strip()
+    if len(clean_body) > 200:
         snippet += "..."
     lines.append(f"\n<code>{_esc(snippet)}</code>")
 

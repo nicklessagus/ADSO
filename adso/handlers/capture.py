@@ -24,7 +24,7 @@ from adso.keyboards import (
     build_destination_keyboard,
     build_preview,
 )
-from adso.llm_client import VALID_TYPES, classify
+from adso.llm_client import VALID_TYPES, classify, extract_original_from_degraded
 from adso.vault_search import find_by_property
 from adso.tasks_client import TasksClient, build_task_notes
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
@@ -614,9 +614,11 @@ async def _push_task_safe(
     fm: dict,
     note_path: Path,
     vault_path: Path,
+    body: str = "",
 ) -> None:
     """Crea la tarea en Google Tasks de forma segura (no propaga errores)."""
-    notes = build_task_notes(fm, note_path, vault_path)
+    description = extract_original_from_degraded(body).strip() if body else ""
+    notes = build_task_notes(fm, note_path, vault_path, description=description)
     await tasks_client.create_task(
         title=fm.get("title", "Sin título"),
         notes=notes,
@@ -674,7 +676,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
         if tasks_client:
             asyncio.create_task(
-                _push_task_safe(tasks_client, fm, path, vault_path)
+                _push_task_safe(tasks_client, fm, path, vault_path, body=body)
             )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")

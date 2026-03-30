@@ -165,10 +165,11 @@ class TasksClient:
 # Helper de contenido
 # ---------------------------------------------------------------------------
 
-def build_task_notes(fm: dict, note_path: Path, vault_path: Path) -> str:
+def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: str = "") -> str:
     """Construye el campo notes para Google Tasks.
 
     Formato:
+        <descripción original del usuario>
         Proyecto: X  (o Área: X si no hay proyecto)
         Prioridad: high/medium/low
         obsidian://open?path=...
@@ -177,11 +178,16 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path) -> str:
         fm: Frontmatter de la nota guardada.
         note_path: Path absoluto de la nota.
         vault_path: Path raíz del vault (para el link obsidian://).
+        description: Texto original del usuario (body limpio, sin callouts).
 
     Returns:
         String listo para el campo notes de Google Tasks.
     """
     parts: list[str] = []
+
+    if description:
+        parts.append(description)
+        parts.append("")  # línea en blanco separadora
 
     if fm.get("project"):
         parts.append(f"Proyecto: {fm['project']}")
