@@ -158,7 +158,15 @@ Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bo
 `[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
 
 ### Prioridad y fecha inferidas
-El LLM infiere `priority` y `due_date` del lenguaje del mensaje para tareas. El prompt incluye la fecha actual (UTC) para que el LLM resuelva expresiones relativas ("el viernes", "mañana") correctamente. Si no hay señal de prioridad, usa `medium`. Ambos campos aparecen en el preview y el usuario puede corregirlos con `[Corregir]`.
+El LLM infiere `priority` y `due_date` del lenguaje del mensaje para tareas. `priority` se usa tal como la devuelve el LLM; si no hay señal, usa `medium`.
+
+`due_date` se resuelve en dos pasos: el LLM propone una fecha (con el prompt incluyendo la fecha UTC actual en inglés y español), pero luego `_classify_and_preview` corre `_parse_date_from_text()` sobre el texto original y overridea el resultado si encuentra una expresión válida. El parser local es determinístico y más fiable que el LLM para expresiones relativas en español ("el viernes", "mañana", "el próximo lunes"). El LLM tiene problemas con la aritmética de días de la semana, especialmente cuando el UTC y la zona horaria del usuario difieren.
+
+Ambos campos aparecen en el preview y el usuario puede corregirlos con `[Corregir]`.
+
+**Sanitización del frontmatter LLM** (`_validate_capture_payload` en `llm_client.py`):
+- **Título:** se stripean heading markers de markdown (`#`, `##`) y prefijos label (`Tarea:`, `Task:`, `Nota:`, `Recordar:`) que el LLM a veces incluye.
+- **Tags:** se filtran días de la semana (lunes…domingo, monday…sunday) y expresiones temporales (hoy, mañana, proxima-semana) que no son etiquetas semánticas útiles. También se filtran tags que duplican el `type` (task, note, idea, etc.).
 
 ---
 
