@@ -82,7 +82,7 @@ MAX_SLUG_LENGTH = 60
 
 def _now_iso() -> str:
     """Retorna timestamp actual en ISO 8601."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _parse_date_value(value: str) -> "date | datetime | str":
@@ -116,7 +116,7 @@ def _make_filename(title: str, date_val: "Optional[str | date | datetime]" = Non
         else:
             prefix = str(date_val)[:10]  # YYYY-MM-DD desde string ISO
     else:
-        prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        prefix = datetime.now().strftime("%Y-%m-%d")
 
     slug_text = slugify(title, max_length=MAX_SLUG_LENGTH, word_boundary=True)
     if not slug_text:

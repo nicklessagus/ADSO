@@ -407,7 +407,7 @@ def build_system_prompt(
         System prompt as a string.
     """
     from datetime import datetime, timezone
-    _now = datetime.now(timezone.utc)
+    _now = datetime.now()
     today = _now.strftime("%Y-%m-%d")
     weekday = _now.strftime("%A")  # e.g. "Sunday"
     _ES_DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]

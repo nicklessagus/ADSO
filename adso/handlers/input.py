@@ -122,24 +122,19 @@ async def handle_text(
     # Corrección de preview pendiente (pending_note)
     if context.user_data.get("pending_note"):
         pn = context.user_data["pending_note"]
-        fm = pn["payload"]["frontmatter"]
-        if fm.get("type") == "task":
-            if pn.get("awaiting_correction"):
-                from adso.handlers.capture import _handle_text_correction
-                await _handle_text_correction(
-                    update, context, text, pn,
-                    locked_msg_id=pn.get("msg_id"),
-                )
-            else:
-                ids = context.user_data.setdefault("block_msg_ids", [])
-                ids.append(update.message.message_id)
-                sent = await update.message.reply_text(
-                    "Usar botón Corregir para modificar la tarea."
-                )
-                ids.append(sent.message_id)
-        else:
+        if pn.get("awaiting_correction"):
             from adso.handlers.capture import _handle_text_correction
-            await _handle_text_correction(update, context, text, pn)
+            await _handle_text_correction(
+                update, context, text, pn,
+                locked_msg_id=pn.get("msg_id"),
+            )
+        else:
+            ids = context.user_data.setdefault("block_msg_ids", [])
+            ids.append(update.message.message_id)
+            sent = await update.message.reply_text(
+                "Usar botón Corregir para modificar."
+            )
+            ids.append(sent.message_id)
         return
 
     # Bloquear si hay cualquier teclado pendiente de resolución

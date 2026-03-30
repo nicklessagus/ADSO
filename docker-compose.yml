@@ -12,6 +12,7 @@ services:
       - adso-data:/app/data
       - ./config.yaml:/app/config.yaml:ro
     environment:
+      - TZ=America/Argentina/Buenos_Aires
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config.yaml
       - ANONYMIZED_TELEMETRY=false

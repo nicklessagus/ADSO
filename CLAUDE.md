@@ -152,8 +152,7 @@ Los tipos `project-index` y `area-index` se generan automáticamente al crear pr
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard.
 
-- **Notas** (`reference`, `idea`): `[Confirmar]` `[Reubicar]` `[Cancelar]`. El usuario puede mandar texto libre en cualquier momento para corregir título, prioridad, tags o tipo — el bot actualiza el frontmatter y regenera el preview.
-- **Tareas** (`task`): primera fila `[Cancelar]` `[Corregir]` `[Confirmar]`, segunda fila `[Reubicar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar fecha límite (lenguaje natural), prioridad y título.
+- **Notas y tareas** (`reference`, `idea`, `task`): primera fila `[Cancelar]` `[Corregir]` `[Confirmar]`, segunda fila `[Reubicar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar título, prioridad, tags y tipo; para tareas también fecha límite en lenguaje natural.
 
 `[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
 
@@ -204,10 +203,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **Resultado OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` — dos filas; Gemini Vision descarta el OCR y reprocesa |
 | **Resultado Gemini Vision** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
 | **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` → al confirmar: `[Cancelar]` `[Tarea]` `[Nota]` |
-| **Captura nota** (destino claro) | `[Cancelar]` `[Reubicar]` `[Confirmar]` |
-| **Captura nota** (sin destino) | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` |
-| **Captura tarea** (destino claro) | `[Cancelar]` `[Corregir]` `[Confirmar]` / `[Reubicar]` — dos filas |
-| **Captura tarea** (sin destino) | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` `[Corregir]` |
+| **Captura nota o tarea** | `[Cancelar]` `[Corregir]` `[Confirmar]` / `[Reubicar]` — dos filas; igual para notas y tareas, con o sin destino |
 | **Reubicar destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
 | **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
 | **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |

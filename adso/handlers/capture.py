@@ -107,7 +107,7 @@ async def _classify_and_preview(
     if mode == "degraded":
         payload = result["payload"]
         fm = payload["frontmatter"]
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         fm["date_created"] = now
         fm["date_modified"] = now
         fm["source"] = "telegram"
@@ -181,7 +181,7 @@ async def _classify_and_preview(
     else:
         body = payload.get("body", "")
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     fm["date_created"] = now
     fm["date_modified"] = now
     fm["source"] = "telegram"
@@ -246,7 +246,7 @@ async def _handle_capture(
     body = payload.get("body", "")
     suggested_links: list[dict] = []
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     fm["date_created"] = now
     fm["date_modified"] = now
     fm["source"] = "telegram"
@@ -493,7 +493,7 @@ async def _handle_text_correction(
     else:
         fm["title"] = text.strip()
 
-    fm["date_modified"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    fm["date_modified"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])
@@ -551,7 +551,7 @@ async def _handle_capture_from_callback(
     body = payload.get("body", "")
     suggested_links: list[dict] = payload.get("suggested_links", [])
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     fm.setdefault("date_created", now)
     fm.setdefault("date_modified", now)
     fm.setdefault("source", "telegram")
@@ -997,7 +997,7 @@ async def _classify_and_preview_arxiv(
     payload["body"] = body
     payload["frontmatter"] = fm
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     fm["date_created"] = now
     fm["date_modified"] = now
     fm["source"] = "telegram"

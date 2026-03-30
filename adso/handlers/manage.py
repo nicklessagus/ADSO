@@ -145,7 +145,7 @@ async def _cb_manage_confirm(
             body = (
                 f"# {fm['title']}\n\n"
                 f"## Descripción\n{params['description']}\n\n"
-                f"## Secciones\n\n## Estado\n- Creado: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n"
+                f"## Secciones\n\n## Estado\n- Creado: {datetime.now().strftime('%Y-%m-%d')}\n"
             )
             await create_note(fm, body, vault_path)
             await query.edit_message_text(f"Proyecto '{params['name']}' creado.")
