@@ -291,8 +291,8 @@ def _validate_capture_payload(payload: dict) -> None:
     if not isinstance(fm, dict):
         raise LLMResponseError("capture.payload.frontmatter missing or not an object")
 
-    if not fm.get("title"):
-        fm["title"] = "Sin título"  # small models occasionally omit the title
+    if not fm.get("title") or fm.get("title") == "Sin título":
+        fm["title"] = ""  # will be filled with content fallback in classify()
 
     note_type = fm.get("type")
     if note_type not in VALID_TYPES:
@@ -323,6 +323,16 @@ def _validate_capture_payload(payload: dict) -> None:
         ]
     elif tags is None:
         fm["tags"] = []
+
+    # Sanitize due_date and scheduled: must be valid ISO 8601, else discard
+    for date_field in ("due_date", "scheduled"):
+        val = fm.get(date_field)
+        if val is not None:
+            try:
+                from datetime import datetime as _dt
+                _dt.fromisoformat(str(val))
+            except (ValueError, TypeError):
+                fm[date_field] = None
 
     if "body" not in payload:
         payload["body"] = ""  # small models occasionally omit the body
@@ -560,6 +570,12 @@ async def classify(
             # Flag de desambiguación
             confidence = validated.get("confidence", 0.5)
             validated["needs_disambiguation"] = confidence < disambiguation_threshold
+
+            # Ensure title is populated (LLM may return empty or omit it)
+            if validated.get("mode") == "capture":
+                fm = validated.get("payload", {}).get("frontmatter", {})
+                if not fm.get("title"):
+                    fm["title"] = content[:80].strip() or "Sin título"
 
             return validated
 

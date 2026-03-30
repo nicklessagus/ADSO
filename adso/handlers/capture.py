@@ -639,6 +639,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     fm = payload["frontmatter"]
     body = payload.get("body", "")
 
+    original_body = body  # body limpio antes de agregar Ver también (para Tasks)
     suggested_links = payload.get("suggested_links", [])
     if suggested_links:
         link_lines = []
@@ -676,7 +677,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
         if tasks_client:
             asyncio.create_task(
-                _push_task_safe(tasks_client, fm, path, vault_path, body=body)
+                _push_task_safe(tasks_client, fm, path, vault_path, body=original_body)
             )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")

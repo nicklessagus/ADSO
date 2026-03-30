@@ -101,7 +101,7 @@ class TestInvalidResponse:
             },
         }
         result = validate_llm_response(data)
-        assert result["payload"]["frontmatter"]["title"] == "Sin título"
+        assert result["payload"]["frontmatter"]["title"] == ""
 
 
     def test_capture_invalid_type(self) -> None:
