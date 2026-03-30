@@ -106,7 +106,9 @@ async def create_note(
    - `type: reference` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: reference` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
    - `type: reference` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`)
-   - `type: task` → `{vault_path}/02-Areas/{area}/`
+   - `type: task` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
+   - `type: task` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
+   - `type: task` sin `project` ni `area` → `{vault_path}/00-Inbox/`
    - `type: idea` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: idea` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
    - `type: idea` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones)

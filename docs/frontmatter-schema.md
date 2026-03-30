@@ -97,7 +97,7 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
-| `task` | `02-Areas/{area}/` | Tarea (el área determina la carpeta destino; con `due_date`/`scheduled` opcionales → Google Calendar) |
+| `task` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Tarea (proyecto > área > Inbox; con `due_date`/`scheduled` opcionales → Google Calendar) |
 | `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
 
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
@@ -185,14 +185,14 @@ El cron de reclasificación extrae el contenido original del callout antes de en
 type: task
 status: pending                         # Text enum — pending | in-progress | done
 priority: medium                        # Text enum — low | medium | high — inferido o explícito
-area: investigacion                     # Text plano — determina la carpeta destino (02-Areas/{area}/) — inferido por LLM
-project: tesis                          # Text plano — opcional, máximo un proyecto. Solo metadata — no cambia ubicación ni lista destino
+project: tesis                          # Text plano — opcional. Si presente, la tarea va a 01-Projects/{project}/ (gana sobre area)
+area: investigacion                     # Text plano — carpeta destino si no hay proyecto (02-Areas/{area}/)
 due_date: 2025-02-01                    # Date — sin comillas, ISO 8601 (solo fecha)
 scheduled: 2025-01-28T10:00:00         # Date & time — sin comillas, ISO 8601
 related: ["[[otra-nota]]"]             # links siempre entre comillas dobles dentro del array
 ---
 ```
-> Las tasks se ubican en `02-Areas/{area}/`. El campo `project` es metadata, no determina la carpeta destino.
+> Routing de tasks: `project` gana sobre `area`. Con proyecto → `01-Projects/{proyecto}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin ninguno → `00-Inbox/`.
 > Todas las tasks se sincronizan a la lista única `ADSO` en Google Tasks.
 > Si la tarea tiene fecha/hora explícita, va además a Google Calendar.
 > Si no tiene fecha, va solo a Google Tasks.
