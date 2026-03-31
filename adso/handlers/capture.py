@@ -491,7 +491,22 @@ async def _handle_text_correction(
         elif new_type in ("idea",):
             fm["type"] = "idea"
     else:
-        fm["title"] = text.strip()
+        # Solo usar como título si es texto corto de una línea.
+        # Texto largo o multi-línea probablemente sea contenido enviado por error
+        # en modo corrección — en ese caso avisar sin modificar nada.
+        stripped = text.strip()
+        if len(stripped) <= 200 and "\n" not in stripped:
+            fm["title"] = stripped
+        else:
+            pending["awaiting_correction"] = True
+            sent = await update.message.reply_text(
+                "Corrección no reconocida. Usar prefijos: <code>titulo</code>, "
+                "<code>tag</code>, <code>tipo</code>, <code>prioridad</code>.",
+                parse_mode="HTML",
+            )
+            pending["error_msg_id"] = sent.message_id
+            pending["error_user_msg_id"] = update.message.message_id
+            return
 
     fm["date_modified"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -512,6 +527,16 @@ async def _handle_text_correction(
                 parse_mode="HTML",
             )
             await update.message.delete()
+            for key in ("error_msg_id", "error_user_msg_id"):
+                mid = pending.pop(key, None)
+                if mid:
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=update.message.chat_id,
+                            message_id=mid,
+                        )
+                    except Exception:
+                        pass
         except Exception:
             # Si el edit falla, al menos enviar el preview actualizado
             await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")

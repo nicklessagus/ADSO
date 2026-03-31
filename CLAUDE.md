@@ -154,6 +154,16 @@ Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bo
 
 - **Notas y tareas** (`reference`, `idea`, `task`): primera fila `[Cancelar]` `[Corregir]` `[Confirmar]`, segunda fila `[Reubicar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar título, prioridad, tags y tipo; para tareas también fecha límite en lenguaje natural.
 
+**Prefijos válidos en modo corrección** (`_handle_text_correction` en `capture.py`):
+- `titulo <texto>` / `título <texto>` — reemplaza el título
+- `prioridad alta|media|baja` — cambia prioridad
+- `tag <nombre>` / `agregar tag <nombre>` — añade un tag
+- `tipo reference|task|idea` — cambia el tipo
+- Sin prefijo y texto ≤ 200 chars sin saltos de línea → se usa como nuevo título (fallback)
+- Sin prefijo y texto largo o multi-línea → se rechaza con mensaje de ayuda (`error_msg_id` guardado en `pending`); el lock se mantiene activo para que el usuario reintente. Cuando la siguiente corrección es válida, ese mensaje de error se borra junto con el mensaje del usuario, quedando solo el preview actualizado.
+
+**Failsafe:** `/reset` cancela cualquier operación pendiente y limpia todo el estado (`pending_note`, `pending_capture_ctx`, `block_msg_ids`, etc.). Funciona en cualquier momento, sin confirmación. Implementado en `handle_reset` (`commands.py`).
+
 `[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
 
 ### Prioridad y fecha inferidas
@@ -213,6 +223,8 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 | **`/reporte` — tipo** | `[Proyecto/Área/Inbox]` `[Ideas]` / `[Salud del vault]` `[Cola de lectura]` / `[Cancelar]` — tres filas |
 | **`/reporte` — categoría** | `[Proyectos]` `[Áreas]` / `[Cancelar]` `[Inbox\|Todas\|Toda la cola]` — dos filas |
 | **`/reporte` — lista de items** | botones de items en pares / `[Cancelar]` `[← Volver]` — última fila fija |
+
+**Failsafe global:** `/reset` cancela cualquier estado pendiente (teclados, correcciones, capturas) y vuelve al estado inicial. Funciona siempre, sin confirmación.
 
 ### Desambiguación de intención
 Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` es Fase 7 — por ahora responde "disponible en próxima versión".

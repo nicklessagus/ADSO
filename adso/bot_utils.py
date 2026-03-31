@@ -134,10 +134,11 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
     if not keys:
         keys = (
             "pending_note", "pending_operation", "original_content",
-            "pending_raw_content", "pending_transcript",
+            "pending_raw_content", "pending_capture_ctx", "pending_transcript",
             "pending_extraction", "pending_description",
             "pending_read_status", "pending_fallback_pdf",
             "pending_arxiv", "manage_missing_fields", "pending_report",
+            "block_msg_ids",
         )
 
     for key in keys:

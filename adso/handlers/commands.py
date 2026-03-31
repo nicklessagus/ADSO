@@ -1,4 +1,4 @@
-"""Handlers de comandos de Telegram: /start, /status, /clasificar, /reporte, /help."""
+"""Handlers de comandos de Telegram: /start, /status, /clasificar, /reporte, /reset, /help."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
+from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_CLASIFICAR_INBOX
 from adso.keyboards import _esc, build_capture_keyboard, build_preview
@@ -27,6 +27,7 @@ _HELP_TEXT = """\
 /reporte_full — Igual a /reporte pero incluye el contenido completo de cada nota
 /clasificar — Clasificá notas de Inbox sin destino asignado
 /status — Estado del sistema (vault, embeddings, inbox)
+/reset — Cancelar cualquier operación pendiente y volver al estado inicial
 /start — Verificar que el bot está activo
 /help — Mostrar este mensaje
 """
@@ -50,6 +51,23 @@ async def handle_start(
     await update.message.reply_text(
         "ADSO activo. Mandame texto y lo clasifico para tu vault."
     )
+
+
+@authorized
+async def handle_reset(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /reset — cancela cualquier operación pendiente y limpia el estado.
+
+    Funciona en cualquier momento, incluso durante correcciones o teclados pendientes.
+    No requiere confirmación. No escribe ni borra nada del vault.
+    """
+    _cleanup_pending(context)
+    context.user_data.pop("pending_capture_ctx", None)
+    context.user_data.pop("block_msg_ids", None)
+    context.user_data.pop("clasificar_inbox_path", None)
+    await update.message.reply_text("Estado reiniciado. Listo para nueva captura.")
 
 
 @authorized

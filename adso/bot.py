@@ -22,7 +22,7 @@ from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.callbacks import handle_callback
 from adso.tasks_client import TasksClient
-from adso.handlers.commands import handle_clasificar, handle_help, handle_start, handle_status
+from adso.handlers.commands import handle_clasificar, handle_help, handle_reset, handle_start, handle_status
 from adso.handlers.reports import handle_reporte_command, handle_reporte_full_command
 from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
@@ -70,6 +70,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("help", handle_help))
     app.add_handler(CommandHandler("status", handle_status))
+    app.add_handler(CommandHandler("reset", handle_reset))
     app.add_handler(CommandHandler("clasificar", handle_clasificar))
     app.add_handler(CommandHandler("reporte", handle_reporte_command))
     app.add_handler(CommandHandler("reporte_full", handle_reporte_full_command))

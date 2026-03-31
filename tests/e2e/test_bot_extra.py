@@ -150,9 +150,10 @@ class TestKeyboards:
     def test_capture_keyboard_without_destination(self) -> None:
         kb = build_capture_keyboard({}, False)
         texts = [b.text for row in kb.inline_keyboard for b in row]
-        assert "Inbox" in texts
-        assert "Elegir área" in texts
-        assert "Elegir proyecto" in texts
+        assert "Cancelar" in texts
+        assert "Corregir" in texts
+        assert "Confirmar" in texts
+        assert "Reubicar" in texts
 
     def test_destination_keyboard(self) -> None:
         kb = build_destination_keyboard()
@@ -255,6 +256,8 @@ class TestTextCorrectionExtra:
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_type_correction(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
         update = make_update(text="tipo task")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
@@ -289,6 +292,8 @@ class TestTextCorrectionExtra:
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_type_idea_correction(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
         update = make_update(text="tipo idea")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
@@ -299,6 +304,8 @@ class TestTextCorrectionExtra:
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_priority_media(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
         update = make_update(text="prioridad media")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
@@ -309,6 +316,8 @@ class TestTextCorrectionExtra:
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_priority_baja(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
         update = make_update(text="prioridad baja")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
@@ -319,6 +328,8 @@ class TestTextCorrectionExtra:
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_default_correction_sets_title(self, mock_classify, make_update, mock_context) -> None:
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
         update = make_update(text="Nuevo título random")
         await handle_text(update, mock_context)
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]

@@ -137,6 +137,8 @@ class TestTextCorrection:
     ) -> None:
         """Con preview pendiente, 'título X' actualiza el título."""
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
 
         update = make_update(text="título Nuevo título corregido")
         await handle_text(update, mock_context)
@@ -152,6 +154,8 @@ class TestTextCorrection:
     ) -> None:
         """Con preview pendiente, 'prioridad alta' cambia priority."""
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
 
         update = make_update(text="prioridad alta")
         await handle_text(update, mock_context)
@@ -167,6 +171,8 @@ class TestTextCorrection:
     ) -> None:
         """Con preview pendiente, 'tag X' agrega tag."""
         _setup_pending_note(mock_context)
+        mock_context.user_data["pending_note"]["awaiting_correction"] = True
+        mock_context.user_data["pending_note"]["msg_id"] = 99
 
         update = make_update(text="agregar tag deep-learning")
         await handle_text(update, mock_context)
