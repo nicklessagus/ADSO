@@ -138,7 +138,7 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_extraction", "pending_description",
             "pending_read_status", "pending_fallback_pdf",
             "pending_arxiv", "manage_missing_fields", "pending_report",
-            "block_msg_ids",
+            "block_msg_ids", "clasificar_inbox_path",
         )
 
     for key in keys:

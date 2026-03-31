@@ -498,7 +498,6 @@ async def _handle_text_correction(
         if len(stripped) <= 200 and "\n" not in stripped:
             fm["title"] = stripped
         else:
-            pending["awaiting_correction"] = True
             sent = await update.message.reply_text(
                 "Corrección no reconocida. Usar prefijos: <code>titulo</code>, "
                 "<code>tag</code>, <code>tipo</code>, <code>prioridad</code>.",
@@ -761,7 +760,6 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
     _cleanup_pending(context)
-    context.user_data.pop("clasificar_inbox_path", None)
     await query.edit_message_text("Cancelado.")
 
 

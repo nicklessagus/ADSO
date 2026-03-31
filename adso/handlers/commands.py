@@ -64,9 +64,6 @@ async def handle_reset(
     No requiere confirmación. No escribe ni borra nada del vault.
     """
     _cleanup_pending(context)
-    context.user_data.pop("pending_capture_ctx", None)
-    context.user_data.pop("block_msg_ids", None)
-    context.user_data.pop("clasificar_inbox_path", None)
     await update.message.reply_text("Estado reiniciado. Listo para nueva captura.")
 
 
