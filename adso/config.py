@@ -93,6 +93,11 @@ class LlmConfig:
 
 
 @dataclass
+class WatcherConfig:
+    debug: bool = False
+
+
+@dataclass
 class WeeklyReportConfig:
     enabled: bool = True
     day: str = "friday"
@@ -142,6 +147,7 @@ class Settings:
     documents: DocumentsConfig = field(default_factory=DocumentsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     weekly_report: WeeklyReportConfig = field(default_factory=WeeklyReportConfig)
+    watcher: WatcherConfig = field(default_factory=WatcherConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +314,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         documents=_build_section(DocumentsConfig, raw.get("documents")),
         llm=_build_section(LlmConfig, raw.get("llm")),
         weekly_report=_build_weekly_report(raw.get("weekly_report")),
+        watcher=_build_section(WatcherConfig, raw.get("watcher")),
     )
 
     _validate_types(settings)

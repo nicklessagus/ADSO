@@ -45,7 +45,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Infraestructura | Docker + docker-compose en Raspberry Pi 4 (4GB RAM) |
 | Calendar / Tasks | Google Calendar API v3 + Google Tasks API *(Fase 6 — diferida)* |
 | Backup | Git (repo privado en GitHub) |
-| Sync | Syncthing send-only desde RPi4 (clientes read-only) + Git (backup/DR) |
+| Sync | Syncthing bidireccional + Git (backup/DR). `VaultWatcher` re-embeds cambios externos automáticamente |
 
 ## Documentación
 

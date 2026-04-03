@@ -112,6 +112,12 @@ weekly_report:
     stale_ideas: true          # ideas con status: raw hace más de stale_idea_days
     paper_suggestion: true     # sugerencia de paper a leer basada en similitud con actividad reciente
   stale_idea_days: 60          # días sin actividad para considerar una idea estancada
+
+# ─── Watcher de vault ────────────────────────────────────────────────────────
+watcher:
+  debug: false                # true: notifica por Telegram cada cambio externo detectado en el vault
+                              # útil para verificar que el watcher funciona durante testing
+                              # en producción dejar en false (los cambios se reindexan silenciosamente)
 ```
 
 ---

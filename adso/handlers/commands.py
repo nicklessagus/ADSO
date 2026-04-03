@@ -15,6 +15,7 @@ from adso.keyboards import _esc, build_capture_keyboard, build_preview
 from adso.llm_client import classify, extract_original_from_degraded
 from adso.security import authorized
 from adso.vault_search import find_by_property
+from adso.vault_watcher import VaultWatcher, WatcherStats
 from adso.vault_writer import GitBackup, read_note
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,28 @@ async def handle_reset(
     await update.message.reply_text("Estado reiniciado. Listo para nueva captura.")
 
 
+def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
+    """Genera las líneas de estado del VaultWatcher para /status."""
+    if watcher is None:
+        return [f"<b>Watcher vault:</b> no iniciado"]
+
+    stats: WatcherStats = watcher.stats
+    label = "activo · debug" if stats.debug else "activo"
+    lines = [f"<b>Watcher vault:</b> {label}"]
+
+    if stats.last_event_at is None:
+        lines.append("  Sin eventos desde el inicio")
+    else:
+        ts = stats.last_event_at.strftime("%H:%M")
+        lines.append(f"  Último evento: {ts}")
+        if stats.conflicts_detected:
+            lines.append(f"  Conflictos detectados: {stats.conflicts_detected}")
+        if stats.debug and stats.changes_detected:
+            lines.append(f"  Cambios externos: {stats.changes_detected}")
+
+    return lines
+
+
 @authorized
 async def handle_status(
     update: Update,
@@ -106,12 +129,16 @@ async def handle_status(
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     backup_status = "activo" if git_backup else "no configurado"
 
+    watcher: Optional[VaultWatcher] = context.bot_data.get("vault_watcher")
+    watcher_lines = _format_watcher_status(watcher)
+
     lines = [
         "<b>ADSO — Estado</b>",
         "",
         f"<b>Modelo LLM:</b> {llm_model}",
         f"<b>Embeddings:</b> {embeddings_status}",
         f"<b>Git backup:</b> {backup_status}",
+        *watcher_lines,
         "",
         f"<b>Notas en vault:</b> {total_notes}",
         f"<b>En inbox:</b> {inbox_count}",

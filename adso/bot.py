@@ -18,6 +18,11 @@ from telegram.ext import (
     filters,
 )
 
+import asyncio
+import logging
+
+import frontmatter as fm_lib
+
 from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.callbacks import handle_callback
@@ -25,8 +30,12 @@ from adso.tasks_client import TasksClient
 from adso.handlers.commands import handle_clasificar, handle_help, handle_reset, handle_start, handle_status
 from adso.handlers.reports import handle_reporte_command, handle_reporte_full_command
 from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
+from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
+from adso.vault_watcher import VaultWatcher
 from adso.vault_writer import GitBackup, ensure_vault_structure, seed_vault
+
+_bot_logger = logging.getLogger(__name__)
 
 
 async def _post_init(app: Application) -> None:
@@ -35,8 +44,43 @@ async def _post_init(app: Application) -> None:
     await ensure_vault_structure(settings.vault_path)
     await seed_vault(settings.vault_path, settings.vault_seed)
 
+    embeddings: EmbeddingsClient = app.bot_data["embeddings"]
+    vault_path = settings.vault_path
+
+    async def _reindex_external_note(path: Path) -> None:
+        """Lee una nota modificada externamente y actualiza su embedding."""
+        try:
+            raw = await asyncio.to_thread(path.read_text, "utf-8")
+            post = fm_lib.loads(raw)
+            if not post.metadata:
+                return
+            body = post.content.strip()
+            if not body:
+                return
+            await _index_note_safe(embeddings, path, body, dict(post.metadata), vault_path)
+            _bot_logger.info("Reindex externo completado: %s", path)
+        except Exception as exc:
+            _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
+
+    watcher = VaultWatcher(
+        vault_path=vault_path,
+        bot=app.bot,
+        chat_id=settings.telegram_allowed_user_id,
+        debug=settings.watcher.debug,
+        on_external_change=_reindex_external_note,
+    )
+    await watcher.start()
+    app.bot_data["vault_watcher"] = watcher
+
     import logging
     logging.getLogger(__name__).info("ADSO iniciando — vault en %s", settings.vault_path)
+
+
+async def _post_shutdown(app: Application) -> None:
+    """Limpieza async ejecutada por PTB al detener el bot."""
+    watcher: Optional[VaultWatcher] = app.bot_data.get("vault_watcher")
+    if watcher:
+        await watcher.stop()
 
 
 def create_application(settings: Optional[Settings] = None) -> Application:
@@ -51,7 +95,13 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     if settings is None:
         settings = load_settings()
 
-    app = Application.builder().token(settings.telegram_token).post_init(_post_init).build()
+    app = (
+        Application.builder()
+        .token(settings.telegram_token)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
 
     # Bot data compartida
     app.bot_data["settings"] = settings

@@ -1,8 +1,10 @@
 COMPOSE := docker compose -f ~/docker/ADSO/docker-compose.yml
+DEPLOY_DIR := ~/docker/ADSO
 
 .PHONY: deploy stop restart logs status shell prune
 
 deploy:
+	cp config.yaml $(DEPLOY_DIR)/config.yaml
 	$(COMPOSE) up --build -d
 
 stop:

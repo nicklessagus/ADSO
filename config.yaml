@@ -59,3 +59,7 @@ llm:
   max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
   max_paper_tokens: 128000    # truncado de PDFs académicos
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
+
+# ─── Watcher de vault ────────────────────────────────────────────────────────
+watcher:
+  debug: true               # true: notifica por Telegram cada cambio externo detectado (útil para testing)

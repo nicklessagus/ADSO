@@ -1145,7 +1145,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 
 | Decisión | Elección | Alternativa descartada | Razón |
 |---|---|---|---|
-| Sync del vault | Syncthing send-only desde RPi4 + Git (backup/DR) | Git como sync / Obsidian Sync / bidi | Git no es tiempo real; Syncthing ya configurado. Send-only porque ADSO es el único escritor (embeddings siempre sincronizados) |
+| Sync del vault | Syncthing bidireccional + Git (backup/DR) | Git como sync / Obsidian Sync | Git no es tiempo real; Syncthing ya configurado. `VaultWatcher` detecta cambios externos y re-embeds automáticamente para mantener ChromaDB sincronizado |
 | Interfaz Obsidian | Escritura directa al filesystem | Obsidian CLI / Local REST API | Ver sección "Alternativa futura: Obsidian CLI" más abajo |
 | Búsqueda | ChromaDB (semántica) + parser propio (estructural) | Solo ChromaDB | ChromaDB no puede seguir wikilinks ni filtrar por frontmatter. El parser propio cubre búsqueda estructural sin dependencias externas |
 | Generación de contenido | LLM con Obsidian Skills como referencia | Spec propia de sintaxis Obsidian | Los Skills de kepano son la referencia oficial para generar markdown, properties, wikilinks, canvas y bases compatibles con Obsidian |
@@ -1162,12 +1162,12 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 ### Sincronización del vault
 
 **Decisión tomada:**
-- **Syncthing** — sincronización en vivo entre RPi4 y clientes (desktop/mobile)
+- **Syncthing** — sincronización en vivo bidireccional entre RPi4 y clientes (desktop/mobile)
 - **Git** — backup e historial únicamente. No es el mecanismo de sync. Sirve para recuperación ante falla catastrófica (rollback a cualquier punto del historial)
-- **ADSO es el único escritor** — los clientes Obsidian son read-only. Toda creación y edición de notas pasa por Telegram
-- **Syncthing en modo send-only desde la RPi4** — los clientes reciben cambios pero no los envían de vuelta
+- **ADSO es el escritor principal** — toda creación de notas pasa por Telegram. Los clientes Obsidian pueden editar notas existentes.
+- **`VaultWatcher`** — detecta modificaciones externas (vía `inotify`/`watchdog`) y dispara re-embed inmediato de la nota afectada via Gemini Embedding API
 
-**Razón:** los embeddings en ChromaDB se generan al escribir una nota. Si se edita un `.md` desde Obsidian, el embedding queda desactualizado y las consultas RAG y links sugeridos trabajan con información vieja. Mantener ADSO como único escritor garantiza que los embeddings siempre estén sincronizados.
+**Razón:** los embeddings en ChromaDB se generan al escribir una nota. Si se edita un `.md` desde Obsidian, `VaultWatcher` detecta el cambio y re-embeds automáticamente, manteniendo ChromaDB sincronizado sin necesidad de esperar al reindex nocturno.
 
 #### Fuentes de verdad
 
@@ -1183,30 +1183,38 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 | Título de la tarea en Google Tasks/Calendar | Bidireccional | Gana el último cambio detectado en el cron |
 | Borrar task en Google Tasks | — | La nota vuelve a `00-Inbox/` con `status: pending-classification` |
 
-**Posibilidad futura:** si se necesita escritura bidireccional, implementar un watcher (o cron) que detecte `.md` modificados externamente y regenere sus embeddings via Gemini Embedding API. No es complejo pero agrega requests a la API y lógica de detección de cambios.
+#### VaultWatcher — cambios externos y conflictos Syncthing
 
-**Lo que sí está decidido para la implementación:** el bot debe detectar archivos de conflicto de Syncthing y notificar al usuario por Telegram. El usuario resuelve manualmente; ADSO nunca auto-resuelve conflictos.
+`VaultWatcher` (`adso/vault_watcher.py`) corre como tarea async en background. Maneja dos tipos de eventos:
 
-#### Detección de conflictos Syncthing
+**Cambios externos (`.md` modificados por Obsidian u otro cliente):**
+- `on_modified` de `watchdog` detecta la modificación
+- Dispara re-embed inmediato de esa nota via Gemini Embedding API (`on_external_change` callback)
+- En modo debug (`watcher.debug: true` en `config.yaml`): notifica por Telegram con el nombre del archivo
+- En modo normal: silencioso (solo log)
+
+**Conflictos de Syncthing (archivos `.sync-conflict-*`):**
 
 Syncthing nombra los conflictos con el patrón:
 ```
 nota.sync-conflict-20240315-143022-DEVICEID.md
 ```
 
-ADSO monitorea el vault con un watcher de filesystem (`watchdog`) y alerta por Telegram cuando detecta este patrón:
+Al detectar uno via `on_created`, notifica al usuario por Telegram:
 
 ```
 ⚠️ Conflicto de sincronización detectado:
   nota.sync-conflict-20240315-143022-ABCD1234.md
   en: 01-Projects/tesis/capitulo-2/
 
-Resuelve el conflicto manualmente y avisame cuando esté listo.
+Resolver el conflicto manualmente.
 ```
 
-El watcher corre como tarea async en background junto al bot. No agrega presión significativa a la RPi4 (solo escucha eventos del filesystem, no polling).
+ADSO nunca auto-resuelve conflictos. El usuario resuelve manualmente y borra el archivo de conflicto.
 
-**Nota sobre Docker:** `inotify` no siempre propaga eventos de forma confiable en bind mounts de Docker. En RPi4 con ext4 y Linux nativo funciona correctamente. Si se detectan problemas, `watchdog` soporta un fallback a `PollingObserver` (polling periódico en vez de inotify). Configurable si fuera necesario.
+El watcher no agrega presión significativa a la RPi4 (escucha eventos del filesystem vía `inotify`, no polling). En bind mounts Docker con ext4 funciona correctamente. Si `inotify` no está disponible, cae automáticamente a `PollingObserver` (10s de intervalo).
+
+**Stats:** `VaultWatcher.stats` expone `last_event_at`, `last_conflict_at`, `conflicts_detected` y `changes_detected`. Visibles en `/status`.
 
 ---
 
