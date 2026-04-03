@@ -1216,6 +1216,8 @@ El watcher no agrega presión significativa a la RPi4 (escucha eventos del files
 
 **Stats:** `VaultWatcher.stats` expone `last_event_at`, `last_conflict_at`, `conflicts_detected` y `changes_detected`. Visibles en `/status`.
 
+> **Pendiente:** `on_created` hoy solo detecta conflictos. Las notas creadas directamente desde Obsidian (sin pasar por el bot) no se indexan hasta el reindex nocturno. La solución es encolar también `on_created` para `.md` normales — el callback `on_external_change` ya maneja el re-embed, es un cambio de dos líneas.
+
 ---
 
 ## Alternativa futura: Obsidian CLI como backend
