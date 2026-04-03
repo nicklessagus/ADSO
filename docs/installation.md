@@ -88,42 +88,37 @@ Si no usás Docker, la variable también funciona con la ruta local del director
 
 ## 2. Configurar el proyecto
 
-```bash
-git clone git@github.com:nicklessagus/ADSO.git
-cd ADSO
+La instalación usa dos directorios separados:
 
-# Variables de entorno
-cp .env.example .env
+| Directorio | Propósito |
+|---|---|
+| `~/Repos/ADSO` | Código fuente — desarrollo y builds |
+| `~/docker/ADSO` | Despliegue — compose, config y credenciales |
+
+```bash
+git clone git@github.com:nicklessagus/ADSO.git ~/Repos/ADSO
 ```
 
-Editá `.env`:
+El directorio de deploy (`~/docker/ADSO/`) ya contiene `.env`, `config.yaml` y la carpeta `credentials/` pre-creados. Solo hace falta completar el `.env` con las credenciales reales:
 
 ```bash
 # ─── Requeridas ───────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN=<token del BotFather>
 TELEGRAM_ALLOWED_USER_ID=<tu ID numérico>
 GEMINI_API_KEY=<tu API key de Gemini>
-GROQ_API_KEY=<tu API key de Groq>       # fallback LLM cuando Gemini no responde
+GROQ_API_KEY=<tu API key de Groq>
 
 # ─── Opcionales ───────────────────────────────────────────────────────────────
-# ANTHROPIC_API_KEY=                    # LLM secundario alternativo
-# LOG_LEVEL=INFO                        # DEBUG | INFO | WARNING | ERROR
+# ANTHROPIC_API_KEY=
+# LOG_LEVEL=INFO
 
-# ─── Paths (defaults para Docker) ─────────────────────────────────────────────
-# VAULT_PATH=/vault                     # directorio local de las notas
-# CHROMA_DATA_DIR=/app/data/chroma      # persistencia de ChromaDB
-# GOOGLE_CALENDAR_CREDS=/ruta/al/directorio/credentials  # directorio con google-oauth.json + token_tasks.json
+# ─── Paths ────────────────────────────────────────────────────────────────────
+VAULT_PATH=/home/pi/NAS/Sync/ADSO
 
 # ─── Permisos de archivos (Docker) ────────────────────────────────────────────
-# El contenedor corre con este UID/GID para que los archivos del vault
-# sean del usuario del host (no root). Obtener con: id -u && id -g
-# ADSO_UID=1000
-# ADSO_GID=1000
-```
-
-```bash
-# Configuración del bot
-cp config.yaml.example config.yaml
+# Obtener con: id -u && id -g
+ADSO_UID=1000
+ADSO_GID=1000
 ```
 
 El `config.yaml` por defecto es válido para empezar. Ajustá a gusto (ver `docs/configuration.md`).
@@ -132,18 +127,26 @@ El `config.yaml` por defecto es válido para empezar. Ajustá a gusto (ver `docs
 
 ## 3. Crear el vault
 
+El vault vive en `~/NAS/Sync/ADSO/` para que Syncthing lo sincronice junto con el resto de los dispositivos. Crear la carpeta si no existe:
+
 ```bash
-mkdir -p /ruta/a/tu/vault
+mkdir -p ~/NAS/Sync/ADSO
 ```
 
 El bot crea la estructura de carpetas (`00-Inbox`, `01-Projects`, etc.) automáticamente al arrancar.
+
+Agregar `~/NAS/Sync/ADSO` como nueva carpeta compartida en Syncthing para sincronizarla con los clientes.
 
 ---
 
 ## 4. Arrancar
 
+Desde el repositorio de código:
+
 ```bash
-docker compose up --build
+cd ~/Repos/ADSO
+make deploy     # build + arranque en background
+make logs       # ver logs en vivo
 ```
 
 Deberías ver:
@@ -155,12 +158,17 @@ adso-bot | [apscheduler.scheduler] INFO: Scheduler started
 adso-bot | [telegram.ext.Application] INFO: Application started
 ```
 
-Para correr en background:
+### Comandos disponibles (Makefile)
 
-```bash
-docker compose up -d --build
-docker compose logs -f   # ver logs
-```
+| comando | acción |
+|---|---|
+| `make deploy` | build + reinicia el contenedor |
+| `make stop` | detiene sin borrar |
+| `make restart` | reinicia sin rebuild |
+| `make logs` | tail de logs en vivo |
+| `make status` | estado del contenedor |
+| `make shell` | bash dentro del contenedor |
+| `make prune` | limpia imágenes huérfanas post-rebuild |
 
 ---
 
@@ -173,8 +181,9 @@ Abrí Telegram, buscá tu bot y mandá cualquier mensaje de texto. El bot deber�
 ## Actualizar
 
 ```bash
+cd ~/Repos/ADSO
 git pull
-docker compose up --build
+make deploy
 ```
 
 ---
@@ -182,7 +191,7 @@ docker compose up --build
 ## Detener
 
 ```bash
-docker compose down
+make stop
 ```
 
 ---
