@@ -181,10 +181,24 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Genera embeddings via Gemini Embedding API (remoto, no local)
 - Almacena y consulta vectores en ChromaDB embebido
 - Indexa notas nuevas inmediatamente después de confirmación (async)
-- Cron nocturno re-indexa notas modificadas o sin embedding
+- Cron nocturno re-indexa notas modificadas o sin embedding; también limpia huérfanos (notas en ChromaDB que ya no existen en el vault)
 - Excluye carpetas en `vault.exclude_dirs`
 
-**Pendiente (Fase 7/8) — limpieza de embeddings huérfanos:** si el usuario borra una nota directamente desde Obsidian (no via bot), ChromaDB conserva el embedding sin referencia válida. La solución prevista es ampliar el cron existente para comparar IDs en ChromaDB contra los `.md` del vault y eliminar los huérfanos. No se implementa file watcher — innecesario para uso personal. Las búsquedas RAG no fallan por huérfanos (ChromaDB los devuelve pero el bot verifica existencia del archivo antes de mostrar), pero degradan la relevancia de los resultados.
+### `vault_watcher.py` — Watcher de cambios externos
+Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Obsidian/Syncthing sin pasar por el bot.
+
+| Evento | Siempre | Solo con `watcher.debug: true` |
+|---|---|---|
+| `.sync-conflict-*` creado | Notifica por Telegram | — |
+| `.md` modificado externamente | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
+| `.md` borrado externamente | Elimina embedding de ChromaDB (`on_external_delete`) | Notifica `🗑 [debug]` por Telegram |
+
+- **`on_external_change`** → `_index_note_safe` (recalcula embedding)
+- **`on_external_delete`** → `embeddings.remove_note(note_id)` (limpia ChromaDB reactivamente, sin esperar el cron)
+- Fallback a `PollingObserver` si `inotify` no está disponible (algunos bind mounts de Docker)
+- Stats en `/status`: `conflicts_detected`, `changes_detected`, `deletions_detected`, `last_event_at`
+
+**Nota:** notas creadas directamente en Obsidian (no via bot) no se re-indexan en tiempo real — solo en el cron nocturno. Ver TODO en `on_created` del handler.
 
 ### `reporters.py` — Reportes a pedido (Fase 8)
 - Genera reportes en Markdown enviados como documento `.md` en Telegram.

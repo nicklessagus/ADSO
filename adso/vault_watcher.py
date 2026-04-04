@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
+from watchdog.events import FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileSystemEventHandler
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]+\.md$", re.IGNOR
 class _VaultEvent:
     path: Path
     is_conflict: bool
+    is_delete: bool = False
 
 
 @dataclass
@@ -37,6 +38,7 @@ class WatcherStats:
     last_conflict_at: Optional[datetime] = None
     conflicts_detected: int = 0
     changes_detected: int = 0
+    deletions_detected: int = 0
 
 
 class _VaultEventHandler(FileSystemEventHandler):
@@ -77,6 +79,17 @@ class _VaultEventHandler(FileSystemEventHandler):
                 self._loop,
             )
 
+    def on_deleted(self, event: FileDeletedEvent) -> None:
+        """Encola borrados de .md para eliminar su embedding de ChromaDB."""
+        if event.is_directory:
+            return
+        path = Path(event.src_path)
+        if path.suffix == ".md" and not CONFLICT_RE.search(path.name):
+            asyncio.run_coroutine_threadsafe(
+                self._queue.put(_VaultEvent(path=path, is_conflict=False, is_delete=True)),
+                self._loop,
+            )
+
 
 class VaultWatcher:
     """Monitorea el vault y notifica por Telegram eventos relevantes.
@@ -95,6 +108,8 @@ class VaultWatcher:
         debug: Si True, notifica también cambios externos por Telegram.
         on_external_change: Callback async llamado con el Path de cada .md
             modificado externamente. Usado para disparar re-embed inmediato.
+        on_external_delete: Callback async llamado con el Path de cada .md
+            borrado externamente. Usado para eliminar su embedding de ChromaDB.
     """
 
     def __init__(
@@ -104,12 +119,14 @@ class VaultWatcher:
         chat_id: int,
         debug: bool = False,
         on_external_change: Optional[Callable[[Path], Awaitable[None]]] = None,
+        on_external_delete: Optional[Callable[[Path], Awaitable[None]]] = None,
     ) -> None:
         self._vault_path = vault_path
         self._bot = bot
         self._chat_id = chat_id
         self._debug = debug
         self._on_external_change = on_external_change
+        self._on_external_delete = on_external_delete
         self._queue: asyncio.Queue[_VaultEvent] = asyncio.Queue()
         self._observer = None
         self._task: Optional[asyncio.Task] = None
@@ -168,6 +185,17 @@ class VaultWatcher:
                     logger.error(
                         "VaultWatcher: error notificando conflicto %s: %s", event.path, exc
                     )
+            elif event.is_delete:
+                self._stats.deletions_detected += 1
+                if self._on_external_delete:
+                    asyncio.create_task(self._on_external_delete(event.path))
+                if self._debug:
+                    try:
+                        await self._notify_delete(event.path)
+                    except Exception as exc:
+                        logger.error(
+                            "VaultWatcher: error notificando borrado %s: %s", event.path, exc
+                        )
             else:
                 self._stats.changes_detected += 1
                 if self._on_external_change:
@@ -209,6 +237,24 @@ class VaultWatcher:
             lines.append(f"  en: <code>{dir_part}/</code>")
         lines.append("")
         lines.append("Reindexando embedding...")
+
+        await self._bot.send_message(
+            chat_id=self._chat_id,
+            text="\n".join(lines),
+            parse_mode="HTML",
+        )
+
+    async def _notify_delete(self, path: Path) -> None:
+        """Notifica sobre un borrado externo en modo debug."""
+        rel, dir_part = self._rel_parts(path)
+        lines = [
+            "🗑 [debug] Nota borrada externamente:",
+            f"  <code>{path.name}</code>",
+        ]
+        if dir_part:
+            lines.append(f"  en: <code>{dir_part}/</code>")
+        lines.append("")
+        lines.append("Eliminando embedding de ChromaDB...")
 
         await self._bot.send_message(
             chat_id=self._chat_id,

@@ -109,6 +109,42 @@ class TestVaultEventHandler:
         assert queue.empty()
 
     @pytest.mark.asyncio
+    async def test_on_deleted_queues_delete_event(self) -> None:
+        """on_deleted encola borrados de .md con is_delete=True."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/01-Projects/tesis/nota.md"
+
+        handler.on_deleted(event)
+        await asyncio.sleep(0.01)
+
+        assert not queue.empty()
+        item = queue.get_nowait()
+        assert item.path == Path(event.src_path)
+        assert item.is_conflict is False
+        assert item.is_delete is True
+
+    @pytest.mark.asyncio
+    async def test_on_deleted_ignores_conflict_files(self) -> None:
+        """on_deleted ignora .sync-conflict-* — no son notas reales."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/nota.sync-conflict-20240315-143022-ABC.md"
+
+        handler.on_deleted(event)
+        await asyncio.sleep(0.01)
+
+        assert queue.empty()
+
+    @pytest.mark.asyncio
     async def test_ignores_non_md_files(self) -> None:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
@@ -195,6 +231,19 @@ class TestVaultWatcherNotify:
         assert "apuntes.md" in kwargs["text"]
         assert "02-Areas/docencia" in kwargs["text"]
 
+    @pytest.mark.asyncio
+    async def test_notify_delete_includes_debug_label(
+        self, watcher: VaultWatcher, tmp_path: Path
+    ) -> None:
+        delete_path = tmp_path / "vault" / "02-Areas" / "docencia" / "apuntes.md"
+        await watcher._notify_delete(delete_path)
+
+        kwargs = watcher._bot.send_message.call_args.kwargs
+        assert "🗑" in kwargs["text"]
+        assert "debug" in kwargs["text"]
+        assert "apuntes.md" in kwargs["text"]
+        assert "02-Areas/docencia" in kwargs["text"]
+
 
 # ---------------------------------------------------------------------------
 # VaultWatcher stats
@@ -258,10 +307,60 @@ class TestVaultWatcherStats:
             bot.send_message.assert_not_awaited()
             await watcher.stop()
 
+    @pytest.mark.asyncio
+    async def test_on_external_delete_callback_called(
+        self, tmp_path: Path
+    ) -> None:
+        """El callback on_external_delete se ejecuta para borrados externos."""
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        callback = AsyncMock()
+
+        watcher = VaultWatcher(
+            vault_path=vault, bot=bot, chat_id=12345,
+            debug=False, on_external_delete=callback,
+        )
+        mock_observer = MagicMock()
+        with patch("adso.vault_watcher._make_observer", return_value=mock_observer):
+            await watcher.start()
+            delete_path = vault / "01-Projects" / "tesis" / "nota.md"
+            from adso.vault_watcher import _VaultEvent
+            await watcher._queue.put(
+                _VaultEvent(path=delete_path, is_conflict=False, is_delete=True)
+            )
+            await asyncio.sleep(0.05)
+
+            callback.assert_awaited_once_with(delete_path)
+            # En modo no-debug no notifica por Telegram
+            bot.send_message.assert_not_awaited()
+            await watcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_stats_update_on_delete(
+        self, watcher: VaultWatcher, tmp_path: Path
+    ) -> None:
+        mock_observer = MagicMock()
+        with patch("adso.vault_watcher._make_observer", return_value=mock_observer):
+            await watcher.start()
+            delete_path = tmp_path / "vault" / "01-Projects" / "tesis" / "nota.md"
+            from adso.vault_watcher import _VaultEvent
+            await watcher._queue.put(
+                _VaultEvent(path=delete_path, is_conflict=False, is_delete=True)
+            )
+            await asyncio.sleep(0.05)
+
+            assert watcher.stats.deletions_detected == 1
+            assert watcher.stats.changes_detected == 0
+            assert watcher.stats.last_event_at is not None
+            await watcher.stop()
+
     def test_initial_stats(self, watcher: VaultWatcher) -> None:
         stats = watcher.stats
         assert stats.conflicts_detected == 0
         assert stats.changes_detected == 0
+        assert stats.deletions_detected == 0
         assert stats.last_event_at is None
         assert stats.debug is True
 

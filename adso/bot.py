@@ -62,12 +62,23 @@ async def _post_init(app: Application) -> None:
         except Exception as exc:
             _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
 
+    async def _remove_external_note(path: Path) -> None:
+        """Elimina de ChromaDB el embedding de una nota borrada externamente."""
+        try:
+            rel = path.relative_to(vault_path)
+            note_id = str(rel).replace(".md", "")
+            await embeddings.remove_note(note_id)
+            _bot_logger.info("Embedding eliminado por borrado externo: %s", note_id)
+        except Exception as exc:
+            _bot_logger.warning("Error eliminando embedding de %s: %s", path, exc)
+
     watcher = VaultWatcher(
         vault_path=vault_path,
         bot=app.bot,
         chat_id=settings.telegram_allowed_user_id,
         debug=settings.watcher.debug,
         on_external_change=_reindex_external_note,
+        on_external_delete=_remove_external_note,
     )
     await watcher.start()
     app.bot_data["vault_watcher"] = watcher
