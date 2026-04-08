@@ -517,6 +517,80 @@ async def update_wikilinks(
         logger.info("Wikilinks actualizados en: %s", note_path)
 
 
+def _remove_empty_ver_tambien(content: str) -> str:
+    """Elimina el header '## Ver también' si no quedan items de lista bajo él."""
+    lines = content.split("\n")
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == "## Ver también":
+            # Buscar si hay algún item de lista antes del próximo heading o EOF
+            j = i + 1
+            has_items = False
+            while j < len(lines):
+                if lines[j].startswith("- [["):
+                    has_items = True
+                    break
+                if lines[j].startswith("## "):
+                    break
+                j += 1
+            if has_items:
+                result.append(lines[i])
+            else:
+                # Saltar también las líneas en blanco que siguen al header
+                while i + 1 < len(lines) and lines[i + 1].strip() == "":
+                    i += 1
+        else:
+            result.append(lines[i])
+        i += 1
+    return "\n".join(result)
+
+
+async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
+    """Elimina de todas las notas del vault wikilinks rotos que apuntaban a una nota borrada.
+
+    Busca líneas del bloque '## Ver también' que referencien el stem del archivo borrado
+    y las elimina. Si el bloque queda sin items, elimina también el header.
+
+    Args:
+        vault_path: Raíz del vault.
+        deleted_path: Path del archivo .md borrado.
+
+    Returns:
+        Número de archivos modificados.
+    """
+    stem = deleted_path.stem
+    link_re = re.compile(
+        r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*\n?",
+        re.MULTILINE,
+    )
+
+    modified = 0
+    for md_path in vault_path.rglob("*.md"):
+        if md_path == deleted_path or md_path.stem == "_index":
+            continue
+        try:
+            raw = await asyncio.to_thread(md_path.read_text, "utf-8")
+        except Exception:
+            continue
+
+        if f"[[{stem}]]" not in raw and f"[[{stem}|" not in raw and f"[[{stem}#" not in raw:
+            continue
+
+        new_content = link_re.sub("", raw)
+        new_content = _remove_empty_ver_tambien(new_content)
+        new_content = new_content.rstrip("\n") + "\n"
+
+        if new_content == raw:
+            continue
+
+        await asyncio.to_thread(md_path.write_text, new_content, "utf-8")
+        modified += 1
+        logger.info("Wikilink roto eliminado: %s → [[%s]]", md_path.name, stem)
+
+    return modified
+
+
 # ---------------------------------------------------------------------------
 # Vault structure
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ from adso.handlers.input import handle_audio, handle_document, handle_photo, han
 from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
 from adso.vault_watcher import VaultWatcher
-from adso.vault_writer import GitBackup, ensure_vault_structure, seed_vault
+from adso.vault_writer import GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
 
 _bot_logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ async def _post_init(app: Application) -> None:
             _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
 
     async def _remove_external_note(path: Path) -> None:
-        """Elimina de ChromaDB el embedding de una nota borrada externamente."""
+        """Elimina de ChromaDB el embedding de una nota borrada externamente y limpia wikilinks rotos."""
         try:
             rel = path.relative_to(vault_path)
             note_id = str(rel).replace(".md", "")
@@ -71,6 +71,12 @@ async def _post_init(app: Application) -> None:
             _bot_logger.info("Embedding eliminado por borrado externo: %s", note_id)
         except Exception as exc:
             _bot_logger.warning("Error eliminando embedding de %s: %s", path, exc)
+        try:
+            count = await remove_broken_wikilinks(vault_path, path)
+            if count:
+                _bot_logger.info("Wikilinks rotos eliminados en %d notas tras borrado de %s", count, path.name)
+        except Exception as exc:
+            _bot_logger.warning("Error limpiando wikilinks rotos para %s: %s", path, exc)
 
     watcher = VaultWatcher(
         vault_path=vault_path,
