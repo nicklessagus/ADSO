@@ -190,6 +190,7 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 | Evento | Siempre | Solo con `watcher.debug: true` |
 |---|---|---|
 | `.sync-conflict-*` creado | Notifica por Telegram | — |
+| `.md` creado externamente (ej: desde Obsidian) | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
 | `.md` modificado externamente | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
 | `.md` borrado externamente | Elimina embedding de ChromaDB + limpia wikilinks rotos en otras notas (`on_external_delete`) — notifica por Telegram si hubo notas modificadas | Notifica `🗑 [debug]` por Telegram |
 
@@ -198,7 +199,7 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 - Fallback a `PollingObserver` si `inotify` no está disponible (algunos bind mounts de Docker)
 - Stats en `/status`: `conflicts_detected`, `changes_detected`, `deletions_detected`, `last_event_at`
 
-**Nota:** notas creadas directamente en Obsidian (no via bot) no se re-indexan en tiempo real — solo en el cron nocturno. Ver TODO en `on_created` del handler.
+**Nota:** notas creadas directamente en Obsidian se re-indexan en tiempo real via `on_created` → `on_external_change`.
 
 ### `reporters.py` — Reportes a pedido (Fase 8)
 - Genera reportes en Markdown enviados como documento `.md` en Telegram.

@@ -53,18 +53,20 @@ class _VaultEventHandler(FileSystemEventHandler):
         self._loop = loop
 
     def on_created(self, event: FileCreatedEvent) -> None:
-        """Solo encola conflictos — las notas nuevas las crea ADSO y ya las indexa.
-
-        TODO: encolar también .md normales para indexar notas creadas directamente
-        desde Obsidian (sin pasar por el bot). El callback on_external_change ya
-        maneja el re-embed; solo hay que quitar el filtro CONFLICT_RE aquí.
-        """
+        """Encola conflictos y notas .md nuevas creadas externamente (ej: desde Obsidian)."""
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix == ".md" and CONFLICT_RE.search(path.name):
+        if path.suffix != ".md":
+            return
+        if CONFLICT_RE.search(path.name):
             asyncio.run_coroutine_threadsafe(
                 self._queue.put(_VaultEvent(path=path, is_conflict=True)),
+                self._loop,
+            )
+        else:
+            asyncio.run_coroutine_threadsafe(
+                self._queue.put(_VaultEvent(path=path, is_conflict=False)),
                 self._loop,
             )
 
