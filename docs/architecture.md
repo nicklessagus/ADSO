@@ -191,10 +191,10 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 |---|---|---|
 | `.sync-conflict-*` creado | Notifica por Telegram | — |
 | `.md` modificado externamente | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
-| `.md` borrado externamente | Elimina embedding de ChromaDB (`on_external_delete`) | Notifica `🗑 [debug]` por Telegram |
+| `.md` borrado externamente | Elimina embedding de ChromaDB + limpia wikilinks rotos en otras notas (`on_external_delete`) — notifica por Telegram si hubo notas modificadas | Notifica `🗑 [debug]` por Telegram |
 
 - **`on_external_change`** → `_index_note_safe` (recalcula embedding)
-- **`on_external_delete`** → `embeddings.remove_note(note_id)` (limpia ChromaDB reactivamente, sin esperar el cron)
+- **`on_external_delete`** → `embeddings.remove_note(note_id)` (limpia ChromaDB reactivamente) + `remove_broken_wikilinks()` (elimina referencias en bloques `## Ver también` de otras notas; notifica por Telegram si modificó alguna)
 - Fallback a `PollingObserver` si `inotify` no está disponible (algunos bind mounts de Docker)
 - Stats en `/status`: `conflicts_detected`, `changes_detected`, `deletions_detected`, `last_event_at`
 

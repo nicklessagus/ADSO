@@ -296,6 +296,30 @@ async def update_wikilinks(
 
 ---
 
+### `remove_broken_wikilinks()`
+
+```python
+async def remove_broken_wikilinks(
+    vault_path: Path,
+    deleted_path: Path,
+) -> int:
+```
+
+**Comportamiento:**
+
+1. Extrae el stem del archivo borrado (ej: `2026-04-08-mi-nota`).
+2. Recorre todos los `.md` del vault (salvo `_index.md`).
+3. En cada archivo que contenga `[[stem]]`, elimina las líneas de lista que lo referencian en el bloque `## Ver también`.
+4. Si el bloque queda sin items, elimina también el header `## Ver también`.
+5. Retorna el número de archivos modificados.
+
+**Notas:**
+- Los wikilinks en ADSO usan solo el stem (no el path completo), por lo que mover una nota dentro del vault **no rompe links**.
+- Se llama desde `_remove_external_note` en `bot.py` al detectar un borrado via `VaultWatcher`. Si retorna `> 0`, el bot notifica por Telegram.
+- Solo actúa sobre el bloque `## Ver también` (links sugeridos por ADSO). No toca wikilinks en el body libre del usuario.
+
+---
+
 ## `vault_search.py`
 
 Responsabilidad única: **lectura y búsqueda estructural sobre el vault**.
