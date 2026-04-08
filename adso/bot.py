@@ -75,6 +75,14 @@ async def _post_init(app: Application) -> None:
             count = await remove_broken_wikilinks(vault_path, path)
             if count:
                 _bot_logger.info("Wikilinks rotos eliminados en %d notas tras borrado de %s", count, path.name)
+                await app.bot.send_message(
+                    chat_id=settings.telegram_allowed_user_id,
+                    text=(
+                        f"🔗 Wikilinks rotos limpiados en {count} nota{'s' if count > 1 else ''} "
+                        f"tras borrar <code>{path.name}</code>."
+                    ),
+                    parse_mode="HTML",
+                )
         except Exception as exc:
             _bot_logger.warning("Error limpiando wikilinks rotos para %s: %s", path, exc)
 
