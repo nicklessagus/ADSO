@@ -146,10 +146,10 @@ def build_capture_keyboard(
         [
             InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
             InlineKeyboardButton("Corregir", callback_data=CB_NOTE_CORRECT),
-            InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
+            InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
         ],
         [
-            InlineKeyboardButton("Reubicar", callback_data=CB_CORRECT),
+            InlineKeyboardButton("Confirmar", callback_data=CB_CONFIRM),
         ],
     ])
 
