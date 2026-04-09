@@ -163,8 +163,11 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
     for ref in proj_refs:
         try:
             note = await read_note(ref.path)
+            name = note.frontmatter.get("project")
+            if not name:
+                continue
             projects.append({
-                "name": note.frontmatter.get("project", ref.path.parent.name),
+                "name": name,
                 "description": note.frontmatter.get("description", ""),
             })
         except Exception:
@@ -174,8 +177,11 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
     for ref in area_refs:
         try:
             note = await read_note(ref.path)
+            name = note.frontmatter.get("area")
+            if not name:
+                continue
             areas.append({
-                "name": note.frontmatter.get("area", ref.path.parent.name),
+                "name": name,
                 "description": note.frontmatter.get("description", ""),
             })
         except Exception:
