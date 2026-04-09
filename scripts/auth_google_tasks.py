@@ -78,16 +78,19 @@ def main() -> None:
             creds = None
 
     if creds is None or not creds.valid:
+        import os as _os
+        _os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
         flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-        # Modo headless: imprimir URL y leer el código de autorización por stdin
+        flow.redirect_uri = "http://localhost"
         auth_url, _ = flow.authorization_url(prompt="consent")
         print("\n=== Autorización OAuth ===")
         print("Abrí esta URL en cualquier navegador:\n")
         print(f"  {auth_url}\n")
-        print("Después de autorizar, Google redirige a localhost — va a dar error de conexión,")
-        print("pero la URL del navegador contiene el código. Copiá el valor del parámetro 'code='.\n")
-        code = input("Pegá el código de autorización aquí: ").strip()
-        flow.fetch_token(code=code)
+        print("Después de autorizar, Google redirige a http://localhost — va a dar error de")
+        print("conexión (ERR_CONNECTION_REFUSED), pero la URL completa en el navegador contiene")
+        print("el código. Copiá y pegá ESA URL completa aquí.\n")
+        redirect_response = input("Pegá la URL completa de redirección: ").strip()
+        flow.fetch_token(authorization_response=redirect_response)
         creds = flow.credentials
 
     token_path.write_text(creds.to_json())
