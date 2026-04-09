@@ -155,37 +155,39 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
 
 
 async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]:
-    """Obtiene proyectos y áreas existentes para el system prompt del LLM."""
-    projects = []
-    areas = []
+    """Obtiene proyectos y áreas existentes leyendo los subdirectorios de
+    01-Projects/ y 02-Areas/ directamente. Si existe un _index.md con
+    campo project:/area: y description:, los usa; si no, usa el nombre del
+    directorio como nombre y descripción vacía.
+    """
+    def _read_index(dir_path: Path, field: str) -> dict:
+        index = dir_path / "_index.md"
+        name = dir_path.name
+        description = ""
+        if index.exists():
+            try:
+                import frontmatter as fm
+                post = fm.load(str(index))
+                name = post.get(field, name)
+                description = post.get("description", "")
+            except Exception:
+                pass
+        return {"name": name, "description": description}
 
-    proj_refs = await find_by_property("type", "project-index", vault_path)
-    for ref in proj_refs:
-        try:
-            note = await read_note(ref.path)
-            name = note.frontmatter.get("project")
-            if not name:
-                continue
-            projects.append({
-                "name": name,
-                "description": note.frontmatter.get("description", ""),
-            })
-        except Exception:
-            pass
+    projects_dir = vault_path / "01-Projects"
+    areas_dir = vault_path / "02-Areas"
 
-    area_refs = await find_by_property("type", "area-index", vault_path)
-    for ref in area_refs:
-        try:
-            note = await read_note(ref.path)
-            name = note.frontmatter.get("area")
-            if not name:
-                continue
-            areas.append({
-                "name": name,
-                "description": note.frontmatter.get("description", ""),
-            })
-        except Exception:
-            pass
+    projects = [
+        _read_index(d, "project")
+        for d in sorted(projects_dir.iterdir())
+        if d.is_dir()
+    ] if projects_dir.exists() else []
+
+    areas = [
+        _read_index(d, "area")
+        for d in sorted(areas_dir.iterdir())
+        if d.is_dir()
+    ] if areas_dir.exists() else []
 
     return projects, areas
 
