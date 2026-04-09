@@ -139,7 +139,68 @@ Agregar `~/NAS/Sync/ADSO` como nueva carpeta compartida en Syncthing para sincro
 
 ---
 
-## 4. Arrancar
+## 4. Backup automático del vault (opcional)
+
+ADSO puede hacer commit+push automático a un repo git privado cada vez que se escribe o modifica una nota (con debounce de 30 segundos). Syncthing hace la sincronización en vivo entre dispositivos — git es el backup histórico y el DR.
+
+### 4.1 Crear el repo en GitHub
+
+Crear un repo privado (ej: `nicklessagus/ADSO_Vault`) en GitHub. No inicializar con README ni .gitignore — el vault ya tiene su propio `.gitignore`.
+
+### 4.2 Inicializar git en el vault
+
+```bash
+git -C ~/NAS/Sync/ADSO init -b main
+git -C ~/NAS/Sync/ADSO add .
+git -C ~/NAS/Sync/ADSO commit -m "Initial vault"
+git -C ~/NAS/Sync/ADSO remote add origin git@github.com:<usuario>/ADSO_Vault.git
+git -C ~/NAS/Sync/ADSO push -u origin main
+```
+
+Si el vault ya estaba inicializado (solo falta el remote):
+
+```bash
+git -C ~/NAS/Sync/ADSO remote add origin git@github.com:<usuario>/ADSO_Vault.git
+git -C ~/NAS/Sync/ADSO push -u origin main
+```
+
+### 4.3 SSH key para el container Docker
+
+El container necesita acceso SSH a GitHub. ADSO usa la key `~/.ssh/id_ed25519` del host, montada en `/ssh-keys/` dentro del container. El `docker-compose.yml` ya tiene el volumen y la variable `GIT_SSH_COMMAND` configurados — no hace falta ningún paso extra si la key del host tiene acceso al repo.
+
+Si querés usar una key dedicada para ADSO:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/adso_vault -C "adso-vault-backup" -N ""
+# Agregar ~/.ssh/adso_vault.pub como deploy key en el repo de GitHub (Settings → Deploy keys → write access)
+```
+
+Luego cambiar en `docker-compose.yml`:
+```yaml
+- GIT_SSH_COMMAND=ssh -i /ssh-keys/adso_vault -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+```
+
+### 4.4 Activar en config.yaml
+
+```yaml
+backup:
+  enabled: true
+  debounce_seconds: 30   # segundos de inactividad antes de hacer commit+push
+```
+
+Hacer `make deploy` para aplicar.
+
+### Comportamiento
+
+- Cada confirmación de nota desde Telegram → commit+push (debounce 30s)
+- Cada cambio externo detectado por el watcher (edición o creación desde Obsidian via Syncthing) → commit+push
+- Cada borrado externo → commit+push (incluye la eliminación del archivo)
+- Error en push → el bot notifica por Telegram inmediatamente
+- Push exitoso → notificación solo si `watcher.debug: true`
+
+---
+
+## 5. Arrancar
 
 Desde el repositorio de código:
 
@@ -172,7 +233,7 @@ adso-bot | [telegram.ext.Application] INFO: Application started
 
 ---
 
-## 5. Verificar
+## 6. Verificar
 
 Abrí Telegram, buscá tu bot y mandá cualquier mensaje de texto. El bot debería responder con un preview de clasificación y botones de confirmación.
 

@@ -5,6 +5,7 @@ WORKDIR /app
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    openssh-client \
     ffmpeg \
     tesseract-ocr \
     tesseract-ocr-spa \
