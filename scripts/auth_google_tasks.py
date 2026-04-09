@@ -69,19 +69,29 @@ def main() -> None:
 
     if creds and creds.expired and creds.refresh_token:
         print("Refrescando token existente...")
-        creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-        # run_local_server abre el navegador; en headless usar run_console()
         try:
-            creds = flow.run_local_server(port=0)
-        except Exception:
-            print("Sin browser disponible — usando flujo por consola.")
-            creds = flow.run_console()
+            creds.refresh(Request())
+        except Exception as exc:
+            print(f"No se pudo refrescar: {exc}")
+            print("Borrando token inválido y reiniciando flujo OAuth...")
+            token_path.unlink(missing_ok=True)
+            creds = None
+
+    if creds is None or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
+        # Modo headless: imprimir URL y leer el código de autorización por stdin
+        auth_url, _ = flow.authorization_url(prompt="consent")
+        print("\n=== Autorización OAuth ===")
+        print("Abrí esta URL en cualquier navegador:\n")
+        print(f"  {auth_url}\n")
+        print("Después de autorizar, Google redirige a localhost — va a dar error de conexión,")
+        print("pero la URL del navegador contiene el código. Copiá el valor del parámetro 'code='.\n")
+        code = input("Pegá el código de autorización aquí: ").strip()
+        flow.fetch_token(code=code)
+        creds = flow.credentials
 
     token_path.write_text(creds.to_json())
-    print(f"Token guardado en {token_path}")
-    print("Copiar este archivo a la RPi4 si fue generado en dev machine.")
+    print(f"\nToken guardado en {token_path}")
 
 
 if __name__ == "__main__":
