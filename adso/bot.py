@@ -61,6 +61,9 @@ async def _post_init(app: Application) -> None:
             _bot_logger.info("Reindex externo completado: %s", path)
         except Exception as exc:
             _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
+        git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
+        if git_backup:
+            await git_backup.notify(path.stem)
 
     async def _remove_external_note(path: Path) -> None:
         """Elimina de ChromaDB el embedding de una nota borrada externamente y limpia wikilinks rotos."""
@@ -85,6 +88,9 @@ async def _post_init(app: Application) -> None:
                 )
         except Exception as exc:
             _bot_logger.warning("Error limpiando wikilinks rotos para %s: %s", path, exc)
+        git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
+        if git_backup:
+            await git_backup.notify(path.stem)
 
     watcher = VaultWatcher(
         vault_path=vault_path,
@@ -131,7 +137,13 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     # Bot data compartida
     app.bot_data["settings"] = settings
     app.bot_data["git_backup"] = (
-        GitBackup(settings.vault_path, settings.backup.debounce_seconds)
+        GitBackup(
+            settings.vault_path,
+            settings.backup.debounce_seconds,
+            bot=app.bot,
+            chat_id=settings.telegram_allowed_user_id,
+            debug=settings.watcher.debug,
+        )
         if settings.backup.enabled
         else None
     )

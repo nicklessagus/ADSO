@@ -724,12 +724,22 @@ class GitBackup:
     Acumula títulos de notas y hace un solo commit+push después del debounce.
     """
 
-    def __init__(self, vault_path: Path, debounce_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        vault_path: Path,
+        debounce_seconds: int = 30,
+        bot=None,
+        chat_id: Optional[int] = None,
+        debug: bool = False,
+    ) -> None:
         self.vault_path = vault_path
         self.debounce_seconds = debounce_seconds
         self._pending_titles: list[str] = []
         self._timer: Optional[asyncio.TimerHandle] = None
         self._lock = asyncio.Lock()
+        self._bot = bot
+        self._chat_id = chat_id
+        self._debug = debug
 
     async def notify(self, title: str) -> None:
         """Registra una nota para backup y reinicia el debounce.
@@ -789,8 +799,20 @@ class GitBackup:
                     origin = repo.remote("origin")
                     await asyncio.to_thread(origin.push)
                     logger.info("Git push exitoso")
+                    if self._debug and self._bot and self._chat_id:
+                        await self._bot.send_message(
+                            chat_id=self._chat_id,
+                            text=f"💾 [debug] Vault backup:\n<code>{message}</code>",
+                            parse_mode="HTML",
+                        )
                 except Exception as e:
                     logger.warning("Git push falló (nota segura en disco): %s", e)
+                    if self._bot and self._chat_id:
+                        await self._bot.send_message(
+                            chat_id=self._chat_id,
+                            text=f"⚠️ Git push falló — vault seguro en disco.\n<code>{e}</code>",
+                            parse_mode="HTML",
+                        )
             else:
                 logger.debug("Git: sin cambios para commit")
 

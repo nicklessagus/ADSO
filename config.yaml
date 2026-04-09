@@ -51,7 +51,7 @@ sync:
 
 # ─── Backup (Git) ─────────────────────────────────────────────────────────
 backup:
-  enabled: false                 # activar cuando el vault tenga repo git dedicado con remote configurado
+  enabled: true                  # repo: git@github.com:nicklessagus/ADSO_Vault.git
   debounce_seconds: 30           # esperar N segundos sin nuevas escrituras antes de commit+push
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
