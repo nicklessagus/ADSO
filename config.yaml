@@ -60,6 +60,10 @@ llm:
   max_paper_tokens: 128000    # truncado de PDFs académicos
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
 
+# ─── Google Tasks ────────────────────────────────────────────────────────────
+tasks:
+  debug: false              # true: notifica por Telegram cada push exitoso a Google Tasks
+
 # ─── Watcher de vault ────────────────────────────────────────────────────────
 watcher:
   debug: true               # true: notifica por Telegram cada cambio externo detectado (útil para testing)

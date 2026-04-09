@@ -645,15 +645,39 @@ async def _push_task_safe(
     note_path: Path,
     vault_path: Path,
     body: str = "",
+    notify_fn: Any = None,
+    debug: bool = False,
 ) -> None:
-    """Crea la tarea en Google Tasks de forma segura (no propaga errores)."""
+    """Crea la tarea en Google Tasks de forma segura (no propaga errores).
+
+    Args:
+        notify_fn: Corrutina callable(str) para enviar mensajes por Telegram.
+            Se invoca en caso de fallo de auth o error de API.
+        debug: Si True, notifica también los pushes exitosos.
+    """
     description = extract_original_from_degraded(body).strip() if body else ""
     notes = build_task_notes(fm, note_path, vault_path, description=description)
-    await tasks_client.create_task(
-        title=fm.get("title", "Sin título"),
+    title = fm.get("title", "Sin título")
+    task_id = await tasks_client.create_task(
+        title=title,
         notes=notes,
         due_date=fm.get("due_date"),
     )
+    if task_id is None:
+        if notify_fn:
+            if tasks_client.auth_failed:
+                await notify_fn(
+                    "Error Google Tasks: token expirado o revocado.\n"
+                    "Ejecutar `scripts/auth_google_tasks.py` para re-autenticar.\n"
+                    f"La tarea '{title}' quedó guardada solo en el vault."
+                )
+            else:
+                await notify_fn(
+                    f"Error Google Tasks: no se pudo sincronizar '{title}'.\n"
+                    "Ver logs para detalles."
+                )
+    elif debug and notify_fn:
+        await notify_fn(f"[debug] Google Tasks: tarea '{title}' sincronizada (id={task_id})")
 
 
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
@@ -706,8 +730,22 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     if fm.get("type") == "task":
         tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
         if tasks_client:
+            _settings: Settings = context.bot_data["settings"]
+            _user_id = _settings.telegram_allowed_user_id
+
+            async def _notify_tasks(msg: str) -> None:
+                await context.bot.send_message(chat_id=_user_id, text=msg)
+
             asyncio.create_task(
-                _push_task_safe(tasks_client, fm, path, vault_path, body=original_body)
+                _push_task_safe(
+                    tasks_client,
+                    fm,
+                    path,
+                    vault_path,
+                    body=original_body,
+                    notify_fn=_notify_tasks,
+                    debug=_settings.tasks.debug,
+                )
             )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")

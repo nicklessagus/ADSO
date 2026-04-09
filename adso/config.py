@@ -93,6 +93,11 @@ class LlmConfig:
 
 
 @dataclass
+class TasksConfig:
+    debug: bool = False
+
+
+@dataclass
 class WatcherConfig:
     debug: bool = False
 
@@ -147,6 +152,7 @@ class Settings:
     documents: DocumentsConfig = field(default_factory=DocumentsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     weekly_report: WeeklyReportConfig = field(default_factory=WeeklyReportConfig)
+    tasks: TasksConfig = field(default_factory=TasksConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
 
 
@@ -314,6 +320,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         documents=_build_section(DocumentsConfig, raw.get("documents")),
         llm=_build_section(LlmConfig, raw.get("llm")),
         weekly_report=_build_weekly_report(raw.get("weekly_report")),
+        tasks=_build_section(TasksConfig, raw.get("tasks")),
         watcher=_build_section(WatcherConfig, raw.get("watcher")),
     )
 

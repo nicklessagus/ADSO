@@ -66,6 +66,8 @@ class TasksClient:
         self._token_path = self._creds_path.parent / "token_tasks.json"
         self._service = None
         self._list_id: Optional[str] = None
+        # Evitar repetir el mismo warning de auth en cada intento
+        self._auth_error_logged: bool = False
 
     async def _ensure_service(self) -> bool:
         """Inicializa el servicio si no está listo. Devuelve True si disponible."""
@@ -74,19 +76,33 @@ class TasksClient:
         try:
             svc = await asyncio.to_thread(_load_service, self._creds_path, self._token_path)
         except Exception as exc:
-            logger.warning("Google Tasks: error al cargar credenciales: %s", exc)
+            if not self._auth_error_logged:
+                logger.warning(
+                    "Google Tasks: error al cargar credenciales: %s — "
+                    "Ejecutar scripts/auth_google_tasks.py para re-autenticar.",
+                    exc,
+                )
+                self._auth_error_logged = True
             return False
 
         if svc is None:
-            logger.warning(
-                "Google Tasks deshabilitado: token no encontrado en %s. "
-                "Ejecutar scripts/auth_google_tasks.py para autenticar.",
-                self._token_path,
-            )
+            if not self._auth_error_logged:
+                logger.warning(
+                    "Google Tasks deshabilitado: token no encontrado en %s. "
+                    "Ejecutar scripts/auth_google_tasks.py para autenticar.",
+                    self._token_path,
+                )
+                self._auth_error_logged = True
             return False
 
         self._service = svc
+        self._auth_error_logged = False  # reset en caso de recuperación
         return True
+
+    @property
+    def auth_failed(self) -> bool:
+        """True si el último intento de autenticación falló."""
+        return self._auth_error_logged
 
     async def _get_list_id(self) -> Optional[str]:
         """Obtiene o crea la lista ADSO, cacheando el ID."""
