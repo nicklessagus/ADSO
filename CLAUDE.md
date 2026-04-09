@@ -324,6 +324,7 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 - **Bibliografía anotada on-demand:** generar un documento consolidado con papers de un proyecto, agrupados por método o tema, con `relevance`, `contribution` y `conclusions`.
 - **NASA ADS:** integración de cuenta para importar colecciones/listas de papers en bloque o por sync periódico. No es flujo de captura individual — requiere OAuth o API key de ADS y un mecanismo de reconciliación con el vault (evitar duplicados por DOI/arXiv ID).
 - **Reportes en PDF:** exportar `/reporte` y `/reporte_full` como PDF además de `.md`. Candidato: `fpdf2` (puro Python, sin deps del sistema, ARM64 nativo). Implementación: un helper `_build_pdf(md_content)` que parsea el MD generado y lo renderiza con fpdf2; los reporters reciben `fmt: str = "md" | "pdf"`. Alternativa más simple pero output básico: `markdown` lib → HTML → `xhtml2pdf`. Pendiente de prueba en RPi4.
+- **Reintento de git push en heartbeat:** si un push falla (error de red, etc.), los commits quedan locales hasta la próxima actividad. Para garantía extra: el `heartbeat_job` podría revisar si `repo.head.commit` tiene commits sin pushear (`repo.iter_commits('origin/main..HEAD')`) y hacer push silencioso. Solo notificar si también falla ese reintento.
 
 ---
 
