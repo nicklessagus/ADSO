@@ -11,9 +11,9 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Dict, Optional
 
 from watchdog.events import FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileSystemEventHandler
 
@@ -133,6 +133,10 @@ class VaultWatcher:
         self._observer = None
         self._task: Optional[asyncio.Task] = None
         self._stats = WatcherStats(debug=debug)
+        # Deduplicación: evita notificar el mismo path dos veces en menos de 2s
+        # (inotify dispara CREATE + MODIFY al escribir un archivo nuevo)
+        self._recent_events: Dict[Path, datetime] = {}
+        self._dedup_window = timedelta(seconds=2)
 
     @property
     def stats(self) -> WatcherStats:
@@ -171,12 +175,27 @@ class VaultWatcher:
             self._task = None
         logger.info("VaultWatcher detenido.")
 
+    def _is_duplicate(self, path: Path) -> bool:
+        """Devuelve True si el path fue procesado hace menos de dedup_window."""
+        now = datetime.now()
+        last = self._recent_events.get(path)
+        if last and (now - last) < self._dedup_window:
+            return True
+        self._recent_events[path] = now
+        # Limpiar entradas viejas para no acumular memoria
+        cutoff = now - self._dedup_window * 10
+        self._recent_events = {p: t for p, t in self._recent_events.items() if t > cutoff}
+        return False
+
     async def _dispatch_loop(self) -> None:
         """Lee la queue y despacha a la notificación correspondiente."""
         while True:
             event = await self._queue.get()
             now = datetime.now()
             self._stats.last_event_at = now
+
+            if not event.is_conflict and not event.is_delete and self._is_duplicate(event.path):
+                continue
 
             if event.is_conflict:
                 self._stats.last_conflict_at = now
