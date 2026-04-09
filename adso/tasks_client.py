@@ -6,7 +6,6 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -229,10 +228,5 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: s
                 parts.append(f"Horario: {dt.strftime('%d/%m/%Y %H:%M')}")
         except Exception:
             pass
-
-    # Link obsidian:// a la nota (ruta absoluta URL-encoded)
-    abs_path = str(note_path.resolve())
-    encoded = quote(abs_path, safe="")
-    parts.append(f"obsidian://open?path={encoded}")
 
     return "\n".join(parts)
