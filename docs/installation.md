@@ -137,6 +137,8 @@ El bot crea la estructura de carpetas (`00-Inbox`, `01-Projects`, etc.) automát
 
 Agregar `~/NAS/Sync/ADSO` como nueva carpeta compartida en Syncthing para sincronizarla con los clientes.
 
+El vault ya incluye un `.gitignore` que excluye archivos de estado local de Obsidian (workspace, cache), conflictos de Syncthing y archivos de sistema.
+
 ---
 
 ## 4. Backup automático del vault (opcional)
@@ -279,3 +281,4 @@ make stop
 | `adso-data` (Docker) | ChromaDB + modelos Whisper descargados |
 | `./config.yaml` (host) | Configuración del bot (montado read-only) |
 | directorio de credenciales Google (host) | `google-oauth.json` + `token_tasks.json` — montado en `/credentials/` |
+| `~/.ssh` (host) | SSH keys para git push del backup — montado en `/ssh-keys/` (read-only) |
