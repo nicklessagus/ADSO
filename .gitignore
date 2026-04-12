@@ -10,6 +10,12 @@ build/
 .eggs/
 *.egg
 
+# Testing / coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Entorno virtual
 .venv/
 venv/
