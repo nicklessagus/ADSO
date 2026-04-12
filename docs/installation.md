@@ -168,7 +168,9 @@ git -C ~/NAS/Sync/ADSO push -u origin main
 
 ### 4.3 SSH key para el container Docker
 
-El container necesita acceso SSH a GitHub. ADSO usa la key `~/.ssh/id_ed25519` del host, montada en `/ssh-keys/` dentro del container. El `docker-compose.yml` ya tiene el volumen y la variable `GIT_SSH_COMMAND` configurados — no hace falta ningún paso extra si la key del host tiene acceso al repo.
+El container necesita acceso SSH a GitHub. ADSO monta la key SSH del host en `/ssh-keys/` dentro del container. El `docker-compose.yml` del directorio de deploy (`~/docker/ADSO/`) tiene el volumen y la variable `GIT_SSH_COMMAND` configurados — no hace falta ningún paso extra si la key del host tiene acceso al repo.
+
+> **Nota:** el `docker-compose.yml` del repositorio de código (`~/Repos/ADSO/`) es la plantilla de referencia y no incluye el volumen SSH ni la variable `GIT_SSH_COMMAND`. El directorio de deploy (`~/docker/ADSO/`) tiene su propio compose con ambas configuraciones, separado del repo de código (ver `Makefile` — `make deploy` copia al directorio de deploy).
 
 Si querés usar una key dedicada para ADSO:
 

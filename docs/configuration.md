@@ -113,6 +113,12 @@ weekly_report:
     paper_suggestion: true     # sugerencia de paper a leer basada en similitud con actividad reciente
   stale_idea_days: 60          # días sin actividad para considerar una idea estancada
 
+# ─── Google Tasks ────────────────────────────────────────────────────────────
+tasks:
+  debug: false                # true: notifica por Telegram también en push exitoso a Google Tasks
+                              # útil para verificar que la integración funciona durante testing
+                              # en producción dejar en false (solo notifica en fallos)
+
 # ─── Watcher de vault ────────────────────────────────────────────────────────
 watcher:
   debug: false                # true: notifica por Telegram cada cambio externo detectado en el vault

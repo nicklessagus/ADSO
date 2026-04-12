@@ -92,7 +92,7 @@ Toda operación es `async` para no bloquear el event loop del bot.
 
 ```python
 async def create_note(
-    frontmatter: dict,
+    note_frontmatter: dict,
     body: str,
     vault_path: Path,
     dry_run: bool = False,
@@ -260,11 +260,12 @@ Copia un archivo a `03-Resources/` en el vault.
 **Comportamiento:**
 
 1. Verifica que `source_path` existe.
-2. Calcula `dest = 03-Resources/{original_filename}`.
-3. **Deduplicación:** si ya existe un archivo con el mismo nombre y el mismo tamaño, lo reutiliza y retorna el path existente sin copiar nada.
-4. Si existe con el mismo nombre pero distinto tamaño (archivo diferente), agrega sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc.
-5. Copia el archivo con `shutil.copy2` (preserva metadatos).
-6. Retorna el path del archivo en el vault.
+2. **Sanitiza el nombre**: aplica `Path(original_filename).name` para eliminar cualquier componente de directorio y prevenir path traversal (ej: `../../.env` queda como `.env`, luego el destino final sigue siendo `03-Resources/.env`).
+3. Calcula `dest = 03-Resources/{safe_name}`.
+4. **Deduplicación:** si ya existe un archivo con el mismo nombre y el mismo tamaño, lo reutiliza y retorna el path existente sin copiar nada.
+5. Si existe con el mismo nombre pero distinto tamaño (archivo diferente), agrega sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc.
+6. Copia el archivo con `shutil.copy2` (preserva metadatos).
+7. Retorna el path del archivo en el vault.
 
 **Errores:**
 - `FileNotFoundError` si `source_path` no existe → propagar.
@@ -286,9 +287,11 @@ async def update_wikilinks(
 **Comportamiento:**
 
 1. Lee el archivo.
-2. Aplica dos reemplazos en el body con regex:
+2. Aplica cuatro reemplazos con regex (en orden de especificidad decreciente):
+   - `[[old_name#{heading}|{alias}]]` → `[[new_name#{heading}|{alias}]]`
+   - `[[old_name#{heading}]]` → `[[new_name#{heading}]]`
+   - `[[old_name|{alias}]]` → `[[new_name|{alias}]]`
    - `[[old_name]]` → `[[new_name]]`
-   - `[[old_name|{alias}]]` → `[[new_name|{alias}]]` (preserva el alias)
 3. Reescribe el archivo si hubo algún cambio.
 4. Actualiza `date_modified` si el archivo fue modificado.
 

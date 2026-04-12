@@ -133,18 +133,18 @@ tags: [paper, cosmology, machine-learning]        # generados por LLM, kebab-cas
 read_status: unread                               # unread | reading | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
-url: "https://arxiv.org/abs/XXXX.XXXXX"
+source_url: "https://arxiv.org/abs/XXXX.XXXXX"   # URL canónica — "source_url", no "url"
 doi: "10.XXXX/..."                                # extraído localmente del PDF
 keywords: ["time-series", "transformer", "self-supervised"]  # palabras clave del paper, idioma original
-relevance: "Para qué sirve este paper"            # provisto por el usuario o inferido por LLM
+relevance: "Para qué sirve este paper"            # provisto por el usuario — campo libre
 context: "Contexto adicional de uso"              # opcional, ej: "comparar con modelo actual"
 priority: medium                                  # Text enum — low | medium | high — inferido o explícito
-# Extraídos localmente del PDF + estructurados por LLM:
+# Campos extraídos por el pipeline de document_extractor.py (no por el LLM de clasificación):
 contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
 methods: ["transformer", "contrastive-learning"]  # métodos/técnicas usadas
 dataset: ["ImageNet", "COCO"]                     # opcional
 conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
-related: ["[[otra-nota]]", "[[paper-similar]]"]   # links siempre entre comillas dobles dentro del array
+related: ["[[otra-nota]]", "[[paper-similar]]"]   # generado por el pipeline de embeddings — links siempre entre comillas dobles
 ---
 ```
 
@@ -220,7 +220,7 @@ type: project-index
 title: "Tesis doctoral"
 date_created: 2025-01-01               # Date — sin comillas
 date_modified: 2025-01-15              # Date — sin comillas
-status: active                          # Text enum — active | on-hold | completed
+status: active                          # Text enum — active | on-hold | completed | archived
 description: "Papers de doctorado, experimentos de ML, escritura académica."  # scope de clasificación — requerido
 sections: [introduccion, experimentos, trabajos-futuros, papers]
 tags: [tesis, doctorado]
@@ -237,16 +237,12 @@ El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 {descripción provista al crear el proyecto}
 
 ## Secciones
-- [[introduccion/]] — {descripción breve}
-- [[experimentos/]] — {descripción breve}
-- [[papers/]] — {descripción breve}
 
 ## Estado
 - Creado: {date_created}
-- Notas: {count} (actualizado por el reporte semanal)
 ```
 
-El usuario puede agregar lo que quiera al body (objetivos, notas, links, etc.). ADSO solo modifica el frontmatter (`date_modified`, `status`, `sections` si se agregan nuevas).
+El usuario puede agregar lo que quiera al body (objetivos, notas, links, secciones, etc.). ADSO solo modifica el frontmatter (`date_modified`, `status`).
 
 ---
 

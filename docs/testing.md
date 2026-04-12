@@ -47,53 +47,38 @@ Todas las dependencias de testing van en un grupo separado (`requirements-dev.tx
 ```
 tests/
 ├── conftest.py                    # fixtures globales
-├── fixtures/
-│   ├── llm_responses/             # JSONs grabados de Gemini para replay
-│   │   ├── classify_text.json
-│   │   ├── classify_audio.json
-│   │   ├── classify_link.json
-│   │   ├── classify_image.json
-│   │   ├── classify_document.json
-│   │   ├── generate_frontmatter_note.json
-│   │   ├── generate_frontmatter_note_academic.json  # note con campos académicos opcionales
-│   │   ├── generate_frontmatter_task.json
-│   │   ├── generate_frontmatter_idea.json
-│   │   ├── disambiguation_response.json  # respuesta con confianza baja en modo
-│   │   ├── query_response.json    # respuesta RAG con notas como contexto
-│   │   ├── malformed_json.json    # respuesta inválida para test de error handling
-│   │   └── empty_response.json    # respuesta vacía para test de modo degradado
-│   └── sample_notes/              # notas .md de ejemplo con frontmatter válido
-│       ├── note.md
-│       ├── note_academic.md          # note con campos académicos (authors, doi, etc.)
-│       ├── task.md
-│       ├── idea.md
-│       ├── inbox_pending.md
-│       ├── project_index.md          # _index.md de proyecto con description y sections
-│       └── area_index.md             # _index.md de área con description
 ├── unit/
 │   ├── test_frontmatter.py        # generación y validación de YAML
 │   ├── test_file_naming.py        # slug, fecha, kebab-case
 │   ├── test_config.py             # carga de config.yaml, defaults, merge con env
-│   ├── test_classification.py     # parsing del modo (captura/consulta/edición/gestión)
-│   ├── test_knowledge_query.py    # parsing de resultados ChromaDB, threshold, dedup
+│   ├── test_classification.py     # parsing del modo (capture/manage) y validación de schema
 │   ├── test_security.py           # auth middleware: allow, reject, edge cases
-│   └── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
+│   ├── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
+│   ├── test_arxiv_client.py       # parsing de metadata arXiv (Atom feed)
+│   ├── test_tasks_client.py       # Google Tasks API async
+│   ├── test_vault_watcher.py      # eventos watchdog, deduplicación inotify
+│   ├── test_vault_writer_ops.py   # operaciones vault_writer (read, append, set_property)
+│   ├── test_embeddings.py         # ChromaDB: index, remove, query_similar
+│   ├── test_document_extractor.py # detección de papers, extracción de secciones
+│   ├── test_transcriber.py        # faster-whisper: modelo, idioma, fallback
+│   └── test_reporters.py          # formateo de reportes (reporte, reporte_full)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
 │   ├── test_degraded_mode.py      # LLM falla → nota en 00-Inbox/pending
-│   ├── test_embeddings_pipeline.py # vault_writer → embeddings → ChromaDB
-│   ├── test_edit_flow.py          # edición de nota existente → re-index
-│   ├── test_rename_flow.py        # renombrado → backlinks actualizados → ChromaDB path actualizado
+│   ├── test_embeddings_integration.py  # vault_writer → embeddings → ChromaDB
 │   ├── test_git_backup.py         # debounce, commit messages, push failures
-│   ├── test_vault_search_integration.py  # backlinks y filtros contra vault temporal
-│   └── test_calendar_sync.py      # mock Google API → parsing de eventos
+│   └── test_vault_search_integration.py  # backlinks y filtros contra vault temporal
 ├── e2e/
 │   ├── test_capture_message.py    # Update simulado → respuesta + vault escrito
-│   ├── test_query_message.py      # Update simulado → RAG → respuesta con notas
-│   ├── test_task_creation.py      # Update simulado → task creada → Google Tasks + Calendar si tiene fecha
 │   ├── test_confirmation_flow.py  # Update → preview → confirm/reject → resultado
-└── README.md                      # instrucciones para correr tests (opcional)
+│   ├── test_media_handlers.py     # audio, imagen, documento → flujo completo
+│   └── test_bot_extra.py          # casos edge: /reset, modo corrección, estado pendiente
 ```
+
+Tests planificados (no implementados aún):
+- `tests/integration/test_calendar_sync.py` — mock Google API (Fase 6 Calendar, diferida)
+- `tests/e2e/test_query_message.py` — RAG queries (Fase 7)
+- `tests/e2e/test_task_creation.py` — Google Tasks + Calendar con fecha (Fase 6)
 
 ---
 
@@ -139,9 +124,13 @@ Qué se testea:
 
 Qué se testea:
 - Parsing de la respuesta JSON del LLM que indica el modo
-- Cada modo reconocido: `captura`, `consulta`, `edición`, `gestión`
-- JSON malformado del LLM → error manejable, no excepción sin capturar
-- Campos faltantes en la respuesta → defaults razonables o error explícito
+- Modos activos: `capture` (captura) y `manage` (gestión)
+- Modos redirigidos: `query` y `edit` → redirigidos a `capture` (Fase 7 no implementada)
+- JSON malformado del LLM → `LLMResponseError` manejable, no excepción desnuda
+- Campos faltantes en la respuesta → error explícito o default razonable
+- Validación de `type` (`reference` | `task` | `idea`), `status` por tipo, `priority`, fechas ISO 8601
+- Status aliases: `todo` → `pending`, `draft` → `raw`
+- Patrones de injection: `check_injection_risk()` detecta variantes en inglés y español
 
 #### `test_vault_search.py`
 
@@ -356,15 +345,27 @@ def chroma_path(tmp_path) -> Path:
 
 @pytest.fixture
 def mock_llm_client() -> AsyncMock:
-    """Mock de llm_client con respuestas default."""
+    """Mock de llm_client.classify con respuesta default válida."""
     client = AsyncMock()
-    # Respuesta default: note clasificada
+    # El schema real tiene wrapper {mode, confidence, payload{frontmatter, body, summary}}
     client.classify.return_value = {
-        "mode": "captura",
-        "type": "note",
-        "project": "tesis",
-        "section": "experimentos",
-        ...
+        "mode": "capture",
+        "confidence": 0.95,
+        "needs_disambiguation": False,
+        "payload": {
+            "frontmatter": {
+                "title": "Nota de prueba",
+                "type": "reference",
+                "tags": ["test"],
+                "status": "active",
+                "project": "tesis",
+                "section": None,
+                "area": None,
+                "priority": None,
+            },
+            "body": "Cuerpo de prueba.",
+            "summary": None,
+        },
     }
     return client
 
@@ -384,13 +385,14 @@ weekly_report:
   enabled: true
   day: friday
   time: "18:00"
-  include:
-    - notes_created
-    - active_project
-    - new_methods
-    - paper_queue
-    - stale_ideas
-    - tasks_review
+  sections:
+    notes_summary: true
+    most_active_project: true
+    papers_queue: true
+    inbox_suggestion: true
+    tasks_summary: true
+    stale_ideas: true
+    paper_suggestion: true
   stale_idea_days: 60
 rag:
   similarity_threshold: 0.75
