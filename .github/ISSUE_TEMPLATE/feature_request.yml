@@ -1,0 +1,53 @@
+name: Feature Request
+description: Propose a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [ROADMAP.md](../../ROADMAP.md) first — your idea may already be planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What are you trying to do that you can't do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like ADSO to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about.
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Which phase does this fit?
+      options:
+        - Phase 6 (Calendar / Tasks)
+        - Phase 7 (RAG queries)
+        - Phase 8 (Vault analysis)
+        - New phase / infrastructure
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints to consider
+      options:
+        - label: Must run on Raspberry Pi 4 (4GB RAM, ARM64)
+        - label: Must work within Gemini free tier limits (~20 RPD)
+        - label: Must not require additional system dependencies
+        - label: Must maintain single-user security model

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest --cov=adso --cov-report=xml --cov-fail-under=80 -m "not integration and not e2e"
+        env:
+          TELEGRAM_TOKEN: dummy
+          TELEGRAM_ALLOWED_USER_ID: "12345"
+          GEMINI_API_KEY: dummy
+          VAULT_PATH: /tmp/adso_test_vault
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install linters
+        run: pip install ruff mypy types-PyYAML
+
+      - name: ruff check
+        run: ruff check adso/ tests/
+
+      - name: mypy
+        run: mypy adso/ --ignore-missing-imports --no-strict-optional
+        continue-on-error: true  # treat as advisory until type coverage is complete
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --no-cache -t adso:ci .
+
+      - name: Check image size
+        run: |
+          SIZE=$(docker image inspect adso:ci --format='{{.Size}}')
+          echo "Image size: $(( SIZE / 1024 / 1024 )) MB"
+          # Fail if image exceeds 2GB (generous limit for RPi deployment)
+          [ "$SIZE" -lt 2147483648 ] || (echo "Image too large" && exit 1)

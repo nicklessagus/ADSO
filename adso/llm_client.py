@@ -41,14 +41,30 @@ VALID_OPERATIONS = {
     "create_section", "convert_idea_to_project", "reclassify_inbox",
 }
 
-# Prompt injection patterns
+# Prompt injection patterns — English and Spanish variants.
+# Checks are case-insensitive (re.IGNORECASE in check_injection_risk).
 INJECTION_PATTERNS = [
-    r"ignore (previous|all|your) instructions",
-    r"forget (what|everything)",
-    r"you are now",
-    r"new instructions:",
+    # English
+    r"ignore (previous|all|your|the) instructions",
+    r"disregard (previous|all|your|the) instructions",
+    r"forget (what|everything|all)",
+    r"you are now (a|an|the)",
+    r"new instructions\s*:",
     r"system prompt",
-    r"</?(input|system|instructions?)>",
+    r"act as (a|an|the)",
+    r"from now on",
+    # XML/tag injection — breaking out of <input> wrapper
+    r"</?(input|system|instructions?|user_context|prompt)>",
+    # Spanish variants
+    r"ignora (las|tus|todas las|las anteriores|tus anteriores) instrucciones",
+    r"olvida (las instrucciones|todo|el contexto|lo anterior|tus instrucciones)",
+    r"ahora (eres|actúa como|actua como|sos)",
+    r"actúa como (un|una|el|la)",
+    r"actua como (un|una|el|la)",
+    r"nuevas instrucciones\s*:",
+    r"a partir de ahora",
+    r"eres (un|una|ahora)",
+    r"pretende (ser|que eres)",
 ]
 
 MAX_RETRIES = 3
@@ -578,7 +594,14 @@ async def classify(
     system_prompt = build_system_prompt(existing_projects, existing_areas, existing_tags)
     user_message = f"<input>\n{content}\n</input>"
     if user_context:
-        user_message += f"\n\n<user_context>{user_context}</user_context>"
+        # Sanitize user_context to prevent tag-breaking injection.
+        # Remove angle brackets that could escape the <user_context> wrapper.
+        safe_context = re.sub(r"[<>]", "", user_context)
+        if check_injection_risk(safe_context):
+            logger.warning("Patrón de inyección detectado en user_context — descartado")
+            safe_context = None
+        if safe_context:
+            user_message += f"\n\n<user_context>{safe_context}</user_context>"
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:

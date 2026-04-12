@@ -692,7 +692,10 @@ async def save_resource(
     resources_dir = vault_path / "03-Resources"
     resources_dir.mkdir(parents=True, exist_ok=True)
 
-    dest = resources_dir / original_filename
+    # Strip directory components to prevent path traversal (e.g. "../../.env").
+    # Path(...).name keeps only the final component regardless of separators.
+    safe_name = Path(original_filename).name or "resource"
+    dest = resources_dir / safe_name
 
     # Si ya existe con el mismo nombre y tamaño, reutilizar — no duplicar
     if dest.exists() and dest.stat().st_size == source_path.stat().st_size:
@@ -701,8 +704,8 @@ async def save_resource(
 
     # Mismo nombre pero distinto tamaño — agregar sufijo numérico
     if dest.exists():
-        stem = Path(original_filename).stem
-        suffix = Path(original_filename).suffix
+        stem = Path(safe_name).stem
+        suffix = Path(safe_name).suffix
         counter = 1
         while dest.exists():
             dest = resources_dir / f"{stem}_{counter}{suffix}"

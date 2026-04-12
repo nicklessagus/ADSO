@@ -1,0 +1,9 @@
+# Code owners — automatically requested for review on PRs.
+* @nicklessagus
+
+# Security-sensitive modules require explicit review
+adso/security.py @nicklessagus
+adso/llm_client.py @nicklessagus
+adso/vault_writer.py @nicklessagus
+docs/security.md @nicklessagus
+SECURITY.md @nicklessagus

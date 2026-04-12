@@ -1,0 +1,60 @@
+name: Bug Report
+description: Something is not working correctly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before reporting: check the logs with `make logs` and `docker inspect adso-bot`.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Send message "..."
+        2. Click button "..."
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste log lines (redact API keys and user IDs).
+      render: text
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "3.11.x"
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "Raspberry Pi 4, Docker 24.x / macOS 14 / Ubuntu 22.04"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config.yaml sections
+      description: Paste any non-sensitive sections of config.yaml related to the bug.
+      render: yaml
