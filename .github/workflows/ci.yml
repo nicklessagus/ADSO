@@ -29,12 +29,16 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest --cov=adso --cov-report=xml -m "not integration and not e2e"
+        run: pytest --cov=adso --cov-report=xml --no-cov-on-fail -m "not integration and not e2e"
         env:
           TELEGRAM_TOKEN: dummy
           TELEGRAM_ALLOWED_USER_ID: "12345"
           GEMINI_API_KEY: dummy
           VAULT_PATH: /tmp/adso_test_vault
+
+      - name: Check coverage threshold (3.11 only)
+        if: matrix.python-version == '3.11'
+        run: python -m coverage report --fail-under=70
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'

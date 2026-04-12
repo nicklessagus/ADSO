@@ -46,6 +46,7 @@ jobs:
   codeql:
     name: CodeQL analysis
     runs-on: ubuntu-latest
+    continue-on-error: true  # Code scanning requires GitHub Advanced Security (private repo)
     permissions:
       security-events: write
       actions: read

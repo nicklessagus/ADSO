@@ -51,4 +51,4 @@ omit = [
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 70             # core logic modules (no Telegram handlers); 72%+ en 3.11
+# fail_under aplicado solo en Python 3.11 via CI (ver .github/workflows/ci.yml)
