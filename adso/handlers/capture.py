@@ -44,6 +44,7 @@ async def _classify_and_preview(
     preserve_body: bool = False,
     forced_type: Optional[str] = None,
     prevent_task: bool = False,
+    original_text: Optional[str] = None,
 ) -> None:
     """Clasifica texto extraído y muestra preview.
 
@@ -175,9 +176,11 @@ async def _classify_and_preview(
     # Para texto libre y audio el body es siempre el texto original del usuario.
     # preserve_body extiende esto a imágenes/documentos cuando el texto viene
     # directamente del usuario (descripción manual, OCR confirmado).
+    # original_text permite que el LLM clasifique con un fragmento (text) pero
+    # el body de la nota use el contenido completo (original_text).
     if media_type in ("text", "audio") or preserve_body:
-        body = text
-        payload["body"] = text
+        body = original_text or text
+        payload["body"] = original_text or text
     else:
         body = payload.get("body", "")
 
@@ -946,12 +949,15 @@ async def _cb_extraction_ok(
 
     await update.callback_query.edit_message_text("Clasificando...")
 
+    preserve_body = pe.get("preserve_body", False)
     await _classify_and_preview(
         update, context, classify_text,
         media_type=pe.get("media_type", "document"),
         resource_file=resource_info,
         extra_fm=extra_fm or None,
         user_context=pe.get("user_context"),
+        preserve_body=preserve_body,
+        original_text=pe["text"] if preserve_body else None,
     )
 
 

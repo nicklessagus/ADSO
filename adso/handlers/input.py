@@ -395,11 +395,13 @@ async def handle_document(
 
             context.user_data["pending_extraction"] = {
                 "text": text,
+                "classify_content": build_classify_content(text, {}, is_paper=False),
                 "temp_path": str(tmp_path),
                 "original_filename": filename,
                 "media_type": "document",
                 "metadata": {},
                 "user_context": msg.caption or None,
+                "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
             }
 
             snippet = text[:500]
