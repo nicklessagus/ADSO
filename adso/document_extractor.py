@@ -142,7 +142,7 @@ def _clean_formula_blocks(text: str) -> str:
 
     # Paso 2: expandir ventana alrededor de anclas (números de ecuación)
     formula_set: set[int] = set()
-    eq_anchors = [i for i, l in enumerate(lines) if _EQ_NUMBER_RE.match(l.strip())]
+    eq_anchors = [i for i, ln in enumerate(lines) if _EQ_NUMBER_RE.match(ln.strip())]
 
     for anchor in eq_anchors:
         for k in range(max(0, anchor - 10), min(n, anchor + 3)):

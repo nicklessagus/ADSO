@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
 
 from adso.handlers.input import handle_text
 from adso.handlers.callbacks import handle_callback

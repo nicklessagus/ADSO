@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_CLASIFICAR_INBOX
-from adso.keyboards import _esc, build_capture_keyboard, build_preview
+from adso.keyboards import build_capture_keyboard, build_preview
 from adso.llm_client import classify, extract_original_from_degraded
 from adso.security import authorized
 from adso.vault_search import find_by_property
@@ -71,7 +71,7 @@ async def handle_reset(
 def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
     """Genera las líneas de estado del VaultWatcher para /status."""
     if watcher is None:
-        return [f"<b>Watcher vault:</b> no iniciado"]
+        return ["<b>Watcher vault:</b> no iniciado"]
 
     stats: WatcherStats = watcher.stats
     label = "activo · debug" if stats.debug else "activo"

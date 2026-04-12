@@ -11,8 +11,7 @@ from pathlib import Path
 from telegram.ext import ContextTypes
 
 from adso.constants import MANAGE_KEYWORDS
-from adso.vault_search import find_by_property, get_all_tags
-from adso.vault_writer import read_note
+from adso.vault_search import get_all_tags
 
 
 def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:

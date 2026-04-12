@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from telegram import Update
 from telegram.ext import ContextTypes

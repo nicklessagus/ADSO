@@ -6,6 +6,7 @@ Solo routing: despacha a los handlers específicos según callback_data.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from telegram import Update
 from telegram.ext import ContextTypes

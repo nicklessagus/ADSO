@@ -29,7 +29,6 @@ from adso.constants import (
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
     CB_INTENT_NOTE,
-    CB_INTENT_SAVE,
     CB_INTENT_TASK,
     CB_MANAGE_CANCEL,
     CB_MANAGE_CONFIRM,
@@ -38,17 +37,8 @@ from adso.constants import (
     CB_READ_STATUS_UNREAD,
     CB_REPORT_HEALTH,
     CB_REPORT_IDEAS,
-    CB_REPORT_IDEAS_PREFIX,
-    CB_REPORT_IDEAS_SHOW_A,
-    CB_REPORT_IDEAS_SHOW_P,
     CB_REPORT_READING,
-    CB_REPORT_READING_PREFIX,
-    CB_REPORT_READING_SHOW_A,
-    CB_REPORT_READING_SHOW_P,
     CB_REPORT_SCOPE,
-    CB_REPORT_SCOPE_PREFIX,
-    CB_REPORT_SCOPE_SHOW_A,
-    CB_REPORT_SCOPE_SHOW_P,
     CB_NOTE_CORRECT,
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_CORRECT,
@@ -118,7 +108,7 @@ def build_preview(
 
     if suggested_links:
         link_labels = [lnk.get("title") or lnk["note_id"] for lnk in suggested_links]
-        lines.append(f"\n<b>Links sugeridos:</b> {', '.join(_esc(l) for l in link_labels)}")
+        lines.append(f"\n<b>Links sugeridos:</b> {', '.join(_esc(lbl) for lbl in link_labels)}")
 
     clean_body = extract_original_from_degraded(body)
     snippet = clean_body[:200].strip()

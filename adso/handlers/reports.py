@@ -19,13 +19,12 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from telegram import InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from adso.bot_utils import _get_existing_items, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import (
-    CB_CANCEL,
     CB_REPORT_HEALTH,
     CB_REPORT_IDEAS,
     CB_REPORT_IDEAS_PREFIX,

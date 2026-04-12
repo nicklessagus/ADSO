@@ -187,12 +187,14 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: s
         <descripción original del usuario>
         Proyecto: X  (o Área: X si no hay proyecto)
         Prioridad: high/medium/low
-        obsidian://open?path=...
+        Horario: DD/MM/YYYY HH:MM  (solo si tiene hora no-medianoche)
+
+    No incluye links obsidian:// — no funcionan desde Google Tasks/Calendar.
 
     Args:
         fm: Frontmatter de la nota guardada.
         note_path: Path absoluto de la nota.
-        vault_path: Path raíz del vault (para el link obsidian://).
+        vault_path: Path raíz del vault.
         description: Texto original del usuario (body limpio, sin callouts).
 
     Returns:

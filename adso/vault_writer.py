@@ -10,7 +10,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -759,10 +759,15 @@ class GitBackup:
 
             # Programar nuevo commit
             loop = asyncio.get_running_loop()
-            self._timer = loop.call_later(
-                self.debounce_seconds,
-                lambda: asyncio.ensure_future(self._do_backup()),
-            )
+            def _schedule_backup() -> None:
+                task = asyncio.ensure_future(self._do_backup())
+                task.add_done_callback(
+                    lambda t: logger.error("Backup task failed: %s", t.exception())
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
+
+            self._timer = loop.call_later(self.debounce_seconds, _schedule_backup)
 
     async def _do_backup(self) -> None:
         """Ejecuta git add + commit + push."""

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from adso.handlers.input import handle_text
 from adso.handlers.callbacks import handle_callback
@@ -13,10 +12,8 @@ from adso.constants import (
     CB_CANCEL,
     CB_CORRECT,
     CB_DEST_INBOX,
-    CB_DISAMBIG_CAPTURE,
     CB_MANAGE_CONFIRM,
     CB_MANAGE_CANCEL,
-    CB_INTENT_SAVE,
     CB_INTENT_CREATE_PROJECT,
 )
 

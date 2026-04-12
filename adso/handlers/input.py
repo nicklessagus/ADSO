@@ -12,7 +12,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _cleanup_pending, _detect_manage_keywords, _has_destination, _has_pending_keyboard, _is_awaiting_text_input
+from adso.bot_utils import _detect_manage_keywords, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_EXTRACTION_CANCEL
 from adso.document_extractor import (
@@ -47,9 +47,8 @@ async def handle_text(
 ) -> None:
     """Handler principal de mensajes de texto."""
     from adso.handlers.capture import _classify_and_preview
-    from adso.handlers.manage import _handle_manage, _handle_manage_missing_fields
+    from adso.handlers.manage import _handle_manage_missing_fields
 
-    settings: Settings = context.bot_data["settings"]
     text = update.message.text
 
     # Transcripción pendiente esperando corrección

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from adso.vault_writer import GitBackup
 

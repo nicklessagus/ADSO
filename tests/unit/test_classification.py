@@ -290,7 +290,6 @@ class TestToKebab:
 
     def test_type_tags_filtered(self) -> None:
         """Tags que duplican el type son eliminados en post-procesado."""
-        import json
         data = {
             "mode": "capture",
             "payload": {
@@ -311,6 +310,6 @@ class TestToKebab:
         assert "productividad" in tags
 
     def test_type_tags_filtered_note_types(self) -> None:
-        from adso.llm_client import _to_kebab, _TYPE_TAGS
+        from adso.llm_client import _TYPE_TAGS
         for bad_tag in ["tarea", "task", "nota", "note", "idea", "paper"]:
             assert bad_tag in _TYPE_TAGS

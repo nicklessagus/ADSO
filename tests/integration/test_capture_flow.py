@@ -6,7 +6,7 @@ import json
 import pytest
 from pathlib import Path
 
-from adso.vault_writer import create_note, read_note, ensure_vault_structure
+from adso.vault_writer import create_note, read_note
 
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "llm_responses"

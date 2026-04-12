@@ -16,8 +16,10 @@ from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
-_raw = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "0")
-ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip()}
+_raw = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "")
+if not _raw.strip():
+    raise RuntimeError("TELEGRAM_ALLOWED_USER_ID is not set — bot refuses to start")
+ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip().isdigit()}
 
 
 def authorized(

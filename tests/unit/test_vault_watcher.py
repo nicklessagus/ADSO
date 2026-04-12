@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from adso.vault_watcher import CONFLICT_RE, VaultWatcher, WatcherStats, _VaultEventHandler
+from adso.vault_watcher import CONFLICT_RE, VaultWatcher, _VaultEventHandler
 
 
 # ---------------------------------------------------------------------------
@@ -58,8 +58,8 @@ class TestVaultEventHandler:
         assert item.is_conflict is True
 
     @pytest.mark.asyncio
-    async def test_on_created_ignores_non_conflict(self) -> None:
-        """on_created no encola .md normales — ADSO los crea y ya los indexa."""
+    async def test_on_created_queues_external_md(self) -> None:
+        """on_created encola .md normales creados externamente (ej: desde Obsidian) para re-embed."""
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         handler = _VaultEventHandler(queue, loop)
@@ -71,7 +71,10 @@ class TestVaultEventHandler:
         handler.on_created(event)
         await asyncio.sleep(0.01)
 
-        assert queue.empty()
+        assert not queue.empty()
+        item = queue.get_nowait()
+        assert item.path == Path(event.src_path)
+        assert item.is_conflict is False
 
     @pytest.mark.asyncio
     async def test_on_modified_queues_external_change(self) -> None:

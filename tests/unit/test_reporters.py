@@ -5,7 +5,6 @@ Usa tmp_path con archivos .md reales (no mocks de vault_search).
 
 from __future__ import annotations
 
-import textwrap
 from datetime import date, datetime, timedelta
 from pathlib import Path
 

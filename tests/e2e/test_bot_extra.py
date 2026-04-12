@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from adso.handlers.input import handle_text, handle_audio, handle_document, handle_photo
+from adso.handlers.input import handle_text, handle_audio
 from adso.handlers.callbacks import handle_callback
 from adso.handlers.capture import _parse_date_from_text, _apply_task_corrections
 from adso.bot_utils import _is_awaiting_text_input
@@ -16,17 +16,13 @@ from adso.keyboards import (
     build_destination_keyboard,
     build_disambiguation_keyboard,
     build_manage_keyboard,
-    build_area_selector,
-    build_project_selector,
     _esc,
 )
 from adso.bot_utils import _has_destination
 from adso.constants import (
     CB_CONFIRM,
     CB_CANCEL,
-    CB_CORRECT,
     CB_DEST_INBOX,
-    CB_DEST_AREA_PREFIX,
     CB_DEST_PROJECT_PREFIX,
     CB_CHOOSE_AREA,
     CB_CHOOSE_PROJECT,

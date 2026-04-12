@@ -6,11 +6,10 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from tests.conftest import ALLOWED_USER_ID, make_message, make_user, make_chat
+from tests.conftest import ALLOWED_USER_ID
 
-from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text, _process_pdf_after_read_status
+from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
 from adso.handlers.callbacks import handle_callback
-from adso.handlers.capture import _classify_and_preview
 from adso.bot_utils import _cleanup_pending
 from adso.keyboards import (
     build_transcript_keyboard,
@@ -27,7 +26,6 @@ from adso.constants import (
     CB_TRANSCRIPT_CANCEL,
     CB_TRANSCRIPT_OK,
     CB_VISION,
-    CB_CONFIRM,
 )
 
 # Decorador común para autorizar el user_id de test

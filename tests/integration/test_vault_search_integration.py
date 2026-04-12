@@ -81,14 +81,8 @@ class TestBacklinks:
 
     @pytest.mark.asyncio
     async def test_backlinks_found(self, vault: Path) -> None:
-        notes = await _create_notes(vault)
-        # nota-a es referenciada por nota-b y nota-c
-        results = await get_backlinks("nota-a", vault, exclude_dirs=[])
-        # No podemos buscar por stem "nota-a" porque el filename incluye fecha
-        # Usemos el stem real del archivo
-        stem_a = notes["nota-a"].stem
+        await _create_notes(vault)
         # nota-b y nota-c referencian [[nota-a]], no el stem del archivo
-        # El contenido usa [[nota-a]] no el stem real
         results = await get_backlinks("nota-a", vault, exclude_dirs=[])
         assert len(results) == 2
 

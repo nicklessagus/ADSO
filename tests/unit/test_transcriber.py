@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from adso.transcriber import transcribe_audio, _get_model, unload_model
+from adso.transcriber import transcribe_audio, unload_model
 
 
 @pytest.fixture(autouse=True)

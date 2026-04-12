@@ -422,7 +422,7 @@ def build_system_prompt(
     Returns:
         System prompt as a string.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
     _now = datetime.now()
     today = _now.strftime("%Y-%m-%d")
     weekday = _now.strftime("%A")  # e.g. "Sunday"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -28,7 +28,7 @@ class TestBuildTaskNotes:
 
         assert "Proyecto: tesis" in result
         assert "Prioridad: high" in result
-        assert "obsidian://open?path=" in result
+        assert "obsidian://" not in result  # links obsidian:// no se incluyen en Tasks
 
     def test_falls_back_to_area(self, tmp_path: Path) -> None:
         vault = tmp_path / "vault"
@@ -53,22 +53,22 @@ class TestBuildTaskNotes:
         fm = {}
         result = build_task_notes(fm, note, vault)
 
-        assert "obsidian://open?path=" in result
+        assert "obsidian://" not in result  # links obsidian:// no se incluyen en Tasks
         assert "Proyecto:" not in result
         assert "Área:" not in result
 
-    def test_obsidian_link_is_url_encoded(self, tmp_path: Path) -> None:
+    def test_no_obsidian_links_included(self, tmp_path: Path) -> None:
         vault = tmp_path / "vault"
         vault.mkdir()
         note = vault / "01-Projects" / "mi proyecto" / "tarea con espacios.md"
         note.parent.mkdir(parents=True)
         note.touch()
 
-        fm = {}
+        fm = {"project": "mi proyecto"}
         result = build_task_notes(fm, note, vault)
 
-        # Los espacios deben estar URL-encoded
-        assert " " not in result.split("obsidian://")[-1]
+        # Los links obsidian:// no se incluyen — no funcionan desde Google Tasks/Calendar
+        assert "obsidian://" not in result
 
     def test_no_priority_field_when_missing(self, tmp_path: Path) -> None:
         vault = tmp_path / "vault"
@@ -155,8 +155,6 @@ class TestTasksClientCreateTask:
 
         await client.create_task("Tarea test", "notas", due_date="2026-04-15")
 
-        call_args = svc.tasks().insert.call_args
-        body = call_args.kwargs.get("body") or call_args.args[0] if call_args.args else call_args.kwargs["body"]
         # insert se llama con tasklist= y body=
         insert_kwargs = svc.tasks().insert.call_args
         # El due debe estar en el body pasado a insert
@@ -174,10 +172,7 @@ class TestTasksClientCreateTask:
         result = await client.create_task("Tarea", long_notes)
 
         assert result is not None
-        insert_kwargs = client._service.tasks().insert.call_args
-        body_str = str(insert_kwargs)
-        # No podemos medir el body exactamente desde el mock string,
-        # pero si llegó hasta insert() sin error, el truncado no rompió nada
+        # si llegó hasta insert() sin error, el truncado no rompió nada
         assert result == "task-abc"
 
     @pytest.mark.asyncio
