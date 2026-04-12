@@ -22,7 +22,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Requiere Python ≥ 3.9. No hay dependencias nativas — venv estándar alcanza, no necesita conda.
+Requiere Python ≥ 3.11. No hay dependencias nativas — venv estándar alcanza, no necesita conda.
 
 Para correr el bot (no solo tests), crear `.env` y `config.yaml`:
 

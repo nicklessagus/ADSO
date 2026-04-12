@@ -21,6 +21,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Transcribe** audios localmente con `faster-whisper`
 - **Extrae texto** de imágenes con OCR local (pytesseract) o Gemini Vision — el usuario elige en el momento
 - **Extrae metadata** de PDFs con `pymupdf`: texto, abstract, keywords, autores, DOI; detecta papers académicos automáticamente
+- **Preserva formato** de archivos `.md` y `.txt`: el LLM solo genera el frontmatter (título, tags, destino), el body de la nota es el contenido original sin modificar
 - **Integra arXiv**: al recibir un link de arxiv.org recupera metadata completa via API oficial (sin scraping) y genera una nota con abstract, autores y summary en español
 - **Genera** archivos Markdown con Frontmatter YAML clasificados, con links automáticos por similitud semántica
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
@@ -31,7 +32,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 
 | Componente | Tecnología |
 |---|---|
-| Bot | Python 3.9+ (dev) / 3.11 (Docker), `python-telegram-bot` (async) |
+| Bot | Python 3.11+, `python-telegram-bot` (async) |
 | LLM primario | Gemini API — `gemini-2.5-flash-lite` |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |

@@ -464,16 +464,14 @@ def make_callback_query():
 | `config.py` | ≥ 90% | Defaults incorrectos pueden causar errores difíciles de debuggear. |
 | `vault_search.py` | ≥ 85% | Lee el vault para backlinks/tags/filtros. Errores degradan consultas estructurales. |
 | `embeddings.py` | ≥ 80% | Errores no pierden datos (se puede re-indexar) pero degradan consultas. |
-| `knowledge_query.py` | ≥ 75% | Solo lectura, no destructivo. |
-| `calendar_client.py` | ≥ 80% | Escribe a Calendar/Tasks externo. |
 | `tasks_client.py` | ≥ 80% | Escribe a Google Tasks externo. |
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
-| `bot.py` | ≥ 70% | Handlers + inline keyboard callbacks. Lo cubre e2e. |
 
-**Target global: ≥ 80%.**
+**Target global (CI): ≥ 70%** sobre módulos de lógica pura (excluye `bot.py` y `handlers/*`).
 
-### Qué NO se mide
+### Qué NO se mide en CI
 
+- `bot.py` y `adso/handlers/*` — requieren PTB Application/Update/Context; cubiertos por e2e tests
 - Código de terceros (`python-telegram-bot`, `chromadb`, `faster-whisper`)
 - Archivos de configuración y fixtures
 - `__init__.py` vacíos
@@ -523,4 +521,4 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa debe correr en **< 30 segundos** en una máquina de desarrollo. Si se pasa, hay un test que está haciendo algo que no debería.
+- La suite completa (unit + integration + e2e) corre en ~55 segundos en desarrollo. Los unit tests solos corren en < 15 segundos en CI.
