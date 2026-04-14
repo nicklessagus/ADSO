@@ -90,7 +90,7 @@ class TestBuildPreview:
     def test_preview_no_destination(self) -> None:
         fm = {"title": "X", "type": "reference"}
         preview = build_preview(fm, "body", [])
-        assert "por definir" in preview
+        assert "00-Inbox" in preview
 
     def test_preview_long_body_truncated(self) -> None:
         fm = {"title": "X", "type": "reference"}

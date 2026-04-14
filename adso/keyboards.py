@@ -68,8 +68,7 @@ def build_preview(
     Regla de destino:
     - project → 01-Projects/{project}/{section}
     - area    → 02-Areas/{area}
-    - type == "task" (sin project ni area) → 00-Inbox
-    - otro tipo sin destino → "por definir" (el usuario debe elegir)
+    - sin destino (cualquier tipo) → 00-Inbox
 
     Args:
         frontmatter: Dict del frontmatter propuesto.
@@ -92,10 +91,8 @@ def build_preview(
         lines.append(f"<b>Destino:</b> {dest}")
     elif fm.get("area"):
         lines.append(f"<b>Destino:</b> 02-Areas/{fm['area']}")
-    elif fm.get("type") == "task":
-        lines.append("<b>Destino:</b> 00-Inbox")
     else:
-        lines.append("<b>Destino:</b> por definir")
+        lines.append("<b>Destino:</b> 00-Inbox")
 
     if fm.get("status"):
         lines.append(f"<b>Status:</b> {fm['status']}")
