@@ -997,7 +997,7 @@ Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servi
 ```
 Nota nueva confirmada
     ├─→ Escribe .md al vault          (inmediato)
-    └─→ Gemini Embedding API          (inmediato, async)
+    └─→ VaultWatcher detecta on_created → Gemini Embedding API   (< 1s, via inotify)
         └─→ Guarda vector ChromaDB (con content_hash en metadata)
 
 Cron nocturno (reindex_vault)
