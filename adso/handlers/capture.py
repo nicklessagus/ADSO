@@ -755,11 +755,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     if git_backup:
         await git_backup.notify(fm.get("title", "Sin título"))
 
-    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
-    if embeddings and body:
-        asyncio.create_task(
-            _index_note_safe(embeddings, path, body, fm, vault_path)
-        )
+    # El embedding lo maneja vault_watcher via on_created — no indexar aquí para evitar doble embed.
 
     if inbox_path_str:
         try:
