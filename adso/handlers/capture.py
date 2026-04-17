@@ -299,10 +299,11 @@ async def _handle_degraded(
     fm["source"] = "telegram"
     fm["media_type"] = "text"
 
-    await create_note(fm, payload["body"], vault_path)
+    written_path = await create_note(fm, payload["body"], vault_path)
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     if git_backup:
+        context.bot_data.setdefault("bot_written_paths", set()).add(written_path)
         await git_backup.notify(fm.get("title", "Sin título"))
 
     await update.message.reply_text(
@@ -753,6 +754,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     if git_backup:
+        context.bot_data.setdefault("bot_written_paths", set()).add(path)
         await git_backup.notify(fm.get("title", "Sin título"))
 
     # El embedding lo maneja vault_watcher via on_created — no indexar aquí para evitar doble embed.

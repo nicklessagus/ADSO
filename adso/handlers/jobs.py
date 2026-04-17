@@ -129,6 +129,7 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
             if git_backup:
+                context.bot_data.setdefault("bot_written_paths", set()).add(new_path)
                 await git_backup.notify(new_fm.get("title", "Sin título"))
 
             embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
