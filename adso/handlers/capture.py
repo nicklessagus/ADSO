@@ -844,11 +844,6 @@ async def _cb_dest(
         fm["project"] = None
         fm["section"] = None
         fm["area"] = None
-    elif dest_type == "resources":
-        fm["project"] = None
-        fm["section"] = None
-        fm["area"] = None
-        fm["_dest_resources"] = True
     elif dest_type == "area":
         fm["project"] = None
         fm["section"] = None

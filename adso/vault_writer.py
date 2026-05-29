@@ -7,6 +7,7 @@ Referencia: docs/vault-interface.md
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -207,6 +208,10 @@ def _clean_frontmatter(fm: dict) -> dict:
     result = {}
     for k, v in fm.items():
         if v is None:
+            continue
+        if isinstance(k, str) and k.startswith("_"):
+            # Convención: claves con prefijo `_` son estado interno del bot
+            # (flags de flujo, metadatos transitorios) y nunca se persisten.
             continue
         if k in DATE_FIELDS and isinstance(v, str):
             result[k] = _parse_date_value(v)
@@ -810,7 +815,7 @@ class GitBackup:
                     if self._debug and self._bot and self._chat_id:
                         await self._bot.send_message(
                             chat_id=self._chat_id,
-                            text=f"💾 [debug] Vault backup:\n<code>{message}</code>",
+                            text=f"💾 [debug] Vault backup:\n<code>{html.escape(message)}</code>",
                             parse_mode="HTML",
                         )
                 except Exception as e:
@@ -818,7 +823,7 @@ class GitBackup:
                     if self._bot and self._chat_id:
                         await self._bot.send_message(
                             chat_id=self._chat_id,
-                            text=f"⚠️ Git push falló — vault seguro en disco.\n<code>{e}</code>",
+                            text=f"⚠️ Git push falló — vault seguro en disco.\n<code>{html.escape(str(e))}</code>",
                             parse_mode="HTML",
                         )
             else:

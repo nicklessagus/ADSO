@@ -366,74 +366,84 @@ async def handle_document(
         return
 
     import tempfile
-    tg_file = await doc.get_file()
-    suffix = Path(filename).suffix or ""
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-    await tg_file.download_to_drive(str(tmp_path))
+    tmp_path: Optional[Path] = None
+    transferred = False
+    try:
+        tg_file = await doc.get_file()
+        suffix = Path(filename).suffix or ""
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        await tg_file.download_to_drive(str(tmp_path))
 
-    if is_pdf(filename):
-        context.user_data["pending_read_status"] = {
-            "temp_path": str(tmp_path),
-            "original_filename": filename,
-            "media_type": "document",
-            "user_context": msg.caption or None,
-        }
-        await msg.reply_text(
-            f"PDF recibido: <b>{_esc(filename)}</b>",
-            reply_markup=build_read_status_keyboard(),
-            parse_mode="HTML",
-        )
-
-    elif is_text_file(filename):
-        try:
-            text = await extract_text_file(tmp_path, max_chars=50000)
-            if not text.strip():
-                await msg.reply_text("El archivo está vacío.")
-                tmp_path.unlink(missing_ok=True)
-                return
-
-            context.user_data["pending_extraction"] = {
-                "text": text,
-                "classify_content": build_classify_content(text, {}, is_paper=False),
+        if is_pdf(filename):
+            context.user_data["pending_read_status"] = {
                 "temp_path": str(tmp_path),
                 "original_filename": filename,
                 "media_type": "document",
-                "metadata": {},
                 "user_context": msg.caption or None,
-                "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
             }
-
-            snippet = text[:500]
-            if len(text) > 500:
-                snippet += "..."
+            transferred = True
             await msg.reply_text(
-                f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                f"<code>{_esc(snippet)}</code>\n\n"
-                "Confirmar, o enviar texto corregido.",
-                reply_markup=build_extraction_keyboard(),
+                f"PDF recibido: <b>{_esc(filename)}</b>",
+                reply_markup=build_read_status_keyboard(),
                 parse_mode="HTML",
             )
 
-        except Exception as e:
-            logger.error("Error leyendo archivo de texto: %s", e)
-            await msg.reply_text(f"Error leyendo archivo: {e}")
-            tmp_path.unlink(missing_ok=True)
+        elif is_text_file(filename):
+            try:
+                text = await extract_text_file(tmp_path, max_chars=50000)
+                if not text.strip():
+                    await msg.reply_text("El archivo está vacío.")
+                    return
 
-    else:
-        context.user_data["pending_description"] = {
-            "temp_path": str(tmp_path),
-            "original_filename": filename,
-            "media_type": "document",
-        }
-        await msg.reply_text(
-            f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
-            "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
-            ]),
-            parse_mode="HTML",
-        )
+                context.user_data["pending_extraction"] = {
+                    "text": text,
+                    "classify_content": build_classify_content(text, {}, is_paper=False),
+                    "temp_path": str(tmp_path),
+                    "original_filename": filename,
+                    "media_type": "document",
+                    "metadata": {},
+                    "user_context": msg.caption or None,
+                    "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
+                }
+                transferred = True
+
+                snippet = text[:500]
+                if len(text) > 500:
+                    snippet += "..."
+                await msg.reply_text(
+                    f"<b>Contenido de {_esc(filename)}:</b>\n\n"
+                    f"<code>{_esc(snippet)}</code>\n\n"
+                    "Confirmar, o enviar texto corregido.",
+                    reply_markup=build_extraction_keyboard(),
+                    parse_mode="HTML",
+                )
+
+            except Exception as e:
+                logger.error("Error leyendo archivo de texto: %s", e)
+                await msg.reply_text(f"Error leyendo archivo: {e}")
+
+        else:
+            context.user_data["pending_description"] = {
+                "temp_path": str(tmp_path),
+                "original_filename": filename,
+                "media_type": "document",
+            }
+            transferred = True
+            await msg.reply_text(
+                f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
+                "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
+                ]),
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        logger.error("Error procesando documento: %s", e)
+        await msg.reply_text(f"Error al procesar documento: {e}")
+    finally:
+        if tmp_path is not None and not transferred:
+            tmp_path.unlink(missing_ok=True)
 
 
 @authorized

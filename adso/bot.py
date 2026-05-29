@@ -48,7 +48,16 @@ async def _post_init(app: Application) -> None:
     vault_path = settings.vault_path
 
     async def _reindex_external_note(path: Path) -> None:
-        """Lee una nota modificada externamente y actualiza su embedding."""
+        """Lee una nota modificada externamente y actualiza su embedding.
+
+        Si el path fue escrito por el bot (capture/jobs ya disparó indexado y
+        backup), no se reindexa ni se notifica al git_backup: evita double-embed
+        y entradas duplicadas en commits.
+        """
+        bot_written: set = app.bot_data.setdefault("bot_written_paths", set())
+        if path in bot_written:
+            bot_written.discard(path)
+            return
         try:
             raw = await asyncio.to_thread(path.read_text, "utf-8")
             post = fm_lib.loads(raw)
@@ -61,11 +70,6 @@ async def _post_init(app: Application) -> None:
             _bot_logger.info("Reindex externo completado: %s", path)
         except Exception as exc:
             _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
-        # Si el path fue escrito por el bot, no llamar notify (ya lo hizo capture/jobs)
-        bot_written: set = app.bot_data.setdefault("bot_written_paths", set())
-        if path in bot_written:
-            bot_written.discard(path)
-            return
         git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
         if git_backup:
             await git_backup.notify(path.stem)

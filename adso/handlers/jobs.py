@@ -28,6 +28,10 @@ _PENDING_FLOW_KEYS = {
 
 _STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
 
+# Evita que dos invocaciones del job corran en paralelo si una tarda más que el
+# intervalo de scheduling (delete_note sobre el mismo path dispararía error).
+_reclassify_lock = asyncio.Lock()
+
 
 async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job periódico: clasifica silenciosamente notas de Inbox con destino ya asignado (Caso A).
@@ -38,6 +42,15 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     Caso B — nota sin destino: se ignora. El usuario debe usar /clasificar.
     """
+    if _reclassify_lock.locked():
+        logger.debug("Reclasificación: invocación previa aún en curso, saltando.")
+        return
+
+    async with _reclassify_lock:
+        await _reclassify_inbox_impl(context)
+
+
+async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
     chat_id = settings.telegram_allowed_user_id

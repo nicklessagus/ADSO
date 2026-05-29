@@ -114,11 +114,15 @@ class EmbeddingsClient:
         self,
         chroma_data_dir: Path,
         gemini_api_key: str = "",
+        max_concurrent_embeds: int = 4,
     ) -> None:
         self._chroma_data_dir = chroma_data_dir
         self._gemini_api_key = gemini_api_key
         self._collection = None
         self._initialized = False
+        # Limita concurrencia contra Gemini Embedding API; protege contra bursts
+        # del watcher (ej: sync masivo de Syncthing → muchos eventos en paralelo).
+        self._embed_semaphore = asyncio.Semaphore(max_concurrent_embeds)
 
     def _ensure_initialized(self) -> None:
         """Inicializa ChromaDB lazily al primer uso."""
@@ -153,22 +157,23 @@ class EmbeddingsClient:
         client = genai.Client(api_key=self._gemini_api_key or None)
 
         last_error = None
-        for attempt in range(1, 4):
-            try:
-                result = await asyncio.to_thread(
-                    client.models.embed_content,
-                    model=EMBEDDING_MODEL,
-                    contents=content,
-                )
-                return result.embeddings[0].values
-            except Exception as e:
-                last_error = e
-                if attempt < 3:
-                    delay = 2 ** (attempt - 1)  # 1s, 2s
-                    logger.warning(
-                        "Embedding retry %d/3 tras error: %s", attempt, e
+        async with self._embed_semaphore:
+            for attempt in range(1, 4):
+                try:
+                    result = await asyncio.to_thread(
+                        client.models.embed_content,
+                        model=EMBEDDING_MODEL,
+                        contents=content,
                     )
-                    await asyncio.sleep(delay)
+                    return result.embeddings[0].values
+                except Exception as e:
+                    last_error = e
+                    if attempt < 3:
+                        delay = 2 ** (attempt - 1)  # 1s, 2s
+                        logger.warning(
+                            "Embedding retry %d/3 tras error: %s", attempt, e
+                        )
+                        await asyncio.sleep(delay)
 
         raise last_error  # type: ignore[misc]
 
