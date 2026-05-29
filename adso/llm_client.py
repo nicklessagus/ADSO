@@ -38,6 +38,29 @@ from adso.llm_schema import (  # noqa: E402
     validate_llm_response,
 )
 
+# Símbolos re-exportados desde llm_schema por compatibilidad. Declararlos en
+# __all__ marca el re-export como intencional (evita F401 en ruff).
+__all__ = [
+    "INJECTION_PATTERNS",
+    "STATUS_ALIASES",
+    "VALID_MODES",
+    "VALID_OPERATIONS",
+    "VALID_PRIORITY",
+    "VALID_STATUS",
+    "VALID_TYPES",
+    "LLMResponseError",
+    "_ACCENT_MAP",
+    "_GEMINI_RESPONSE_SCHEMA",
+    "_TEMPORAL_TAGS",
+    "_TITLE_CLEANUP_RE",
+    "_TYPE_TAGS",
+    "_to_kebab",
+    "_validate_capture_payload",
+    "_validate_manage_payload",
+    "check_injection_risk",
+    "validate_llm_response",
+]
+
 # ---------------------------------------------------------------------------
 # Retry / degraded-mode config
 # ---------------------------------------------------------------------------
