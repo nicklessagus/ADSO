@@ -11,6 +11,7 @@ from pathlib import Path
 from telegram.ext import ContextTypes
 
 from adso.constants import MANAGE_KEYWORDS
+from adso.vault_cache import parse_cached
 from adso.vault_search import get_all_tags
 
 
@@ -163,14 +164,10 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
         index = dir_path / "_index.md"
         name = dir_path.name
         description = ""
-        if index.exists():
-            try:
-                import frontmatter as fm
-                post = fm.load(str(index))
-                name = post.get(field, name)
-                description = post.get("description", "")
-            except Exception:
-                pass
+        note = parse_cached(index)
+        if note is not None:
+            name = note.frontmatter.get(field, name)
+            description = note.frontmatter.get("description", "")
         return {"name": name, "description": description}
 
     projects_dir = vault_path / "01-Projects"

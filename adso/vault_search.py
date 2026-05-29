@@ -13,8 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-import frontmatter
-
+from adso.vault_cache import parse_cached
 from adso.vault_writer import NoteRef, NoteData
 
 logger = logging.getLogger(__name__)
@@ -77,20 +76,10 @@ def _parse_note_safe(path: Path) -> Optional[NoteData]:
     """Lee una nota de forma segura. Retorna None si falla el parsing.
 
     No rompe la búsqueda si una nota tiene frontmatter inválido.
+    Delega en `vault_cache.parse_cached`, que cachea el parse por
+    (mtime, size) para evitar re-leer notas sin cambios en scans repetidos.
     """
-    try:
-        raw = path.read_text(encoding="utf-8")
-        post = frontmatter.loads(raw)
-        if not post.metadata:
-            return None
-        return NoteData(
-            path=path,
-            frontmatter=dict(post.metadata),
-            body=post.content,
-        )
-    except Exception:
-        logger.debug("Error parsing nota: %s", path)
-        return None
+    return parse_cached(path)
 
 
 def _note_ref_from_data(note: NoteData, snippet: Optional[str] = None) -> NoteRef:
