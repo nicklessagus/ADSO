@@ -82,7 +82,8 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 adso/
 ├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
 ├── transcriber.py          # Transcripción de audio con faster-whisper
-├── llm_client.py           # Cliente Gemini/Claude, clasificación y generación (usa Obsidian Skills como referencia)
+├── llm_client.py           # Cliente Gemini/Claude: llamadas a API, retries, modo degradado, build_system_prompt
+├── llm_schema.py           # Schema de salida de Gemini + validación de respuesta + sanitización de frontmatter + patrones de injection (re-exportados desde llm_client por compatibilidad)
 ├── vault_writer.py         # Escritura de .md al filesystem + git backup con debounce
 ├── vault_watcher.py        # Watcher de filesystem (watchdog): conflictos Syncthing + re-embed de cambios externos + limpieza de wikilinks rotos al borrar
 ├── vault_search.py         # Búsqueda estructural: backlinks ([[wikilinks]]), tags, filtros por frontmatter
