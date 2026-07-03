@@ -178,9 +178,10 @@ El LLM infiere `priority` y `due_date` del lenguaje del mensaje para tareas. `pr
 
 Ambos campos aparecen en el preview y el usuario puede corregirlos con `[Corregir]`.
 
-**Sanitización del frontmatter LLM** (`_validate_capture_payload` en `llm_client.py`):
+**Sanitización del frontmatter LLM** (`_validate_capture_payload` en `llm_schema.py`):
 - **Título:** se stripean heading markers de markdown (`#`, `##`) y prefijos label (`Tarea:`, `Task:`, `Nota:`, `Recordar:`) que el LLM a veces incluye.
 - **Tags:** se filtran días de la semana (lunes…domingo, monday…sunday) y expresiones temporales (hoy, mañana, proxima-semana) que no son etiquetas semánticas útiles. También se filtran tags que duplican el `type` (task, note, idea, etc.).
+- **Tipos coaccionados (defensa contra respuestas del LLM, sobre todo el fallback de Groq sin schema):** `confidence` se fuerza a float en `[0,1]` (default 0.5 si no es numérico) en `validate_llm_response` — evita `TypeError` en la comparación con el umbral de desambiguación. `year` se coacciona a `int` o se descarta. `authors`/`keywords` se fuerzan a lista de strings (un string suelto se parte por comas; otro tipo → `None`). `read_status` se valida contra `{read, unread}` (`VALID_READ_STATUS`) o se descarta.
 
 ---
 

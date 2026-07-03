@@ -212,6 +212,56 @@ class TestDisambiguation:
         assert result["confidence"] == 0.5
 
 
+def _capture(**fm) -> dict:
+    """Construye una respuesta capture válida con el frontmatter dado."""
+    base = {"title": "Test", "type": "reference"}
+    base.update(fm)
+    return {"mode": "capture", "payload": {"frontmatter": base, "body": "b"}}
+
+
+class TestTypeCoercion:
+    """Endurecimiento de tipos en la respuesta del LLM (cubre el fallback de Groq)."""
+
+    def test_confidence_string_defaults(self) -> None:
+        result = validate_llm_response({**_capture(), "confidence": "high"})
+        assert result["confidence"] == 0.5
+
+    def test_confidence_clamped_to_range(self) -> None:
+        assert validate_llm_response({**_capture(), "confidence": 5})["confidence"] == 1.0
+        assert validate_llm_response({**_capture(), "confidence": -2})["confidence"] == 0.0
+
+    def test_confidence_valid_float_preserved(self) -> None:
+        assert validate_llm_response({**_capture(), "confidence": 0.7})["confidence"] == 0.7
+
+    def test_year_string_coerced_to_int(self) -> None:
+        result = validate_llm_response(_capture(year="2024"))
+        assert result["payload"]["frontmatter"]["year"] == 2024
+
+    def test_year_garbage_discarded(self) -> None:
+        result = validate_llm_response(_capture(year="reciente"))
+        assert result["payload"]["frontmatter"]["year"] is None
+
+    def test_authors_string_split_to_list(self) -> None:
+        result = validate_llm_response(_capture(authors="Smith, Doe"))
+        assert result["payload"]["frontmatter"]["authors"] == ["Smith", "Doe"]
+
+    def test_authors_non_list_discarded(self) -> None:
+        result = validate_llm_response(_capture(keywords={"x": 1}))
+        assert result["payload"]["frontmatter"]["keywords"] is None
+
+    def test_authors_list_cleaned(self) -> None:
+        result = validate_llm_response(_capture(authors=["A ", "", "B"]))
+        assert result["payload"]["frontmatter"]["authors"] == ["A", "B"]
+
+    def test_read_status_normalized(self) -> None:
+        result = validate_llm_response(_capture(read_status="READ"))
+        assert result["payload"]["frontmatter"]["read_status"] == "read"
+
+    def test_read_status_invalid_discarded(self) -> None:
+        result = validate_llm_response(_capture(read_status="maybe"))
+        assert result["payload"]["frontmatter"]["read_status"] is None
+
+
 class TestInjectionDetection:
 
     def test_detects_ignore_instructions(self) -> None:

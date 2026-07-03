@@ -38,6 +38,7 @@ STATUS_ALIASES: dict[str, str] = {
     "published": "active",
 }
 VALID_PRIORITY = {"low", "medium", "high"}
+VALID_READ_STATUS = {"read", "unread"}
 VALID_OPERATIONS = {
     "create_project", "create_area", "archive_project", "unarchive_project",
     "delete_project", "delete_area", "rename_project", "rename_area",
@@ -177,9 +178,15 @@ def validate_llm_response(response_json: dict) -> dict:
     if mode not in VALID_MODES:
         raise LLMResponseError(f"Invalid mode: {mode!r}")
 
-    if "confidence" not in response_json:
-        # Default to 0.5 if omitted
-        response_json["confidence"] = 0.5
+    # Coerce confidence to a float in [0,1]. Small models (o el fallback de Groq
+    # sin schema) a veces devuelven "high" o un string; sin esto, la comparación
+    # `confidence < threshold` aguas abajo lanzaría TypeError y quemaría un retry.
+    conf = response_json.get("confidence", 0.5)
+    try:
+        conf = float(conf)
+    except (TypeError, ValueError):
+        conf = 0.5
+    response_json["confidence"] = max(0.0, min(1.0, conf))
 
     payload = response_json.get("payload")
     if not isinstance(payload, dict):
@@ -292,6 +299,34 @@ def _validate_capture_payload(payload: dict) -> None:
                 _dt.fromisoformat(str(val))
             except (ValueError, TypeError):
                 fm[date_field] = None
+
+    # Campos académicos: forzar tipos y descartar si no se puede (nunca crashear
+    # aguas abajo por un tipo inesperado del LLM, sobre todo del fallback de Groq).
+    year = fm.get("year")
+    if year is not None:
+        try:
+            fm["year"] = int(year)
+        except (TypeError, ValueError):
+            fm["year"] = None
+
+    # authors/keywords deben ser listas de strings. Un string suelto se parte por
+    # comas; cualquier otro tipo se descarta.
+    for list_field in ("authors", "keywords"):
+        val = fm.get(list_field)
+        if val is None:
+            continue
+        if isinstance(val, list):
+            fm[list_field] = [str(x).strip() for x in val if str(x).strip()]
+        elif isinstance(val, str):
+            fm[list_field] = [p.strip() for p in val.split(",") if p.strip()]
+        else:
+            fm[list_field] = None
+
+    # read_status: enum {read, unread}, descartar si no coincide
+    read_status = fm.get("read_status")
+    if read_status is not None:
+        rs = str(read_status).strip().lower()
+        fm["read_status"] = rs if rs in VALID_READ_STATUS else None
 
     if "body" not in payload:
         payload["body"] = ""  # small models occasionally omit the body
