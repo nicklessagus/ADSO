@@ -326,20 +326,24 @@ _WEEKDAYS_ES: dict[str, int] = {
 
 
 def _user_tz() -> timezone | ZoneInfo:
-    """Zona horaria del usuario, desde la env var ADSO_TIMEZONE (default UTC).
+    """Zona horaria del usuario para parsear fechas relativas.
 
     Los días de la semana y "mañana"/"hoy" deben resolverse en la hora local del
     usuario: computarlos en UTC produce un off-by-one cerca de medianoche (ej. un
     usuario en UTC-3 escribiendo "el viernes" un jueves 22:00 local, que en UTC ya
     es viernes).
+
+    Orden de resolución: ``ADSO_TIMEZONE`` (override explícito) → ``TZ`` (la que
+    docker-compose ya define para el contenedor) → UTC. Requiere el paquete
+    ``tzdata`` para que ``zoneinfo`` resuelva los nombres en imágenes slim.
     """
-    tz_name = os.getenv("ADSO_TIMEZONE", "").strip()
+    tz_name = os.getenv("ADSO_TIMEZONE", "").strip() or os.getenv("TZ", "").strip()
     if not tz_name:
         return timezone.utc
     try:
         return ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, ValueError):
-        logger.warning("ADSO_TIMEZONE inválida (%r) — usando UTC", tz_name)
+        logger.warning("Zona horaria inválida (%r) — usando UTC", tz_name)
         return timezone.utc
 
 

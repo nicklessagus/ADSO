@@ -174,7 +174,7 @@ El LLM infiere `priority` y `due_date` del lenguaje del mensaje para tareas. `pr
 
 `due_date` se resuelve en dos pasos: el LLM propone una fecha (con el prompt incluyendo la fecha UTC actual en inglés y español), pero luego `_classify_and_preview` corre `_parse_date_from_text()` sobre el texto original y overridea el resultado si encuentra una expresión válida. El parser local es determinístico y más fiable que el LLM para expresiones relativas en español ("el viernes", "mañana", "el próximo lunes"). El LLM tiene problemas con la aritmética de días de la semana, especialmente cuando el UTC y la zona horaria del usuario difieren.
 
-`_parse_date_from_text()` computa "ahora" en la zona horaria del usuario (`ADSO_TIMEZONE`, default UTC) para evitar off-by-one en días de semana cerca de medianoche local. Acepta un parámetro `now` inyectable para tests. Valida el rango de hora/minuto (`0≤h≤23`, `0≤m≤59`) y descarta la hora si está fuera de rango en vez de lanzar `ValueError`. Los matches relativos ("mañana", "hoy", "pasado mañana") usan límites de palabra (`\b`) para no matchear dentro de otras palabras.
+`_parse_date_from_text()` computa "ahora" en la zona horaria del usuario para evitar off-by-one en días de semana cerca de medianoche local. `_user_tz()` resuelve la zona en orden `ADSO_TIMEZONE` → `TZ` (docker-compose ya la setea a `America/Argentina/Buenos_Aires`) → UTC. Requiere el paquete `tzdata` (en `requirements.txt`/`pyproject.toml`) para que `zoneinfo` resuelva nombres IANA en la imagen `python:3.11-slim` (que no trae la base de datos de zonas del sistema). Acepta un parámetro `now` inyectable para tests. Valida el rango de hora/minuto (`0≤h≤23`, `0≤m≤59`) y descarta la hora si está fuera de rango en vez de lanzar `ValueError`. Los matches relativos ("mañana", "hoy", "pasado mañana") usan límites de palabra (`\b`) para no matchear dentro de otras palabras.
 
 Ambos campos aparecen en el preview y el usuario puede corregirlos con `[Corregir]`.
 
@@ -352,8 +352,9 @@ GROQ_API_KEY               # fallback LLM cuando Gemini no responde; sin esta ke
 ANTHROPIC_API_KEY          # LLM secundario alternativo
 LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
 ADSO_TIMEZONE              # zona horaria IANA para parsear fechas relativas ("el viernes",
-                           # "mañana"). Ej: America/Argentina/Buenos_Aires. Default: UTC.
-                           # Sin ella, los días de semana cerca de medianoche pueden
+                           # "mañana"). Ej: America/Argentina/Buenos_Aires. Override explícito;
+                           # si falta, se usa TZ (que docker-compose ya define) y luego UTC.
+                           # Sin zona correcta, los días de semana cerca de medianoche pueden
                            # resolverse con off-by-one respecto a la hora local.
 
 # Paths (defaults para Docker)

@@ -522,6 +522,38 @@ class TestParseDateFromText:
         assert result is not None
 
 
+class TestUserTz:
+    """_user_tz resuelve ADSO_TIMEZONE → TZ → UTC."""
+
+    def test_default_is_utc(self, monkeypatch) -> None:
+        from datetime import timezone
+        from adso.handlers.capture import _user_tz
+        monkeypatch.delenv("ADSO_TIMEZONE", raising=False)
+        monkeypatch.delenv("TZ", raising=False)
+        assert _user_tz() == timezone.utc
+
+    def test_adso_timezone_wins(self, monkeypatch) -> None:
+        from zoneinfo import ZoneInfo
+        from adso.handlers.capture import _user_tz
+        monkeypatch.setenv("ADSO_TIMEZONE", "America/Argentina/Buenos_Aires")
+        monkeypatch.setenv("TZ", "UTC")
+        assert _user_tz() == ZoneInfo("America/Argentina/Buenos_Aires")
+
+    def test_falls_back_to_tz_env(self, monkeypatch) -> None:
+        from zoneinfo import ZoneInfo
+        from adso.handlers.capture import _user_tz
+        monkeypatch.delenv("ADSO_TIMEZONE", raising=False)
+        monkeypatch.setenv("TZ", "America/Argentina/Buenos_Aires")
+        assert _user_tz() == ZoneInfo("America/Argentina/Buenos_Aires")
+
+    def test_invalid_falls_back_to_utc(self, monkeypatch) -> None:
+        from datetime import timezone
+        from adso.handlers.capture import _user_tz
+        monkeypatch.setenv("ADSO_TIMEZONE", "Not/A_Zone")
+        monkeypatch.delenv("TZ", raising=False)
+        assert _user_tz() == timezone.utc
+
+
 class TestApplyTaskCorrections:
     """Tests para _apply_task_corrections."""
 
