@@ -31,12 +31,17 @@ from adso.keyboards import (
     build_destination_keyboard,
     build_preview,
 )
-from adso.llm_client import VALID_TYPES, classify, extract_original_from_degraded
+from adso.llm_client import VALID_TYPES, check_injection_risk, classify, extract_original_from_degraded
 from adso.vault_search import find_by_property
 from adso.tasks_client import TasksClient, build_task_notes
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
 
 logger = logging.getLogger(__name__)
+
+_INJECTION_PREVIEW_WARNING = (
+    "⚠️ El contenido extraído contiene un patrón de posible inyección de "
+    "instrucciones. Revisar el preview con atención antes de confirmar.\n\n"
+)
 
 
 async def _classify_and_preview(
@@ -236,6 +241,13 @@ async def _classify_and_preview(
     has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
     keyboard = build_capture_keyboard(fm, has_dest)
+
+    # Contenido extraído (PDF/OCR/Vision/documento) que trae un patrón de posible
+    # inyección: el <input> ya va blindado en classify(), pero avisar para que el
+    # usuario escrute el preview antes de confirmar. No bloquea — igual se confirma.
+    if check_injection_risk(text):
+        logger.warning("Patrón de inyección detectado en contenido a clasificar")
+        preview = _INJECTION_PREVIEW_WARNING + preview
 
     reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
     await reply_fn(
@@ -1132,6 +1144,11 @@ async def _classify_and_preview_arxiv(
     has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
     keyboard = build_capture_keyboard(fm, has_dest)
+
+    # Abstract/metadata de arXiv con patrón de posible inyección → avisar.
+    if check_injection_risk(content):
+        logger.warning("Patrón de inyección detectado en metadata de arXiv")
+        preview = _INJECTION_PREVIEW_WARNING + preview
 
     if reply_msg is not None:
         await reply_msg.edit_text(preview, reply_markup=keyboard, parse_mode="HTML")

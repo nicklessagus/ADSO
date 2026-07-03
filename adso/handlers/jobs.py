@@ -20,10 +20,16 @@ from adso.vault_writer import GitBackup, create_note, delete_note, read_note
 
 logger = logging.getLogger(__name__)
 
+# Claves que indican un flujo interactivo en curso: si alguna está presente, el
+# cron de reclasificación se salta la pasada para no pisar/notificar en medio de
+# una interacción del usuario. Debe cubrir todas las keys de flujo (alineado con
+# _has_pending_keyboard / _is_awaiting_text_input en bot_utils.py): incluye los
+# flujos de PDF escaneado, read_status, arXiv y reportes que antes faltaban.
 _PENDING_FLOW_KEYS = {
     "pending_note", "pending_operation", "pending_raw_content",
     "pending_extraction", "pending_transcript", "pending_description",
-    "manage_missing_fields",
+    "manage_missing_fields", "pending_fallback_pdf", "pending_read_status",
+    "pending_arxiv", "pending_report",
 }
 
 _STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}

@@ -113,6 +113,17 @@ def _atomic_write_sync(path: Path, content: str) -> None:
         raise
 
 
+def _file_hash_sync(path: Path) -> str:
+    """SHA-256 de un archivo, leído por chunks (memory-safe en la RPi4)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _parse_date_value(value: str) -> "date | datetime | str":
     """Convierte un string ISO 8601 a objeto date/datetime para serialización YAML sin comillas.
 
@@ -794,22 +805,31 @@ async def save_resource(
     # Strip directory components to prevent path traversal (e.g. "../../.env").
     # Path(...).name keeps only the final component regardless of separators.
     safe_name = Path(original_filename).name or "resource"
-    dest = resources_dir / safe_name
+    stem = Path(safe_name).stem
+    suffix = Path(safe_name).suffix
 
-    # Si ya existe con el mismo nombre y tamaño, reutilizar — no duplicar
-    if dest.exists() and dest.stat().st_size == source_path.stat().st_size:
-        logger.info("Recurso ya existe (mismo nombre y tamaño), reutilizando: %s", dest.relative_to(vault_path))
-        return dest
+    source_size = source_path.stat().st_size
+    source_hash = await asyncio.to_thread(_file_hash_sync, source_path)
 
-    # Mismo nombre pero distinto tamaño — agregar sufijo numérico
-    if dest.exists():
-        stem = Path(safe_name).stem
-        suffix = Path(safe_name).suffix
-        counter = 1
-        while dest.exists():
-            dest = resources_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
+    # Buscar un nombre libre. Si en el camino aparece un archivo con el MISMO
+    # contenido (comparado por hash, no solo por tamaño), reutilizarlo — así dos
+    # archivos distintos del mismo tamaño ya no se confunden ni se descarta el
+    # nuevo silenciosamente (era pérdida de datos).
+    candidate = resources_dir / safe_name
+    counter = 1
+    while candidate.exists():
+        if candidate.stat().st_size == source_size:
+            existing_hash = await asyncio.to_thread(_file_hash_sync, candidate)
+            if existing_hash == source_hash:
+                logger.info(
+                    "Recurso ya existe (mismo contenido), reutilizando: %s",
+                    candidate.relative_to(vault_path),
+                )
+                return candidate
+        candidate = resources_dir / f"{stem}_{counter}{suffix}"
+        counter += 1
 
+    dest = candidate
     await asyncio.to_thread(shutil.copy2, str(source_path), str(dest))
     logger.info("Recurso guardado: %s", dest.relative_to(vault_path))
     return dest

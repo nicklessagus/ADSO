@@ -604,6 +604,38 @@ class TestSaveResource:
         with pytest.raises(FileNotFoundError):
             await save_resource(tmp_path / "no.pdf", "no.pdf", vault_path)
 
+    @pytest.mark.asyncio
+    async def test_identical_content_reused(self, vault_path: Path, tmp_path: Path) -> None:
+        from adso.vault_writer import save_resource
+
+        (vault_path / "03-Resources" / "paper.pdf").write_bytes(b"same bytes")
+        src = tmp_path / "paper.pdf"
+        src.write_bytes(b"same bytes")
+
+        dest = await save_resource(src, "paper.pdf", vault_path)
+
+        # Mismo contenido → reutiliza el existente, no crea un duplicado
+        assert dest.name == "paper.pdf"
+
+    @pytest.mark.asyncio
+    async def test_same_size_different_content_not_clobbered(
+        self, vault_path: Path, tmp_path: Path
+    ) -> None:
+        from adso.vault_writer import save_resource
+
+        # Mismo tamaño exacto (10 bytes) pero contenido distinto: el bug viejo lo
+        # trataba como idéntico y descartaba el nuevo silenciosamente.
+        (vault_path / "03-Resources" / "paper.pdf").write_bytes(b"AAAAAAAAAA")
+        src = tmp_path / "paper.pdf"
+        src.write_bytes(b"BBBBBBBBBB")
+
+        dest = await save_resource(src, "paper.pdf", vault_path)
+
+        assert dest.name == "paper_1.pdf"
+        assert dest.read_bytes() == b"BBBBBBBBBB"
+        # el original quedó intacto
+        assert (vault_path / "03-Resources" / "paper.pdf").read_bytes() == b"AAAAAAAAAA"
+
 
 # ---------------------------------------------------------------------------
 # Fase 4 — handle_photo
