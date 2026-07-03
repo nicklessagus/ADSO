@@ -25,6 +25,11 @@ _NS = {
 
 _ARXIV_API = "https://export.arxiv.org/api/query?id_list={id}"
 
+# Tope de lectura de la respuesta: la metadata de un paper son ~decenas de KB.
+# Sin este límite, un endpoint hostil/comprometido podría agotar la RAM de la RPi4
+# con un read() ilimitado.
+_MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 # Patrones de URL soportados:
 #   https://arxiv.org/abs/2301.12345
 #   https://arxiv.org/abs/2301.12345v2
@@ -139,7 +144,12 @@ def _fetch_metadata_sync(arxiv_id: str) -> dict:
     """
     url = _ARXIV_API.format(id=arxiv_id)
     with urllib.request.urlopen(url, timeout=10) as resp:
-        raw = resp.read()
+        # Leer un byte de más que el tope para detectar truncamiento.
+        raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+    if len(raw) > _MAX_RESPONSE_BYTES:
+        raise ValueError(
+            f"Respuesta de arXiv excede el tope de {_MAX_RESPONSE_BYTES} bytes"
+        )
 
     root = ET.fromstring(raw)
     entries = root.findall("atom:entry", _NS)

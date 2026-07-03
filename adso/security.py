@@ -22,6 +22,16 @@ if not _raw.strip():
 ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip().isdigit()}
 
 
+def is_authorized(update: Update) -> bool:
+    """True si el update proviene de un usuario en la allow-list.
+
+    Helper reutilizable: lo usan tanto el decorador `authorized` (por handler)
+    como el gate global de `bot.py` (defensa en profundidad).
+    """
+    user = update.effective_user
+    return user is not None and user.id in ALLOWED_USER_IDS
+
+
 def authorized(
     handler: Callable[..., Coroutine[Any, Any, Any]],
 ) -> Callable[..., Coroutine[Any, Any, Any]]:
@@ -44,9 +54,7 @@ def authorized(
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        if update.effective_user is None:
-            return None
-        if update.effective_user.id not in ALLOWED_USER_IDS:
+        if not is_authorized(update):
             return None
         return await handler(update, context, *args, **kwargs)
 

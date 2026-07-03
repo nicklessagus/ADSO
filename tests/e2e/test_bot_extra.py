@@ -515,7 +515,7 @@ class TestParseDateFromText:
         assert "T" not in result  # sin componente de hora
 
     def test_invalid_hour_does_not_raise_on_weekday(self) -> None:
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
         base = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
         # No debe lanzar ValueError por hora fuera de rango
         result = _parse_date_from_text("el lunes 30hs", now=base)

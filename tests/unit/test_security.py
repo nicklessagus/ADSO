@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram import Update, User
 
-from adso.security import authorized
+from adso.security import authorized, is_authorized
 
 
 def _make_update(user_id: int | None = None) -> Update:
@@ -104,3 +104,39 @@ class TestAuthorized:
 
         handler.assert_not_awaited()
         assert result is None
+
+
+class TestIsAuthorized:
+
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    def test_authorized_true(self) -> None:
+        assert is_authorized(_make_update(42)) is True
+
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    def test_unauthorized_false(self) -> None:
+        assert is_authorized(_make_update(999)) is False
+
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    def test_no_user_false(self) -> None:
+        assert is_authorized(_make_update(None)) is False
+
+
+class TestGlobalAuthGate:
+    """Gate global de bot.py: corta updates no autorizados con ApplicationHandlerStop."""
+
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    @pytest.mark.asyncio
+    async def test_unauthorized_raises_stop(self) -> None:
+        from telegram.ext import ApplicationHandlerStop
+        from adso.bot import _global_auth_gate
+
+        with pytest.raises(ApplicationHandlerStop):
+            await _global_auth_gate(_make_update(999), MagicMock())
+
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    @pytest.mark.asyncio
+    async def test_authorized_passes_through(self) -> None:
+        from adso.bot import _global_auth_gate
+
+        # No debe lanzar: el update sigue al group 0
+        assert await _global_auth_gate(_make_update(42), MagicMock()) is None

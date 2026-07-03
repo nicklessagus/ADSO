@@ -10,11 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from telegram import Update
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     CommandHandler,
+    ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -32,6 +36,7 @@ from adso.handlers.reports import handle_reporte_command, handle_reporte_full_co
 from adso.handlers.input import handle_audio, handle_document, handle_photo, handle_text
 from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
+from adso.security import is_authorized
 from adso.vault_watcher import VaultWatcher
 from adso.vault_writer import GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
 
@@ -123,6 +128,19 @@ async def _post_shutdown(app: Application) -> None:
         await watcher.stop()
 
 
+async def _global_auth_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Descarta updates de usuarios no autorizados antes de cualquier handler.
+
+    Registrado en group=-1: si el usuario no está en la allow-list, corta el
+    procesamiento (ApplicationHandlerStop) y el update nunca llega a los handlers
+    reales del group 0. Defensa en profundidad: hace que el decorador `authorized`
+    por handler sea cinturón-y-tiradores en vez del único control — un handler
+    nuevo sin decorar ya no es un bypass.
+    """
+    if not is_authorized(update):
+        raise ApplicationHandlerStop
+
+
 def create_application(settings: Optional[Settings] = None) -> Application:
     """Crea y configura la Application de python-telegram-bot.
 
@@ -161,6 +179,11 @@ def create_application(settings: Optional[Settings] = None) -> Application:
         gemini_api_key=settings.gemini_api_key,
     )
     app.bot_data["tasks_client"] = TasksClient(settings.google_calendar_creds)
+
+    # Gate de auth global (defensa en profundidad): corre antes que todo y
+    # descarta updates no autorizados. Los handlers siguen decorados con
+    # @authorized como segunda barrera.
+    app.add_handler(TypeHandler(Update, _global_auth_gate), group=-1)
 
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))

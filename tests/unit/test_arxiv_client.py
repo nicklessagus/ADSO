@@ -104,6 +104,17 @@ class TestFetchArxivMetadata:
             meta = _fetch_metadata_sync("2301.07041")
         assert meta["year"] == 2023
 
+    def test_oversized_response_rejected(self) -> None:
+        # Respuesta enorme → ValueError, no se intenta parsear (protege la RAM).
+        from adso.arxiv_client import _MAX_RESPONSE_BYTES
+        big = b"x" * (_MAX_RESPONSE_BYTES + 1)
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value.__enter__ = lambda s: s
+            mock_open.return_value.__exit__ = lambda *a: None
+            mock_open.return_value.read.return_value = big
+            with pytest.raises(ValueError, match="excede el tope"):
+                _fetch_metadata_sync("2301.07041")
+
     def test_parses_abstract(self) -> None:
         with patch("urllib.request.urlopen") as mock_open:
             mock_open.return_value.__enter__ = lambda s: s
