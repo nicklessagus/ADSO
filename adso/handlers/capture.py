@@ -6,17 +6,24 @@ confirmación/cancelación/destino, y los helpers del flujo de captura.
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_destination
+from adso.bot_utils import (
+    _cleanup_pending,
+    _get_existing_items,
+    _get_existing_tags,
+    _has_destination,
+    spawn_tracked,
+)
 from adso.config import Settings
 from adso.embeddings import EmbeddingsClient
 from adso.keyboards import (
@@ -318,7 +325,25 @@ _WEEKDAYS_ES: dict[str, int] = {
 }
 
 
-def _parse_date_from_text(text: str) -> Optional[str]:
+def _user_tz() -> timezone | ZoneInfo:
+    """Zona horaria del usuario, desde la env var ADSO_TIMEZONE (default UTC).
+
+    Los días de la semana y "mañana"/"hoy" deben resolverse en la hora local del
+    usuario: computarlos en UTC produce un off-by-one cerca de medianoche (ej. un
+    usuario en UTC-3 escribiendo "el viernes" un jueves 22:00 local, que en UTC ya
+    es viernes).
+    """
+    tz_name = os.getenv("ADSO_TIMEZONE", "").strip()
+    if not tz_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("ADSO_TIMEZONE inválida (%r) — usando UTC", tz_name)
+        return timezone.utc
+
+
+def _parse_date_from_text(text: str, now: Optional[datetime] = None) -> Optional[str]:
     """Intenta extraer una fecha en español del texto. Retorna ISO 8601 o None.
 
     Soporta:
@@ -329,12 +354,15 @@ def _parse_date_from_text(text: str) -> Optional[str]:
 
     Args:
         text: Texto en lenguaje natural (puede contener más cosas además de la fecha).
+        now: Momento de referencia (para tests). Si None, usa la hora local del
+            usuario (ADSO_TIMEZONE).
 
     Returns:
         String ISO 8601 (con hora si se detectó, solo fecha si no), o None.
     """
     t = text.lower()
-    now = datetime.now(timezone.utc)
+    if now is None:
+        now = datetime.now(_user_tz())
 
     # Hora: "15hs", "15h", "15:30", "a las 15"
     time_m = re.search(r'\b(\d{1,2}):(\d{2})\b', t) or \
@@ -342,9 +370,12 @@ def _parse_date_from_text(text: str) -> Optional[str]:
              re.search(r'a las\s+(\d{1,2})\b', t)
     hour, minute, has_time = 0, 0, False
     if time_m:
-        hour = int(time_m.group(1))
-        minute = int(time_m.group(2)) if time_m.lastindex and time_m.lastindex >= 2 else 0
-        has_time = True
+        parsed_hour = int(time_m.group(1))
+        parsed_minute = int(time_m.group(2)) if time_m.lastindex and time_m.lastindex >= 2 else 0
+        # Descartar horas/minutos fuera de rango ("a las 25", "30hs") en vez de
+        # dejar que datetime.replace() lance ValueError más abajo.
+        if 0 <= parsed_hour <= 23 and 0 <= parsed_minute <= 59:
+            hour, minute, has_time = parsed_hour, parsed_minute, True
 
     target: Optional[datetime] = None
 
@@ -371,15 +402,15 @@ def _parse_date_from_text(text: str) -> Optional[str]:
             except ValueError:
                 pass
 
-    # Relativos
+    # Relativos (con límites de palabra para no matchear dentro de otras palabras)
     if not target:
-        if "pasado mañana" in t or "pasado manana" in t:
+        if re.search(r'\bpasado\s+ma[ñn]ana\b', t):
             base = now + timedelta(days=2)
             target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        elif "mañana" in t or "manana" in t:
+        elif re.search(r'\bma[ñn]ana\b', t):
             base = now + timedelta(days=1)
             target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        elif "hoy" in t:
+        elif re.search(r'\bhoy\b', t):
             target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
     # Día de semana
@@ -444,10 +475,8 @@ def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
         fm["title"] = text.split(" ", 1)[1].strip()
         changed = True
 
-    # Fallback: actualizar título
-    if not changed:
-        fm["title"] = text.strip()
-
+    # Sin fallback de título acá: el caller decide qué hacer cuando no cambió
+    # nada (aplica el mismo guard de longitud/multilínea que la rama no-tarea).
     return changed
 
 
@@ -469,8 +498,9 @@ async def _handle_text_correction(
     fm = payload["frontmatter"]
     text_lower = text.lower().strip()
 
+    handled = True
     if fm.get("type") == "task":
-        _apply_task_corrections(fm, text, text_lower)
+        handled = _apply_task_corrections(fm, text, text_lower)
     elif text_lower.startswith("titulo ") or text_lower.startswith("título "):
         fm["title"] = text.split(" ", 1)[1].strip()
     elif text_lower.startswith("prioridad "):
@@ -495,9 +525,14 @@ async def _handle_text_correction(
         elif new_type in ("idea",):
             fm["type"] = "idea"
     else:
-        # Solo usar como título si es texto corto de una línea.
-        # Texto largo o multi-línea probablemente sea contenido enviado por error
-        # en modo corrección — en ese caso avisar sin modificar nada.
+        handled = False
+
+    if not handled:
+        # Ningún prefijo/campo reconocido. Solo usar como título si es texto corto
+        # de una línea. Texto largo o multi-línea probablemente sea contenido
+        # enviado por error en modo corrección — avisar sin modificar nada.
+        # Aplica igual a tareas y a notas (antes las tareas pisaban el título sin
+        # este guard).
         stripped = text.strip()
         if len(stripped) <= 200 and "\n" not in stripped:
             fm["title"] = stripped
@@ -740,7 +775,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             async def _notify_tasks(msg: str) -> None:
                 await context.bot.send_message(chat_id=_user_id, text=msg)
 
-            asyncio.create_task(
+            spawn_tracked(
                 _push_task_safe(
                     tasks_client,
                     fm,
@@ -749,7 +784,8 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
                     body=original_body,
                     notify_fn=_notify_tasks,
                     debug=_settings.tasks.debug,
-                )
+                ),
+                name="push_task",
             )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
@@ -757,7 +793,17 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         context.bot_data.setdefault("bot_written_paths", set()).add(path)
         await git_backup.notify(fm.get("title", "Sin título"))
 
-    # El embedding lo maneja vault_watcher via on_created — no indexar aquí para evitar doble embed.
+    # Indexar el embedding inline (mismo patrón que jobs.reclassify_inbox). El path
+    # se registró en bot_written_paths arriba, así que el vault_watcher salteará el
+    # evento inotify de esta escritura y no habrá doble embed. Antes se delegaba al
+    # watcher, pero el watcher justamente saltea bot_written_paths → la nota quedaba
+    # sin embedding hasta el reindex nocturno.
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if embeddings and body.strip():
+        spawn_tracked(
+            _index_note_safe(embeddings, path, body, fm, vault_path),
+            name="index_note",
+        )
 
     if inbox_path_str:
         try:

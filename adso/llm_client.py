@@ -347,7 +347,17 @@ async def classify(
         if all retries are exhausted.
     """
     system_prompt = build_system_prompt(existing_projects, existing_areas, existing_tags)
-    user_message = f"<input>\n{content}\n</input>"
+    # Neutralizar cualquier tag de control (<input>, </input>, <system>, etc.) que
+    # el contenido externo (PDF, OCR, abstract) pudiera incluir para escaparse del
+    # wrapper. Se inserta un espacio tras el "<" solo cuando forma uno de nuestros
+    # tags, preservando el "<" legítimo (código, matemática) del resto del texto.
+    safe_content = re.sub(
+        r"</?\s*(input|system|user_context)\b",
+        lambda m: m.group(0).replace("<", "< "),
+        content,
+        flags=re.IGNORECASE,
+    )
+    user_message = f"<input>\n{safe_content}\n</input>"
     if user_context:
         # Sanitize user_context to prevent tag-breaking injection.
         # Remove angle brackets that could escape the <user_context> wrapper.

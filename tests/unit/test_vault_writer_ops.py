@@ -6,12 +6,14 @@ import pytest
 from pathlib import Path
 
 from adso.vault_writer import (
+    _safe_component,
     append_to_note,
     create_note,
     delete_note,
     ensure_vault_structure,
     move_note,
     read_note,
+    remove_broken_wikilinks,
     seed_vault,
     set_property,
     update_wikilinks,
@@ -326,3 +328,99 @@ class TestCreateNoteEdgeCases:
         p.write_text("Just text, no frontmatter.", encoding="utf-8")
         with pytest.raises(ValueError, match="frontmatter"):
             await read_note(p)
+
+
+class TestSafeComponent:
+    """Sanitización de componentes de path contra traversal."""
+
+    @pytest.mark.parametrize("value", ["tesis", "mi-proyecto", "Área 51", "a_b"])
+    def test_valid_names_pass_through(self, value: str) -> None:
+        assert _safe_component(value) == value.strip()
+
+    @pytest.mark.parametrize(
+        "value",
+        ["../etc", "../../secret", "a/b", "a\\b", "..", ".", ".hidden", "", "   ", "x\x00y"],
+    )
+    def test_traversal_and_junk_rejected(self, value: str) -> None:
+        assert _safe_component(value) is None
+
+    @pytest.mark.parametrize("value", [None, 123, ["x"], {"a": 1}])
+    def test_non_string_rejected(self, value) -> None:
+        assert _safe_component(value) is None
+
+
+class TestCreateNotePathTraversal:
+    """create_note nunca debe escribir fuera del vault."""
+
+    @pytest.mark.asyncio
+    async def test_project_traversal_redirects_to_inbox(self, vault: Path) -> None:
+        path = await create_note(
+            {"title": "Evil", "type": "reference", "status": "active",
+             "project": "../../../etc"},
+            "body", vault,
+        )
+        assert path.resolve().is_relative_to(vault.resolve())
+        assert "00-Inbox" in str(path)
+
+    @pytest.mark.asyncio
+    async def test_section_traversal_redirects_to_inbox(self, vault: Path) -> None:
+        path = await create_note(
+            {"title": "Evil2", "type": "reference", "status": "active",
+             "project": "tesis", "section": "../../.obsidian"},
+            "body", vault,
+        )
+        assert path.resolve().is_relative_to(vault.resolve())
+        # project válido pero section con traversal → section se descarta, cae en el proyecto
+        assert "01-Projects/tesis" in str(path)
+
+
+class TestAtomicWrite:
+    """Las escrituras deben ser atómicas y no dejar temporales."""
+
+    @pytest.mark.asyncio
+    async def test_no_temp_files_left_behind(self, vault: Path) -> None:
+        await create_note(
+            {"title": "Atomic", "type": "reference", "status": "active", "project": "tesis"},
+            "body", vault,
+        )
+        temps = list((vault / "01-Projects" / "tesis").glob(".adso-tmp-*"))
+        assert temps == []
+
+    @pytest.mark.asyncio
+    async def test_content_intact_after_append(self, sample_note: Path) -> None:
+        await append_to_note(sample_note, "Nuevo contenido")
+        note = await read_note(sample_note)
+        assert "Body original." in note.body
+        assert "Nuevo contenido" in note.body
+
+
+class TestRemoveBrokenWikilinksScoped:
+    """remove_broken_wikilinks solo toca el bloque '## Ver también'."""
+
+    @pytest.mark.asyncio
+    async def test_removes_link_in_ver_tambien(self, vault: Path) -> None:
+        note = await create_note(
+            {"title": "Src", "type": "reference", "status": "active", "project": "tesis"},
+            "Cuerpo.\n\n## Ver también\n\n- [[nota-vieja]] — Nota vieja\n",
+            vault,
+        )
+        deleted = vault / "01-Projects" / "tesis" / "nota-vieja.md"
+        count = await remove_broken_wikilinks(vault, deleted)
+        assert count == 1
+        body = (await read_note(note)).body
+        assert "[[nota-vieja]]" not in body
+
+    @pytest.mark.asyncio
+    async def test_preserves_user_text_outside_block(self, vault: Path) -> None:
+        # Un wikilink usado en prosa/otra lista fuera de "Ver también" NO se toca.
+        note = await create_note(
+            {"title": "Src2", "type": "reference", "status": "active", "project": "tesis"},
+            "- [[nota-vieja]] dato importante del usuario\n\n"
+            "## Ver también\n\n- [[nota-vieja]] — link\n",
+            vault,
+        )
+        deleted = vault / "01-Projects" / "tesis" / "nota-vieja.md"
+        await remove_broken_wikilinks(vault, deleted)
+        body = (await read_note(note)).body
+        # El item del bloque Ver también se borró, pero la línea del usuario queda
+        assert "dato importante del usuario" in body

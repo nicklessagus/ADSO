@@ -9,7 +9,7 @@ from typing import Optional
 
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags
+from adso.bot_utils import _get_existing_items, _get_existing_tags, spawn_tracked
 from adso.config import Settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.capture import _index_note_safe
@@ -147,8 +147,9 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
             if embeddings and body:
-                asyncio.create_task(
-                    _index_note_safe(embeddings, new_path, body, new_fm, vault_path)
+                spawn_tracked(
+                    _index_note_safe(embeddings, new_path, body, new_fm, vault_path),
+                    name="index_note",
                 )
 
             title = new_fm.get("title", "Sin título")

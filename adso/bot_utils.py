@@ -5,14 +5,50 @@ Funciones puras y getters async sin lógica de negocio de Telegram.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from pathlib import Path
+from typing import Awaitable
 
 from telegram.ext import ContextTypes
 
 from adso.constants import MANAGE_KEYWORDS
 from adso.vault_cache import parse_cached
 from adso.vault_search import get_all_tags
+
+logger = logging.getLogger(__name__)
+
+# Referencias fuertes a tareas de fondo. asyncio solo guarda weak-refs a las
+# tareas creadas con create_task: sin una referencia fuerte el GC puede
+# recolectarlas a mitad de ejecución y cancelarlas silenciosamente (re-embed,
+# push a Tasks, etc. perdidos). Se descartan solas al terminar.
+_BG_TASKS: "set[asyncio.Task]" = set()
+
+
+def spawn_tracked(coro: Awaitable, *, name: str | None = None) -> "asyncio.Task":
+    """Crea una tarea de fondo con referencia fuerte y logging de excepciones.
+
+    Reemplaza ``asyncio.create_task(coro)`` cuando no se espera el resultado:
+    evita el GC prematuro y no deja excepciones sin loguear.
+    """
+    task = asyncio.ensure_future(coro)
+    if name:
+        try:
+            task.set_name(name)
+        except AttributeError:
+            pass
+    _BG_TASKS.add(task)
+
+    def _done(t: "asyncio.Task") -> None:
+        _BG_TASKS.discard(t)
+        if not t.cancelled():
+            exc = t.exception()
+            if exc is not None:
+                logger.error("Tarea de fondo %s falló: %r", t.get_name(), exc)
+
+    task.add_done_callback(_done)
+    return task
 
 
 def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:

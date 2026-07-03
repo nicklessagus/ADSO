@@ -499,6 +499,28 @@ class TestParseDateFromText:
         assert parsed_date > datetime.now(timezone.utc)
         assert parsed_date.weekday() == 4  # viernes
 
+    def test_weekday_uses_injected_now_not_utc(self) -> None:
+        # Jueves 22:00 hora local (UTC-3) = viernes 01:00 UTC. "el viernes" debe
+        # resolver al viernes SIGUIENTE (mañana), no al de la semana próxima.
+        from datetime import datetime, timezone, timedelta
+        local = timezone(timedelta(hours=-3))
+        thu_night = datetime(2026, 7, 2, 22, 0, tzinfo=local)  # jueves
+        result = _parse_date_from_text("el viernes", now=thu_night)
+        assert result == "2026-07-03"  # el viernes inmediato
+
+    def test_hour_out_of_range_ignored(self) -> None:
+        # "a las 25" no es una hora válida: se descarta la hora, no crashea.
+        result = _parse_date_from_text("mañana a las 25")
+        assert result is not None
+        assert "T" not in result  # sin componente de hora
+
+    def test_invalid_hour_does_not_raise_on_weekday(self) -> None:
+        from datetime import datetime, timezone, timedelta
+        base = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+        # No debe lanzar ValueError por hora fuera de rango
+        result = _parse_date_from_text("el lunes 30hs", now=base)
+        assert result is not None
+
 
 class TestApplyTaskCorrections:
     """Tests para _apply_task_corrections."""
@@ -523,10 +545,14 @@ class TestApplyTaskCorrections:
         _apply_task_corrections(fm, "título nuevo título", "título nuevo título")
         assert fm["title"] == "nuevo título"
 
-    def test_fallback_sets_title(self) -> None:
+    def test_no_field_returns_false_without_touching_title(self) -> None:
+        # _apply_task_corrections ya no hace fallback de título: si no reconoce
+        # ningún campo devuelve False y deja el frontmatter intacto. El fallback
+        # (con guard de longitud/multilínea) lo aplica _handle_text_correction.
         fm = {"title": "old", "type": "task"}
-        _apply_task_corrections(fm, "Tarea de ejemplo", "tarea de ejemplo")
-        assert fm["title"] == "Tarea de ejemplo"
+        changed = _apply_task_corrections(fm, "Tarea de ejemplo", "tarea de ejemplo")
+        assert changed is False
+        assert fm["title"] == "old"
 
     def test_date_and_priority_combined(self) -> None:
         fm = {"title": "T", "type": "task", "priority": "medium"}

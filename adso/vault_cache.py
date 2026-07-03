@@ -77,9 +77,16 @@ def parse_cached(path: Path) -> Optional[NoteData]:
     # serializar a los demás threads).
     try:
         raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        # Archivo borrado/inaccesible entre el stat y el read: transitorio, debug.
+        logger.debug("No se pudo leer nota %s: %s", path, exc)
+        return None
+    try:
         post = frontmatter.loads(raw)
-    except Exception:
-        logger.debug("Error parsing nota: %s", path)
+    except Exception as exc:
+        # YAML corrupto (típicamente edición externa a mano). La nota queda
+        # invisible a los scans — hay que poder diagnosticarlo, no silenciarlo.
+        logger.warning("Frontmatter inválido en %s, nota omitida de scans: %s", path, exc)
         return None
 
     if not post.metadata:

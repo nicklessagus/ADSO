@@ -15,7 +15,7 @@ from adso.bot_utils import _extract_name_from_command, _get_existing_items
 from adso.config import Settings
 from adso.keyboards import _esc, build_manage_keyboard
 from adso.llm_client import classify
-from adso.vault_writer import create_note
+from adso.vault_writer import _safe_component, create_note
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,25 @@ async def _cb_manage_confirm(
     payload = pending["payload"]
     operation = payload["operation"]
     params = payload["params"]
+
+    # Sanitizar nombres contra path traversal antes de construir cualquier path.
+    # El nombre puede venir del LLM o de texto libre del usuario.
+    safe_name = _safe_component(params.get("name"))
+    if operation in ("create_project", "create_area", "create_section") and not safe_name:
+        await query.edit_message_text(
+            f"Nombre inválido: {params.get('name')!r}. No se creó nada."
+        )
+        return
+    if operation == "create_section":
+        safe_project = _safe_component(params.get("project"))
+        if not safe_project:
+            await query.edit_message_text(
+                f"Proyecto inválido: {params.get('project')!r}. No se creó nada."
+            )
+            return
+        params["project"] = safe_project
+    if safe_name:
+        params["name"] = safe_name
 
     try:
         if operation == "create_project":

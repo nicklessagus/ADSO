@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -86,6 +88,31 @@ def _now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _atomic_write_sync(path: Path, content: str) -> None:
+    """Escribe ``content`` a ``path`` de forma atómica.
+
+    Escribe a un temporal en el mismo directorio, hace fsync y luego
+    ``os.replace`` (rename atómico en el mismo filesystem). Si el proceso muere
+    a mitad de la escritura (OOM en RPi4, ``docker stop``), el archivo destino
+    queda intacto — nunca truncado ni vacío. Regla de oro: sin pérdida de datos.
+
+    Debe correr en un thread (``asyncio.to_thread``): hace I/O bloqueante.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".adso-tmp-", suffix=path.suffix)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _parse_date_value(value: str) -> "date | datetime | str":
     """Convierte un string ISO 8601 a objeto date/datetime para serialización YAML sin comillas.
 
@@ -126,6 +153,34 @@ def _make_filename(title: str, date_val: "Optional[str | date | datetime]" = Non
     return f"{prefix}-{slug_text}.md"
 
 
+def _safe_component(name: Any) -> Optional[str]:
+    """Sanitiza un componente de path (project/area/section) contra path traversal.
+
+    Estos valores vienen del LLM (que procesa contenido externo susceptible a
+    injection) o de comandos del usuario, y se concatenan al path del vault. Un
+    valor como ``"../../etc"`` escribiría fuera del vault.
+
+    Returns:
+        El nombre limpio (stripped) si es un único componente seguro, o None si
+        es inválido/vacío/con traversal. El caller debe tratar None como
+        "sin destino" (→ Inbox o preguntar al usuario).
+    """
+    if not isinstance(name, str):
+        return None
+    cleaned = name.strip()
+    if not cleaned or cleaned in (".", ".."):
+        return None
+    if cleaned.startswith("."):
+        return None
+    if any(sep in cleaned for sep in ("/", "\\", "\x00")):
+        return None
+    # Path(...).name descarta cualquier componente de directorio; si difiere del
+    # original, el valor contenía separadores u otra construcción de path.
+    if Path(cleaned).name != cleaned:
+        return None
+    return cleaned
+
+
 def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
     """Calcula el directorio destino según el frontmatter.
 
@@ -134,9 +189,9 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
         (nota sin proyecto ni área — el caller debe preguntar al usuario).
     """
     note_type = fm.get("type", "idea")
-    project = fm.get("project")
-    section = fm.get("section")
-    area = fm.get("area")
+    project = _safe_component(fm.get("project"))
+    section = _safe_component(fm.get("section"))
+    area = _safe_component(fm.get("area"))
 
     if note_type == "project-index":
         if project:
@@ -266,6 +321,12 @@ async def create_note(
         # Fallback a Inbox si no se puede resolver
         dest_dir = vault_path / "00-Inbox"
 
+    # Defensa en profundidad: nunca escribir fuera del vault, pase lo que pase
+    # con los componentes del frontmatter.
+    if not dest_dir.resolve().is_relative_to(vault_path.resolve()):
+        logger.warning("Destino fuera del vault (%s) — redirigiendo a Inbox", dest_dir)
+        dest_dir = vault_path / "00-Inbox"
+
     # Nombre del archivo
     note_type = fm.get("type")
     if note_type in ("project-index", "area-index"):
@@ -287,8 +348,8 @@ async def create_note(
     post = frontmatter.Post(body, **clean_fm)
     content = frontmatter.dumps(post)
 
-    # Escribir archivo
-    await asyncio.to_thread(file_path.write_text, content, "utf-8")
+    # Escribir archivo (atómico: temp + fsync + replace)
+    await asyncio.to_thread(_atomic_write_sync, file_path, content)
 
     logger.info("Nota creada: %s", file_path)
     return file_path
@@ -347,7 +408,7 @@ async def append_to_note(
     post = frontmatter.Post(new_body, **clean_fm)
     output = frontmatter.dumps(post)
 
-    await asyncio.to_thread(note_path.write_text, output, "utf-8")
+    await asyncio.to_thread(_atomic_write_sync, note_path, output)
 
 
 async def set_property(
@@ -419,7 +480,7 @@ async def set_property(
     post = frontmatter.Post(note.body, **clean_fm)
     output = frontmatter.dumps(post)
 
-    await asyncio.to_thread(note_path.write_text, output, "utf-8")
+    await asyncio.to_thread(_atomic_write_sync, note_path, output)
 
 
 async def delete_note(note_path: Path) -> None:
@@ -518,7 +579,7 @@ async def update_wikilinks(
         clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": _now_iso()})
         final_post = frontmatter.Post(post.content, **clean_meta)
         output = frontmatter.dumps(final_post)
-        await asyncio.to_thread(note_path.write_text, output, "utf-8")
+        await asyncio.to_thread(_atomic_write_sync, note_path, output)
         logger.info("Wikilinks actualizados en: %s", note_path)
 
 
@@ -551,6 +612,32 @@ def _remove_empty_ver_tambien(content: str) -> str:
     return "\n".join(result)
 
 
+def _strip_broken_links_in_ver_tambien(content: str, link_re: "re.Pattern[str]") -> str:
+    """Elimina items ``- [[stem]]`` rotos, pero SOLO dentro del bloque '## Ver también'.
+
+    Recorre las líneas manteniendo el estado "dentro del bloque Ver también"
+    (entre el header ``## Ver también`` y el siguiente ``## `` o EOF). Fuera de
+    ese bloque, las líneas se preservan tal cual — así un wikilink que el usuario
+    haya escrito en un párrafo o en otra lista nunca se borra.
+    """
+    lines = content.split("\n")
+    result: list[str] = []
+    in_block = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## Ver también":
+            in_block = True
+            result.append(line)
+            continue
+        if in_block and stripped.startswith("## "):
+            in_block = False
+        if in_block and link_re.match(line):
+            # Item de lista roto dentro del bloque → descartar la línea
+            continue
+        result.append(line)
+    return "\n".join(result)
+
+
 async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
     """Elimina de todas las notas del vault wikilinks rotos que apuntaban a una nota borrada.
 
@@ -565,9 +652,11 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
         Número de archivos modificados.
     """
     stem = deleted_path.stem
+    # Ancla ^- \[\[stem...\]\]: solo líneas que son un item de lista con el wikilink.
+    # Se aplica exclusivamente DENTRO del bloque "## Ver también" (ver más abajo)
+    # para no borrar texto del usuario que use ese wikilink en otra parte de la nota.
     link_re = re.compile(
-        r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*\n?",
-        re.MULTILINE,
+        r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*$"
     )
 
     modified = 0
@@ -576,20 +665,25 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
             continue
         try:
             raw = await asyncio.to_thread(md_path.read_text, "utf-8")
-        except Exception:
+        except OSError as exc:
+            logger.warning("No se pudo leer %s para limpiar wikilinks: %s", md_path, exc)
             continue
 
         if f"[[{stem}]]" not in raw and f"[[{stem}|" not in raw and f"[[{stem}#" not in raw:
             continue
 
-        new_content = link_re.sub("", raw)
+        new_content = _strip_broken_links_in_ver_tambien(raw, link_re)
         new_content = _remove_empty_ver_tambien(new_content)
         new_content = new_content.rstrip("\n") + "\n"
 
         if new_content == raw:
             continue
 
-        await asyncio.to_thread(md_path.write_text, new_content, "utf-8")
+        try:
+            await asyncio.to_thread(_atomic_write_sync, md_path, new_content)
+        except OSError as exc:
+            logger.warning("No se pudo escribir %s al limpiar wikilinks: %s", md_path, exc)
+            continue
         modified += 1
         logger.info("Wikilink roto eliminado: %s → [[%s]]", md_path.name, stem)
 
@@ -774,64 +868,86 @@ class GitBackup:
 
             self._timer = loop.call_later(self.debounce_seconds, _schedule_backup)
 
-    async def _do_backup(self) -> None:
-        """Ejecuta git add + commit + push."""
-        async with self._lock:
-            if not self._pending_titles:
-                return
-
-            titles = list(self._pending_titles)
-            self._pending_titles.clear()
-            self._timer = None
-
-        # Generar mensaje de commit
+    @staticmethod
+    def _build_message(titles: list[str]) -> str:
+        """Genera el mensaje de commit a partir de los títulos acumulados."""
         if len(titles) == 1:
-            message = f"Add note: {titles[0]}"
-        else:
-            title_list = ", ".join(titles[:5])
-            if len(titles) > 5:
-                title_list += f" (+{len(titles) - 5} más)"
-            message = f"Add {len(titles)} notes: {title_list}"
+            return f"Add note: {titles[0]}"
+        title_list = ", ".join(titles[:5])
+        if len(titles) > 5:
+            title_list += f" (+{len(titles) - 5} más)"
+        return f"Add {len(titles)} notes: {title_list}"
 
+    def _sync_backup(self, message: str) -> tuple[str, str]:
+        """Parte síncrona del backup: add + commit + push. Corre en un thread.
+
+        Todas las operaciones de GitPython (``Repo``, ``add``, ``is_dirty``,
+        ``commit``, ``push``) son bloqueantes y en la RPi4 con SD lenta pueden
+        tardar cientos de ms — no deben correr en el event loop o congelan el bot.
+
+        Returns:
+            Tupla ``(status, detail)`` donde status ∈ {pushed, clean, push_failed,
+            no_git, not_repo} y detail es el mensaje de error si aplica.
+        """
         try:
             import git
-
-            repo = git.Repo(str(self.vault_path))
-
-            # Stage all changes
-            repo.git.add(A=True)
-
-            # Check if there are changes to commit
-            if repo.is_dirty(untracked_files=True):
-                author = git.Actor("ADSO", "adso@localhost")
-                repo.index.commit(message, author=author, committer=author)
-                logger.info("Git commit: %s", message)
-
-                # Push (puede fallar si no hay remote)
-                try:
-                    origin = repo.remote("origin")
-                    await asyncio.to_thread(origin.push)
-                    logger.info("Git push exitoso")
-                    if self._debug and self._bot and self._chat_id:
-                        await self._bot.send_message(
-                            chat_id=self._chat_id,
-                            text=f"💾 [debug] Vault backup:\n<code>{html.escape(message)}</code>",
-                            parse_mode="HTML",
-                        )
-                except Exception as e:
-                    logger.warning("Git push falló (nota segura en disco): %s", e)
-                    if self._bot and self._chat_id:
-                        await self._bot.send_message(
-                            chat_id=self._chat_id,
-                            text=f"⚠️ Git push falló — vault seguro en disco.\n<code>{html.escape(str(e))}</code>",
-                            parse_mode="HTML",
-                        )
-            else:
-                logger.debug("Git: sin cambios para commit")
-
         except ImportError:
-            logger.warning("GitPython no instalado, backup deshabilitado")
+            return ("no_git", "")
+
+        try:
+            repo = git.Repo(str(self.vault_path))
         except git.InvalidGitRepositoryError:
-            logger.warning("El vault no es un repo git: %s", self.vault_path)
-        except Exception as e:
+            return ("not_repo", "")
+
+        repo.git.add(A=True)
+        if not repo.is_dirty(untracked_files=True):
+            return ("clean", "")
+
+        author = git.Actor("ADSO", "adso@localhost")
+        repo.index.commit(message, author=author, committer=author)
+        try:
+            origin = repo.remote("origin")
+            origin.push()
+        except Exception as e:  # noqa: BLE001 — cualquier fallo de push se reporta
+            return ("push_failed", str(e))
+        return ("pushed", "")
+
+    async def _do_backup(self) -> None:
+        """Ejecuta git add + commit + push (parte bloqueante en un thread)."""
+        async with self._lock:
+            self._timer = None
+            if not self._pending_titles:
+                return
+            titles = list(self._pending_titles)
+            self._pending_titles.clear()
+
+        message = self._build_message(titles)
+
+        try:
+            status, detail = await asyncio.to_thread(self._sync_backup, message)
+        except Exception as e:  # noqa: BLE001
             logger.error("Error en git backup: %s", e)
+            return
+
+        if status == "pushed":
+            logger.info("Git commit+push exitoso: %s", message)
+            if self._debug and self._bot and self._chat_id:
+                await self._bot.send_message(
+                    chat_id=self._chat_id,
+                    text=f"💾 [debug] Vault backup:\n<code>{html.escape(message)}</code>",
+                    parse_mode="HTML",
+                )
+        elif status == "push_failed":
+            logger.warning("Git push falló (nota segura en disco): %s", detail)
+            if self._bot and self._chat_id:
+                await self._bot.send_message(
+                    chat_id=self._chat_id,
+                    text=f"⚠️ Git push falló — vault seguro en disco.\n<code>{html.escape(detail)}</code>",
+                    parse_mode="HTML",
+                )
+        elif status == "clean":
+            logger.debug("Git: sin cambios para commit")
+        elif status == "no_git":
+            logger.warning("GitPython no instalado, backup deshabilitado")
+        elif status == "not_repo":
+            logger.warning("El vault no es un repo git: %s", self.vault_path)

@@ -132,6 +132,9 @@ class VaultWatcher:
         self._queue: asyncio.Queue[_VaultEvent] = asyncio.Queue()
         self._observer = None
         self._task: Optional[asyncio.Task] = None
+        # Referencias fuertes a las tareas de callback (evita GC prematuro) y
+        # permite drenarlas en stop().
+        self._bg_tasks: "set[asyncio.Task]" = set()
         self._stats = WatcherStats(debug=debug)
         # Deduplicación: evita notificar el mismo path dos veces en menos de 2s
         # (inotify dispara CREATE + MODIFY al escribir un archivo nuevo)
@@ -173,7 +176,24 @@ class VaultWatcher:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        # Drenar tareas de callback en vuelo (re-embed/delete) antes de salir.
+        if self._bg_tasks:
+            await asyncio.gather(*self._bg_tasks, return_exceptions=True)
         logger.info("VaultWatcher detenido.")
+
+    def _spawn(self, coro) -> None:
+        """Lanza una tarea de callback guardando referencia fuerte y logueando errores."""
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+
+        def _done(t: "asyncio.Task") -> None:
+            self._bg_tasks.discard(t)
+            if not t.cancelled():
+                exc = t.exception()
+                if exc is not None:
+                    logger.error("VaultWatcher: callback falló: %r", exc)
+
+        task.add_done_callback(_done)
 
     def _is_duplicate(self, path: Path) -> bool:
         """Devuelve True si el path fue procesado hace menos de dedup_window."""
@@ -209,7 +229,7 @@ class VaultWatcher:
             elif event.is_delete:
                 self._stats.deletions_detected += 1
                 if self._on_external_delete:
-                    asyncio.create_task(self._on_external_delete(event.path))
+                    self._spawn(self._on_external_delete(event.path))
                 if self._debug:
                     try:
                         await self._notify_delete(event.path)
@@ -220,7 +240,7 @@ class VaultWatcher:
             else:
                 self._stats.changes_detected += 1
                 if self._on_external_change:
-                    asyncio.create_task(self._on_external_change(event.path))
+                    self._spawn(self._on_external_change(event.path))
                 if self._debug:
                     try:
                         await self._notify_change(event.path)

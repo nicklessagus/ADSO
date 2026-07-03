@@ -55,6 +55,18 @@ class TestParseCached:
         _write(note, "Solo texto, sin frontmatter.\n")
         assert parse_cached(note) is None
 
+    def test_corrupt_yaml_returns_none_and_warns(self, tmp_path: Path, caplog) -> None:
+        # YAML de frontmatter inválido (indentación rota): la nota se omite de los
+        # scans pero debe quedar registrada a nivel warning para diagnóstico.
+        import logging
+
+        note = tmp_path / "broken.md"
+        _write(note, "---\ntitle: x\n  bad: : indent\n\ttab\n---\nbody\n")
+        with caplog.at_level(logging.WARNING, logger="adso.vault_cache"):
+            result = parse_cached(note)
+        assert result is None
+        assert any("Frontmatter inválido" in r.message for r in caplog.records)
+
     def test_second_call_is_cache_hit(self, tmp_path: Path) -> None:
         note = tmp_path / "n.md"
         _write(note, NOTE_BODY)
