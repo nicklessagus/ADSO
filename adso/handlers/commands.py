@@ -28,6 +28,7 @@ _HELP_TEXT = """\
 /reporte — Generá un reporte del vault (proyecto, área, ideas, salud, cola de lectura)
 /reporte_full — Igual a /reporte pero incluye el contenido completo de cada nota
 /clasificar — Clasificá notas de Inbox sin destino asignado
+/buscar &lt;consulta&gt; — Buscar notas del vault por similitud semántica
 /status — Estado del sistema (vault, embeddings, inbox)
 /reset — Cancelar cualquier operación pendiente y volver al estado inicial
 /start — Verificar que el bot está activo

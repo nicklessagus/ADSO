@@ -283,11 +283,16 @@ rag:
 
 ## Plan de implementación
 
-### Etapa 7.0 — Retrieval puro (0 gen calls) · MVP
-- `knowledge_query.retrieve()` + `ScoredNote`/`QueryResult`.
-- Comando `/buscar <q>` → resultados inline/`.md`.
-- Cablear `CB_DISAMBIG_QUERY` al pipeline (reemplaza "próxima versión").
-- Tests: retrieve con ChromaDB mockeado, umbral, vault vacío, formato de salida.
+### Etapa 7.0 — Retrieval puro (0 gen calls) · MVP ✅ IMPLEMENTADO
+- `knowledge_query.retrieve()` + `ScoredNote`/`QueryResult` (`adso/knowledge_query.py`).
+- Comando `/buscar <q>` → resultados inline (≤3) o informe `.md` (`adso/handlers/query.py`).
+- `CB_DISAMBIG_QUERY` cableado al pipeline (reemplaza "próxima versión");
+  `CB_QUERY_REPORT` para el botón `[Generar informe .md]`.
+- Fallback de baja confianza: si nada supera el umbral, relaja y muestra top-3
+  con aviso (`below_threshold`).
+- Tests: `tests/unit/test_knowledge_query.py`, `tests/e2e/test_query_handler.py`.
+- Pendiente del checkpoint (pregunta abierta #3): eval manual de calidad de
+  retrieval contra el vault real.
 
 ### Etapa 7.1 — Scope + expansión estructural (0 gen calls)
 - `where` por project/area + botones de scope.

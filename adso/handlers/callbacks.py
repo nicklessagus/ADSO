@@ -37,6 +37,7 @@ from adso.constants import (
     CB_INTENT_SAVE,
     CB_INTENT_TASK,
     CB_MANAGE_CANCEL,
+    CB_QUERY_REPORT,
     CB_MANAGE_CONFIRM,
     CB_OCR,
     CB_READ_STATUS_READ,
@@ -171,8 +172,17 @@ async def handle_callback(
             await _handle_capture_from_callback(query, context, pending)
 
     elif data == CB_DISAMBIG_QUERY:
-        await query.edit_message_text("Modo consulta disponible en próxima versión.")
+        from adso.handlers.query import run_query
+        pending_text = context.user_data.pop("pending_raw_content", None)
         context.user_data.pop("pending_note", None)
+        if pending_text:
+            await run_query(update, context, pending_text)
+        else:
+            await query.edit_message_text("No hay texto para buscar.")
+
+    elif data == CB_QUERY_REPORT:
+        from adso.handlers.query import cb_query_report
+        await cb_query_report(query, context)
 
     elif data == CB_MANAGE_CONFIRM:
         await _cb_manage_confirm(query, context, vault_path)

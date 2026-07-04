@@ -296,7 +296,7 @@ Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el 
 | 4 | Imágenes y capturas (OCR + Gemini Vision) | ✅ |
 | 5 | Integraciones externas (arXiv) | ✅ |
 | 6 | Google Calendar + Google Tasks | ⏸ diferida — diseño pendiente |
-| 7 | Consultas RAG en lenguaje natural | 📐 diseño listo — `docs/fase7-rag-design.md` |
+| 7 | Consultas RAG en lenguaje natural | 🔄 parcial — 7.0 retrieval puro (`/buscar`) implementado; scope/expansión/síntesis pendientes. Diseño en `docs/fase7-rag-design.md` |
 | 8 | Análisis del vault: reportes a pedido (scope, ideas, salud, cola de lectura), scoring de papers, detección de gaps | 🔄 parcial — reportes implementados |
 
 ### Fase 5 — arXiv

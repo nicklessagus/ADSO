@@ -201,14 +201,28 @@ class TestCallbackPaths:
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})
-    async def test_disambig_query(self, make_callback_query, mock_context) -> None:
+    async def test_disambig_query_no_text(self, make_callback_query, mock_context) -> None:
+        # Sin pending_raw_content no hay nada que buscar → aviso.
         _setup_pending_note(mock_context)
         update = make_callback_query(data=CB_DISAMBIG_QUERY)
         await handle_callback(update, mock_context)
         update.callback_query.edit_message_text.assert_called_once_with(
-            "Modo consulta disponible en próxima versión."
+            "No hay texto para buscar."
         )
         assert "pending_note" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_disambig_query_runs_search(self, make_callback_query, mock_context) -> None:
+        # Con pending_raw_content, dispara run_query con ese texto.
+        from unittest.mock import AsyncMock
+        mock_context.user_data["pending_raw_content"] = "papers de tesis"
+        update = make_callback_query(data=CB_DISAMBIG_QUERY)
+        with patch("adso.handlers.query.run_query", new_callable=AsyncMock) as mock_run:
+            await handle_callback(update, mock_context)
+        mock_run.assert_awaited_once()
+        assert mock_run.await_args[0][2] == "papers de tesis"
+        assert "pending_raw_content" not in mock_context.user_data
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})
