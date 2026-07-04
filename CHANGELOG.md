@@ -5,6 +5,31 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.1.0] — 2026-07-04
+
+Performance and hardening release, driven by a post-release audit (performance / security / docs).
+
+### Performance (RPi4)
+- Scanned-PDF rendering (`_render_pdf_pages`) now runs in a worker thread — rasterizing at 200 DPI no longer freezes the event loop for seconds; pages render to in-memory PNGs (no temp files)
+- One embedding per capture: the preview's body embedding is reused when confirming (if the body didn't change), and `/buscar` reuses the query embedding on the relaxed-threshold retry — fewer Gemini API calls and lower latency
+- Nightly reindex uses the vault parse cache (unchanged notes are not re-read from the SD card)
+- Heavy vault jobs (`reclassify_inbox`, `reindex_job`) share a lock so they never overlap
+- Whisper transcription with `beam_size=1` (greedy) — 3-5x faster on ARM int8 with marginal quality loss for short voice notes
+- `genai.Client` instantiated lazily once per module instead of per request
+
+### Security
+- Per-page pixel cap (16 MP) when rasterizing PDFs — a small PDF declaring huge page dimensions can no longer exhaust the RPi4's RAM
+- File size limit now also enforced after download when Telegram omits `file_size` (previously the pre-check was skipped for `None`)
+- Docker hardening: `no-new-privileges` + `cap_drop: ALL`
+- Vault backup SSH: dedicated deploy key + pinned `known_hosts` with `StrictHostKeyChecking=yes`; the install guide no longer suggests mounting `~/.ssh` or disabling host verification
+- CI: `trufflehog` action pinned to a commit SHA (was floating on `@main`)
+- Search query text no longer logged at INFO level
+
+### Docs
+- Bot messages aligned with the impersonal-infinitive style guide; third documentation audit applied (phase 7.0 status, real fixtures, minor drift)
+
+---
+
 ## [1.0.0] — 2026-07-04
 
 First public release.
