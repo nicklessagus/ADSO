@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "adso"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Autonomous Data Structuring Orchestrator — Telegram bot for Obsidian vault management"
 requires-python = ">=3.11"
 dependencies = [
@@ -32,6 +32,9 @@ dev = [
     "pytest-asyncio~=0.24",
     "pytest-cov~=6.0",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "adso.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]

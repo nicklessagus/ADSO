@@ -5,15 +5,39 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
-## [Unreleased]
+## [1.0.0] — 2026-07-04
+
+First public release.
+
+### Added
+- Phase 7.0 — semantic retrieval over the vault with `/buscar` and the `[🔎 Buscar en el vault]` button (ChromaDB, no LLM synthesis)
+- Verbatim body for text files (`.md`, `.txt`): the LLM only generates frontmatter; the note body is the original content
+- Timezone-aware relative date parsing (`ADSO_TIMEZONE` / `TZ` + `tzdata`)
+- Vault parse cache keyed by `(mtime, size)` — repeated scans ~69% faster on RPi4; metrics in `/status`
+- `/status` shows the running version
+- Version is now single-sourced from `adso.__version__` (pyproject reads it dynamically)
+
+### Changed
+- Primary LLM migrated to `gemini-3.1-flash-lite` (stable since May 2026); model ID centralized in `config.GEMINI_MODEL`
+- `llm_client` split: schema, validation and sanitization moved to `llm_schema.py` (re-exported for compatibility)
+- Atomic writes for every vault `.md` (temp + fsync + `os.replace`) — a crash never leaves a truncated note
+- Git backup runs fully off the event loop (`asyncio.to_thread`)
+- Floating dependencies capped with upper bounds for reproducible builds
 
 ### Security
 - Fix path traversal vulnerability in `save_resource()` — filename components are now stripped before composing the destination path
+- Path sanitization (`_safe_component`) for LLM-provided `project`/`area`/`section` and manage operations
 - Expand prompt injection detection to include Spanish-language variants (`ignora las instrucciones`, `ahora eres`, etc.) and common bypasses
 - Apply injection check to `user_context` parameter before LLM call
-
-### Changed
+- Neutralize literal `<input>`/`<system>` tags in external content before prompt wrapping
+- Global auth gate (`TypeHandler`, `group=-1`) in addition to the per-handler `@authorized` decorator
+- Injection warning prepended to previews of externally-extracted content (PDF/OCR/Vision/arXiv)
 - Dockerfile: replace `chmod -R 777 /app/data` with explicit `chown` to avoid world-writable data directory
+- `config.yaml` untracked (template: `config.yaml.example`); `.dockerignore` added
+- Pre-publication audit (July 2026): clean git history verified, docs scrubbed of personal paths
+
+### Docs
+- Installation guide reproducible from a fresh clone; test env vars documented; module tree, phase statuses, coverage gate and Python requirement synced with reality
 
 ---
 

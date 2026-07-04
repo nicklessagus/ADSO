@@ -8,6 +8,7 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from adso import __version__ as ADSO_VERSION
 from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import GEMINI_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
@@ -137,7 +138,7 @@ async def handle_status(
     cache_stats = vault_cache.stats()
 
     lines = [
-        "<b>ADSO — Estado</b>",
+        f"<b>ADSO v{ADSO_VERSION} — Estado</b>",
         "",
         f"<b>Modelo LLM:</b> {llm_model}",
         f"<b>Embeddings:</b> {embeddings_status}",
