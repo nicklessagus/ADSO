@@ -4,6 +4,12 @@ services:
     container_name: adso-bot
     restart: unless-stopped
     user: "${ADSO_UID:-1000}:${ADSO_GID:-1000}"
+    # Hardening: el bot procesa archivos no confiables (PDFs, imágenes) con
+    # pymupdf/Pillow/tesseract — reducir superficie ante una vuln en esas libs.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     env_file:
       - .env
     volumes:

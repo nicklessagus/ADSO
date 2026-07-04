@@ -222,13 +222,18 @@ async def _classify_and_preview(
         if local_date:
             fm["due_date"] = local_date
 
+    body_embedding: Optional[list] = None
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body:
         try:
+            # Embeder el body una sola vez: se reutiliza al indexar en _cb_confirm
+            # si el body no cambió (evita una segunda llamada a la API por captura).
+            body_embedding = await embeddings.compute_embedding(body)
             similar = await embeddings.query_similar(
                 query_text=body,
                 n_results=settings.links.max_suggestions,
                 threshold=settings.links.similarity_threshold,
+                query_embedding=body_embedding,
             )
             if similar:
                 suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
@@ -237,6 +242,7 @@ async def _classify_and_preview(
 
     context.user_data["pending_note"] = result
     result["payload"]["suggested_links"] = suggested_links
+    result["payload"]["_body_embedding"] = body_embedding
 
     has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
@@ -274,14 +280,17 @@ async def _handle_capture(
     fm["source"] = "telegram"
     fm["media_type"] = "text"
 
+    body_embedding: Optional[list] = None
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body:
         try:
             settings: Settings = context.bot_data["settings"]
+            body_embedding = await embeddings.compute_embedding(body)
             similar = await embeddings.query_similar(
                 query_text=body,
                 n_results=settings.links.max_suggestions,
                 threshold=settings.links.similarity_threshold,
+                query_embedding=body_embedding,
             )
             if similar:
                 suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
@@ -290,6 +299,7 @@ async def _handle_capture(
 
     context.user_data["pending_note"] = result
     result["payload"]["suggested_links"] = suggested_links
+    result["payload"]["_body_embedding"] = body_embedding
     context.user_data["original_content"] = update.message.text
 
     has_dest = _has_destination(fm)
@@ -641,10 +651,13 @@ async def _handle_capture_from_callback(
         embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
         if embeddings:
             try:
+                body_embedding = payload.get("_body_embedding") or await embeddings.compute_embedding(body)
+                payload["_body_embedding"] = body_embedding
                 similar = await embeddings.query_similar(
                     query_text=body,
                     n_results=settings.links.max_suggestions,
                     threshold=settings.links.similarity_threshold,
+                    query_embedding=body_embedding,
                 )
                 if similar:
                     suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
@@ -671,8 +684,14 @@ async def _index_note_safe(
     body: str,
     fm: dict,
     vault_path: Path,
+    embedding: Optional[list] = None,
 ) -> None:
-    """Indexa embedding de forma segura (no propaga errores)."""
+    """Indexa embedding de forma segura (no propaga errores).
+
+    Args:
+        embedding: Vector precomputado de `body` (ej: el del preview de captura,
+            si el body no cambió al confirmar). Si None, index_note lo computa.
+    """
     import hashlib
 
     try:
@@ -689,7 +708,7 @@ async def _index_note_safe(
             "title": fm.get("title", ""),
             "content_hash": hashlib.md5(body.encode()).hexdigest(),
         }
-        await embeddings.index_note(note_id, body, metadata)
+        await embeddings.index_note(note_id, body, metadata, embedding=embedding)
     except Exception as e:
         logger.warning("Error indexando embedding para %s: %s", note_path, e)
 
@@ -747,6 +766,10 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     payload = pending["payload"]
     fm = payload["frontmatter"]
     body = payload.get("body", "")
+    # Embedding computado en el preview — solo reutilizable si el body final
+    # queda idéntico al del preview (sin "Ver también" ni recurso adjunto).
+    body_embedding = payload.pop("_body_embedding", None)
+    preview_body = body
 
     original_body = body  # body limpio antes de agregar Ver también (para Tasks)
     suggested_links = payload.get("suggested_links", [])
@@ -816,8 +839,10 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     # sin embedding hasta el reindex nocturno.
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     if embeddings and body.strip():
+        if body != preview_body:
+            body_embedding = None  # el body cambió (links/recurso): re-embeder
         spawn_tracked(
-            _index_note_safe(embeddings, path, body, fm, vault_path),
+            _index_note_safe(embeddings, path, body, fm, vault_path, embedding=body_embedding),
             name="index_note",
         )
 

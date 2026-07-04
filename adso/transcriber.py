@@ -44,9 +44,11 @@ async def transcribe_audio(
 
     def _do_transcribe() -> str:
         mdl = _get_model(model, model_dir)
+        # beam_size=1 (greedy): en CPU ARM int8 el beam search de 5 es 3-5x
+        # más lento con ganancia marginal para notas de voz cortas.
         segments, info = mdl.transcribe(
             str(file_path),
-            beam_size=5,
+            beam_size=1,
             language=language,
         )
         text = " ".join(segment.text.strip() for segment in segments)

@@ -504,6 +504,30 @@ async def _call_groq(system_prompt: str, user_message: str) -> str:
     return text
 
 
+# Cliente genai reutilizado entre llamadas (lazy) — recrearlo por request
+# suma overhead innecesario en la RPi4.
+_genai_client = None
+
+
+def _get_genai_client():
+    """Cliente genai lazy y compartido por el módulo.
+
+    Raises:
+        RuntimeError: Si GEMINI_API_KEY no está configurada.
+    """
+    global _genai_client
+    if _genai_client is None:
+        import os
+
+        from google import genai
+
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY not configured")
+        _genai_client = genai.Client(api_key=api_key)
+    return _genai_client
+
+
 async def _call_gemini(system_prompt: str, user_message: str) -> str:
     """Call the Gemini API with constrained JSON output and return the response text.
 
@@ -517,15 +541,9 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
     Raises:
         Exception: If the API fails.
     """
-    from google import genai
     from google.genai import types
-    import os
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not configured")
-
-    client = genai.Client(api_key=api_key)
+    client = _get_genai_client()
 
     response = await asyncio.to_thread(
         client.models.generate_content,
@@ -584,15 +602,9 @@ async def describe_image_with_vision(
     Raises:
         RuntimeError: Si la API falla o devuelve respuesta vacía.
     """
-    from google import genai
     from google.genai import types
-    import os
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not configured")
-
-    client = genai.Client(api_key=api_key)
+    client = _get_genai_client()
 
     contents: list = [
         types.Part.from_bytes(data=img_bytes, mime_type=mime_type)

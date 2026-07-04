@@ -860,16 +860,18 @@ class TestOcrCallback:
 
         mock_doc = MagicMock()
         mock_doc.__len__ = MagicMock(return_value=10)
+        mock_doc.__enter__ = MagicMock(return_value=mock_doc)  # fitz.open se usa como context manager
         mock_pix = MagicMock()
-        mock_doc.__getitem__ = MagicMock(
-            return_value=MagicMock(get_pixmap=MagicMock(return_value=mock_pix))
-        )
+        mock_pix.tobytes = MagicMock(return_value=b"\x89PNG")
+        mock_page = MagicMock(get_pixmap=MagicMock(return_value=mock_pix))
+        mock_page.rect.width = 612.0
+        mock_page.rect.height = 792.0
+        mock_doc.__getitem__ = MagicMock(return_value=mock_page)
         mock_tesseract = MagicMock()
         mock_tesseract.image_to_string = MagicMock(return_value="texto pagina")
         mock_pil = MagicMock()
 
         with patch("fitz.open", return_value=mock_doc), \
-             patch("pathlib.Path.read_bytes", return_value=b"\x89PNG"), \
              patch.dict(sys.modules, {"pytesseract": mock_tesseract, "PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             await _cb_ocr(update, mock_context)
 

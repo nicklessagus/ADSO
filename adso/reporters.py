@@ -132,15 +132,11 @@ async def _llm_synthesis(report_summary: str) -> Optional[str]:
         Síntesis en español (2-3 oraciones) o None.
     """
     try:
-        from google import genai
         from google.genai import types
-        import os
 
-        api_key = os.environ.get("GEMINI_API_KEY", "")
-        if not api_key:
-            return None
+        from adso.llm_client import _get_genai_client
 
-        client = genai.Client(api_key=api_key)
+        client = _get_genai_client()
         prompt = (
             "Sos un asistente que genera síntesis ejecutivas de reportes de vault personal.\n"
             "Generá una síntesis en español de 2-3 oraciones que describa el estado general "

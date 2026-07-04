@@ -34,9 +34,14 @@ _PENDING_FLOW_KEYS = {
 
 _STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
 
-# Evita que dos invocaciones del job corran en paralelo si una tarda más que el
-# intervalo de scheduling (delete_note sobre el mismo path dispararía error).
-_reclassify_lock = asyncio.Lock()
+# Lock compartido entre los jobs pesados sobre el vault (reclassify_inbox y
+# reindex_job). Evita: (a) dos invocaciones del mismo job en paralelo si una
+# tarda más que el intervalo de scheduling (delete_note sobre el mismo path
+# dispararía error), y (b) que la reclasificación corra encima del reindex
+# nocturno, sumando carga de CPU/red concurrente en la RPi4. El reindex espera
+# el lock (debe correr sí o sí); la reclasificación saltea la pasada y
+# reintenta en el próximo ciclo.
+_vault_heavy_lock = asyncio.Lock()
 
 
 async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -48,11 +53,11 @@ async def reclassify_inbox(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     Caso B — nota sin destino: se ignora. El usuario debe usar /clasificar.
     """
-    if _reclassify_lock.locked():
-        logger.debug("Reclasificación: invocación previa aún en curso, saltando.")
+    if _vault_heavy_lock.locked():
+        logger.debug("Reclasificación: reindex o invocación previa en curso, saltando.")
         return
 
-    async with _reclassify_lock:
+    async with _vault_heavy_lock:
         await _reclassify_inbox_impl(context)
 
 
@@ -192,10 +197,11 @@ async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info("Reindex nocturno iniciando...")
     try:
-        stats = await embeddings.reindex_vault(
-            vault_path=settings.vault_path,
-            exclude_dirs=settings.vault.exclude_dirs,
-        )
+        async with _vault_heavy_lock:
+            stats = await embeddings.reindex_vault(
+                vault_path=settings.vault_path,
+                exclude_dirs=settings.vault.exclude_dirs,
+            )
         logger.info("Reindex completo: %s", stats)
     except Exception as e:
         logger.error("Error en reindex nocturno: %s", e)

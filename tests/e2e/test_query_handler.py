@@ -38,6 +38,7 @@ def _prep(mock_context, make_update, query: str, hits):
     update.message.reply_text = AsyncMock(return_value=status)
 
     emb = MagicMock()
+    emb.compute_embedding = AsyncMock(return_value=[0.1] * 8)
     emb.query_similar = AsyncMock(return_value=hits)
     mock_context.bot_data["embeddings"] = emb
     mock_context.bot = MagicMock()

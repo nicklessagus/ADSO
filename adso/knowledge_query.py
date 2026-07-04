@@ -92,11 +92,16 @@ async def retrieve(
     Comportamiento ante error: propaga excepciones de red/embedding al caller
     (el handler decide cómo notificar). No silencia.
     """
+    # Embeder la consulta una sola vez: el reintento con umbral relajado
+    # reutiliza el mismo vector (evita una segunda llamada a la API).
+    query_embedding = await embeddings.compute_embedding(query)
+
     hits = await embeddings.query_similar(
         query_text=query,
         n_results=max_results,
         threshold=threshold,
         where=scope,
+        query_embedding=query_embedding,
     )
 
     below_threshold = False
@@ -107,13 +112,14 @@ async def retrieve(
             n_results=_FALLBACK_RESULTS,
             threshold=None,
             where=scope,
+            query_embedding=query_embedding,
         )
         below_threshold = bool(hits)
 
     notes = [_to_scored(h, vault_path) for h in hits]
     logger.info(
-        "Consulta '%s' → %d resultados%s",
-        query, len(notes), " (baja confianza)" if below_threshold else "",
+        "Consulta (%d chars) → %d resultados%s",
+        len(query), len(notes), " (baja confianza)" if below_threshold else "",
     )
     return QueryResult(
         query=query,

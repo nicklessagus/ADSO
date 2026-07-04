@@ -5,6 +5,7 @@ Solo routing: despacha a los handlers específicos según callback_data.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -273,34 +274,40 @@ async def handle_callback(
 
 
 _PDF_SCAN_PAGES = 2  # páginas a procesar en OCR y Vision para PDFs escaneados
+_MAX_RENDER_PIXELS = 16_000_000  # tope de píxeles por página renderizada (protege la RAM de la RPi4)
 
 
-async def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> list[tuple[bytes, str]]:
-    """Renderiza las primeras n_pages de un PDF como imágenes PNG.
+def _pdf_page_count(pdf_path: "Path") -> int:
+    """Cuenta las páginas de un PDF. Síncrono — llamar via asyncio.to_thread."""
+    import fitz
+
+    with fitz.open(str(pdf_path)) as doc:
+        return len(doc)
+
+
+def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> list[tuple[bytes, str]]:
+    """Renderiza las primeras n_pages de un PDF como imágenes PNG en memoria.
+
+    Síncrono y CPU-intensivo (segundos en la RPi4) — llamar siempre via
+    asyncio.to_thread para no bloquear el event loop. Si una página declara
+    dimensiones enormes, el DPI efectivo se reduce para no superar
+    _MAX_RENDER_PIXELS (evita OOM por PDFs maliciosos o malformados).
 
     Returns:
         Lista de (bytes, mime_type) lista para enviar a Vision o pytesseract.
     """
     import fitz
-    import tempfile
-    from pathlib import Path
 
-    doc = fitz.open(str(tmp_path))
-    pages_to_render = min(n_pages, len(doc))
     result = []
-    tmp_files = []
-
-    for i in range(pages_to_render):
-        img_tmp = Path(tempfile.mktemp(suffix=".png"))
-        tmp_files.append(img_tmp)
-        pix = doc[i].get_pixmap(dpi=dpi)
-        pix.save(str(img_tmp))
-        result.append((img_tmp.read_bytes(), "image/png"))
-
-    doc.close()
-    for f in tmp_files:
-        f.unlink(missing_ok=True)
-
+    with fitz.open(str(tmp_path)) as doc:
+        for i in range(min(n_pages, len(doc))):
+            page = doc[i]
+            scale = dpi / 72.0
+            est_pixels = (page.rect.width * scale) * (page.rect.height * scale)
+            if est_pixels > _MAX_RENDER_PIXELS:
+                scale *= (_MAX_RENDER_PIXELS / est_pixels) ** 0.5
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+            result.append((pix.tobytes("png"), "image/png"))
     return result
 
 
@@ -329,26 +336,28 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         from PIL import Image
 
         if media_type == "document":
-            import fitz
-            doc = fitz.open(str(tmp_path))
-            total_pages = len(doc)
-            doc.close()
+            import io
+
+            total_pages = await asyncio.to_thread(_pdf_page_count, tmp_path)
             pages_to_scan = min(_PDF_SCAN_PAGES, total_pages)
             await query.edit_message_text(
                 f"Ejecutando OCR en las primeras {pages_to_scan} página(s) del PDF..."
             )
-            page_images = await _render_pdf_pages(tmp_path, pages_to_scan)
+            page_images = await asyncio.to_thread(_render_pdf_pages, tmp_path, pages_to_scan)
             texts = []
             for img_bytes, _ in page_images:
-                import io
-                img = Image.open(io.BytesIO(img_bytes))
-                t = await asyncio.to_thread(pytesseract.image_to_string, img, lang="spa+eng")
+                t = await asyncio.to_thread(
+                    lambda b=img_bytes: pytesseract.image_to_string(
+                        Image.open(io.BytesIO(b)), lang="spa+eng"
+                    )
+                )
                 texts.append(t)
             text = "\n\n".join(texts)
         else:
             await query.edit_message_text("Ejecutando OCR...")
-            img = Image.open(tmp_path)
-            text = await asyncio.to_thread(pytesseract.image_to_string, img, lang="spa+eng")
+            text = await asyncio.to_thread(
+                lambda: pytesseract.image_to_string(Image.open(tmp_path), lang="spa+eng")
+            )
 
         if not text.strip():
             await query.edit_message_text(
@@ -424,10 +433,10 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
         if media_type == "document":
-            images = await _render_pdf_pages(tmp_path, _PDF_SCAN_PAGES)
+            images = await asyncio.to_thread(_render_pdf_pages, tmp_path, _PDF_SCAN_PAGES)
             text = await describe_image_with_vision(images, prompt=_VISION_PROMPT_PDF)
         else:
-            image_bytes = tmp_path.read_bytes()
+            image_bytes = await asyncio.to_thread(tmp_path.read_bytes)
             text = await describe_image_with_vision(
                 [(image_bytes, "image/jpeg")], prompt=_VISION_PROMPT_IMAGE
             )

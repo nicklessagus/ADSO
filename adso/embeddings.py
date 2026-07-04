@@ -120,6 +120,7 @@ class EmbeddingsClient:
         self._gemini_api_key = gemini_api_key
         self._collection = None
         self._initialized = False
+        self._genai_client = None
         # Limita concurrencia contra Gemini Embedding API; protege contra bursts
         # del watcher (ej: sync masivo de Syncthing → muchos eventos en paralelo).
         self._embed_semaphore = asyncio.Semaphore(max_concurrent_embeds)
@@ -152,9 +153,7 @@ class EmbeddingsClient:
         Raises:
             Exception: Si falla después de 3 reintentos.
         """
-        from google import genai
-
-        client = genai.Client(api_key=self._gemini_api_key or None)
+        client = self._get_genai_client()
 
         last_error = None
         async with self._embed_semaphore:
@@ -177,11 +176,28 @@ class EmbeddingsClient:
 
         raise last_error  # type: ignore[misc]
 
+    def _get_genai_client(self):
+        """Cliente genai lazy y reutilizado entre llamadas (evita recrearlo por request)."""
+        if self._genai_client is None:
+            from google import genai
+
+            self._genai_client = genai.Client(api_key=self._gemini_api_key or None)
+        return self._genai_client
+
+    async def compute_embedding(self, content: str) -> list[float]:
+        """Calcula el embedding de un texto (API pública para reutilizar el vector).
+
+        Permite embeder una sola vez cuando el mismo texto se usa en más de una
+        operación (ej: query_similar para sugerir links + index_note al confirmar).
+        """
+        return await self._compute_embedding(content)
+
     async def index_note(
         self,
         note_id: str,
         content: str,
         metadata: dict,
+        embedding: Optional[list[float]] = None,
     ) -> None:
         """Calcula embedding y lo almacena en ChromaDB (upsert).
 
@@ -189,10 +205,13 @@ class EmbeddingsClient:
             note_id: ID único (stem del archivo).
             content: Cuerpo de la nota para embedding.
             metadata: Frontmatter serializable.
+            embedding: Vector precomputado de `content` (evita re-embeder si el
+                caller ya lo calculó). Si None, se computa acá.
         """
         self._ensure_initialized()
 
-        embedding = await self._compute_embedding(content)
+        if embedding is None:
+            embedding = await self._compute_embedding(content)
         serialized = _serialize_metadata(metadata)
 
         await asyncio.to_thread(
@@ -256,6 +275,7 @@ class EmbeddingsClient:
         n_results: int = 10,
         threshold: Optional[float] = None,
         where: Optional[dict] = None,
+        query_embedding: Optional[list[float]] = None,
     ) -> list[SimilarNote]:
         """Busca notas similares por texto.
 
@@ -264,6 +284,9 @@ class EmbeddingsClient:
             n_results: Máximo de resultados.
             threshold: Similitud mínima (0-1). Si None, no filtra.
             where: Filtro de metadata ChromaDB.
+            query_embedding: Vector precomputado de `query_text` (evita
+                re-embeder el mismo texto en llamadas repetidas). Si None,
+                se computa acá.
 
         Returns:
             Lista de SimilarNote ordenada por distancia ascendente.
@@ -276,8 +299,9 @@ class EmbeddingsClient:
             return []
         n_results = min(n_results, count)
 
-        # Calcular embedding de la consulta
-        query_embedding = await self._compute_embedding(query_text)
+        # Calcular embedding de la consulta (si no vino precomputado)
+        if query_embedding is None:
+            query_embedding = await self._compute_embedding(query_text)
 
         # Preparar kwargs para query
         query_kwargs: dict[str, Any] = {
@@ -352,7 +376,7 @@ class EmbeddingsClient:
         if exclude_dirs is None:
             exclude_dirs = ["05-Archive", ".obsidian", ".trash"]
 
-        import frontmatter
+        from adso import vault_cache
 
         stats = {"indexed": 0, "skipped": 0, "removed": 0, "errors": 0}
 
@@ -395,14 +419,15 @@ class EmbeddingsClient:
             vault_note_ids.add(note_id)
 
             try:
-                raw = await asyncio.to_thread(md_path.read_text, "utf-8")
-                post = frontmatter.loads(raw)
-
-                if not post.metadata:
+                # parse_cached evita releer/reparsear notas sin cambios desde
+                # el último scan (mismo caché que usa vault_search).
+                note = await asyncio.to_thread(vault_cache.parse_cached, md_path)
+                if note is None:
+                    # Sin frontmatter, ilegible o YAML inválido (ya logueado).
                     continue
 
-                fm = dict(post.metadata)
-                body = post.content
+                fm = note.frontmatter
+                body = note.body
 
                 if not body.strip():
                     continue

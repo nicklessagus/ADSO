@@ -25,8 +25,7 @@ from telegram.ext import (
 import asyncio
 import logging
 
-import frontmatter as fm_lib
-
+from adso import vault_cache
 from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.callbacks import handle_callback
@@ -65,14 +64,13 @@ async def _post_init(app: Application) -> None:
             bot_written.discard(path)
             return
         try:
-            raw = await asyncio.to_thread(path.read_text, "utf-8")
-            post = fm_lib.loads(raw)
-            if not post.metadata:
+            note = await asyncio.to_thread(vault_cache.parse_cached, path)
+            if note is None:
                 return
-            body = post.content.strip()
+            body = note.body.strip()
             if not body:
                 return
-            await _index_note_safe(embeddings, path, body, dict(post.metadata), vault_path)
+            await _index_note_safe(embeddings, path, body, note.frontmatter, vault_path)
             _bot_logger.info("Reindex externo completado: %s", path)
         except Exception as exc:
             _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)

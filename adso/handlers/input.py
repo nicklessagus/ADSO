@@ -5,6 +5,7 @@ Todos los tipos de input convergen aquí antes de pasar al flujo de clasificaci�
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
@@ -36,6 +37,26 @@ from adso.keyboards import (
 from adso.llm_client import check_injection_risk
 from adso.security import authorized
 from adso.transcriber import transcribe_audio
+
+
+async def _exceeds_size_after_download(
+    tmp_path: Path,
+    declared_size: Optional[int],
+    max_bytes: int,
+) -> bool:
+    """Aplica el límite de tamaño sobre el archivo ya descargado.
+
+    Telegram puede no informar ``file_size`` (None) — en ese caso el pre-check
+    antes de descargar se saltea y el límite debe verificarse acá. Si el
+    archivo excede el límite, se borra el temporal y retorna True.
+    """
+    if declared_size:
+        return False  # ya validado contra max_bytes antes de descargar
+    size = await asyncio.to_thread(lambda: tmp_path.stat().st_size)
+    if size > max_bytes:
+        tmp_path.unlink(missing_ok=True)
+        return True
+    return False
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +321,12 @@ async def handle_audio(
             tmp_path = Path(tmp.name)
         await tg_file.download_to_drive(str(tmp_path))
 
+        if await _exceeds_size_after_download(tmp_path, audio_file.file_size, max_bytes):
+            await msg.reply_text(
+                f"Audio demasiado grande (máx {settings.documents.max_size_mb}MB)."
+            )
+            return
+
         text = await transcribe_audio(
             tmp_path,
             model=settings.whisper.model,
@@ -374,6 +401,12 @@ async def handle_document(
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = Path(tmp.name)
         await tg_file.download_to_drive(str(tmp_path))
+
+        if await _exceeds_size_after_download(tmp_path, doc.file_size, max_bytes):
+            await msg.reply_text(
+                f"Archivo demasiado grande (máx {settings.documents.max_size_mb}MB)."
+            )
+            return
 
         if is_pdf(filename):
             context.user_data["pending_read_status"] = {
@@ -481,6 +514,12 @@ async def handle_photo(
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     await tg_file.download_to_drive(str(tmp_path))
+
+    if await _exceeds_size_after_download(tmp_path, photo.file_size, max_bytes):
+        await msg.reply_text(
+            f"Imagen demasiado grande (máx {settings.documents.max_size_mb}MB)."
+        )
+        return
 
     context.user_data["pending_fallback_pdf"] = {
         "temp_path": str(tmp_path),
