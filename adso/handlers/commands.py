@@ -123,7 +123,7 @@ async def handle_status(
                 pass
     total_pending = pending_auto + pending_manual
 
-    llm_model = "gemini-2.5-flash-lite"
+    llm_model = "gemini-3.1-flash-lite"
 
     embeddings = context.bot_data.get("embeddings")
     embeddings_status = "activo" if embeddings else "no iniciado"

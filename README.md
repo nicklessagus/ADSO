@@ -33,7 +33,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Componente | Tecnología |
 |---|---|
 | Bot | Python 3.11+, `python-telegram-bot` (async) |
-| LLM primario | Gemini API — `gemini-2.5-flash-lite` |
+| LLM primario | Gemini API — `gemini-3.1-flash-lite` |
 | LLM secundario | Anthropic API / Claude (opcional) |
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |
 | OCR / Visión | `pytesseract` (local) o Gemini Vision (remoto) — el usuario elige en el momento |

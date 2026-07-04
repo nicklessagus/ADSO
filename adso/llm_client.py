@@ -527,7 +527,7 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         contents=user_message,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -600,7 +600,7 @@ async def describe_image_with_vision(
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         contents=contents,
     )
 

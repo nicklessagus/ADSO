@@ -35,7 +35,7 @@ de conocimiento verificable de un chatbot que alucina sobre notas personales.
 
 | Modelo | Uso | Free tier |
 |---|---|---|
-| `gemini-2.5-flash-lite` | generación (clasificación, síntesis) | **1.500 RPD**, 30 RPM, 1M TPM |
+| `gemini-3.1-flash-lite` | generación (clasificación, síntesis) | **~1.000 RPD**, 15 RPM, 250k TPM (verificar en AI Studio) |
 | `gemini-embedding-001` | embeddings (indexado + consultas) | **1.000 RPD**, 100 RPM |
 | Groq (`llama-3.1-8b-instant`) | fallback de generación | ya integrado |
 

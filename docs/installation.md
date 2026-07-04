@@ -263,7 +263,7 @@ make stop
 
 ## Notas de compatibilidad
 
-- **Gemini API:** ADSO usa `gemini-2.5-flash-lite` (free tier: 1000 requests/día, sin tarjeta de crédito). `gemini-2.0-flash` está deprecado desde febrero 2026 y retirado en marzo 2026 — no usar.
+- **Gemini API:** ADSO usa `gemini-3.1-flash-lite` (estable desde mayo 2026; free tier: ~1000 requests/día, sin tarjeta de crédito). Los `gemini-2.0-flash*` fueron retirados el 1-jun-2026 — no usar.
 - **python-telegram-bot v21+:** requiere el extra `[job-queue]` para el scheduler de trabajos periódicos. Ya incluido en `requirements.txt`.
 - **docker compose v2:** usar `docker compose` (sin guion). Instalar con `sudo apt install docker-compose-v2`.
 

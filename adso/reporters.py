@@ -149,7 +149,7 @@ async def _llm_synthesis(report_summary: str) -> Optional[str]:
 
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-2.5-flash-lite",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="text/plain",
