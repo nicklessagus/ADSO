@@ -15,6 +15,17 @@ class ConfigError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Constantes de modelo
+# ---------------------------------------------------------------------------
+
+# Modelo de generación de Gemini usado en todo el bot (clasificación, síntesis
+# de reportes, Gemini Vision). Fuente única de verdad: cambiar el modelo es una
+# sola línea. Estable desde may-2026; free tier jul-2026 ~1.000 RPD / 15 RPM /
+# 250k TPM (verificar cap real por proyecto en AI Studio).
+GEMINI_MODEL = "gemini-3.1-flash-lite"
+
+
+# ---------------------------------------------------------------------------
 # Sub-dataclasses para secciones de config.yaml
 # ---------------------------------------------------------------------------
 

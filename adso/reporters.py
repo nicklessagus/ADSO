@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from adso import __version__ as ADSO_VERSION
+from adso.config import GEMINI_MODEL
 from adso.vault_search import scan_notes
 from adso.vault_writer import NoteData
 
@@ -149,7 +150,7 @@ async def _llm_synthesis(report_summary: str) -> Optional[str]:
 
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-3.1-flash-lite",
+            model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="text/plain",

@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
-from adso.config import Settings
+from adso.config import GEMINI_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
 from adso.keyboards import build_capture_keyboard, build_preview
 from adso.llm_client import classify, extract_original_from_degraded
@@ -123,7 +123,7 @@ async def handle_status(
                 pass
     total_pending = pending_auto + pending_manual
 
-    llm_model = "gemini-3.1-flash-lite"
+    llm_model = GEMINI_MODEL
 
     embeddings = context.bot_data.get("embeddings")
     embeddings_status = "activo" if embeddings else "no iniciado"

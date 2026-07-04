@@ -13,6 +13,8 @@ import logging
 import re
 from typing import Any, Callable, Coroutine, Optional
 
+from adso.config import GEMINI_MODEL
+
 logger = logging.getLogger(__name__)
 
 # Schema, validación y sanitización viven en llm_schema.py. Se re-exportan aquí
@@ -527,7 +529,7 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model="gemini-3.1-flash-lite",
+        model=GEMINI_MODEL,
         contents=user_message,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -600,7 +602,7 @@ async def describe_image_with_vision(
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model="gemini-3.1-flash-lite",
+        model=GEMINI_MODEL,
         contents=contents,
     )
 
