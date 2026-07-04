@@ -28,28 +28,40 @@ de conocimiento verificable de un chatbot que alucina sobre notas personales.
 
 ---
 
-## El driver central: presupuesto de generación (20 RPD)
+## Presupuesto de LLM (verificado 2026-07, free tier)
 
-El free tier de Gemini da **~20 requests/día de generación** (`gemini-2.5-flash-lite`).
-Este es el condicionante que define toda la arquitectura. La clave es una
-asimetría de costos:
+> **Corrección importante:** el CLAUDE.md decía "~20 RPD observado". Eso quedó
+> obsoleto — Google subió fuerte el free tier. Números verificados (jul 2026):
 
-| Operación | Costo | Quota |
+| Modelo | Uso | Free tier |
 |---|---|---|
-| Retrieval (embedding de la consulta) | 1 llamada de *embedding* | Embedding API — mucho más alta que generación |
-| Búsqueda en ChromaDB | local, gratis | — |
-| Expansión estructural (backlinks/outgoing) | local, gratis (filesystem) | — |
-| **Síntesis** en lenguaje natural | **1 llamada de *generación*** | **~20 RPD** ← escaso |
+| `gemini-2.5-flash-lite` | generación (clasificación, síntesis) | **1.500 RPD**, 30 RPM, 1M TPM |
+| `gemini-embedding-001` | embeddings (indexado + consultas) | **1.000 RPD**, 100 RPM |
+| Groq (`llama-3.1-8b-instant`) | fallback de generación | ya integrado |
 
-**Decisión de diseño: retrieval-first, síntesis opt-in.**
+Implicancias para el diseño:
 
-- Una consulta normal (`/buscar X`) devuelve las notas relevantes gastando solo
-  1 embedding (quota abundante), **sin tocar** el presupuesto de generación.
-- La síntesis en lenguaje natural es un botón `[Sintetizar]` explícito: gasta 1
-  de los ~20 requests diarios **solo si el usuario lo pide**.
-- La síntesis automática (sintetizar en cada consulta) queda como **opción
-  configurable a futuro** (`rag.auto_synthesize`, default `false`) — decidido con
-  el usuario: probar on-demand primero, dejar la puerta abierta a la automática.
+- **Generación ya no es el cuello de botella.** A 1.500 RPD y 1M TPM, sintetizar
+  en cada consulta es perfectamente viable. La síntesis on-demand se mantiene por
+  **decisión de producto** (retrieval honesto primero, no gastar en respuestas que
+  no se piden), no por escasez de quota.
+- **El presupuesto más ajustado ahora es embeddings (1.000 RPD)**, y se comparte
+  con el indexado (cada confirmación de nota + reindex). Mitigante confirmado:
+  `reindex_vault` es **incremental** (saltea notas sin cambios por `content_hash`,
+  `embeddings.py`), así que el steady-state es bajo. Para un vault personal, 1.000
+  embeddings/día cubren indexado + consultas con margen amplio. Google mismo
+  describe este tier como "great for small-scale RAG".
+- **Sin necesidad de otro proveedor.** Gemini alcanza para generación y
+  embeddings; Groq ya cubre el fallback de generación. No hay que sumar deps.
+
+**Decisión de diseño: retrieval-first, síntesis on-demand.**
+
+- Una consulta normal (`/buscar X`) devuelve las notas relevantes con solo 1
+  embedding (quota holgada).
+- La síntesis es un botón `[Sintetizar]` explícito (1 generación, cuando se pide).
+- La síntesis automática queda como **opción configurable** (`rag.auto_synthesize`,
+  default `false`) — ahora barata de habilitar; se deja apagada por elección, no
+  por límite.
 
 ---
 
@@ -153,8 +165,12 @@ async def synthesize(
 
 - `retrieve` es puro retrieval (embedding + ChromaDB + filesystem). Testeable con
   ChromaDB mockeado.
-- La deduplicación al fusionar semántico + estructural es por `note_id`; gana la
-  mayor `similarity`, y se registra el `via` de origen.
+- **Semánticos y estructurales NO se mezclan en una sola lista ordenada.** Los
+  backlinks/outgoing no tienen score de similitud, así que ordenarlos junto a los
+  semánticos sería arbitrario. `QueryResult` los mantiene separados por `via`; la
+  presentación los muestra en dos secciones ("Resultados" / "Relacionadas", ver
+  abajo). La deduplicación es por `note_id`: si una nota aparece por semántica y
+  por backlink, gana la semántica (tiene score) y no se repite en "Relacionadas".
 
 ---
 
@@ -188,13 +204,21 @@ generación. Prompt (patrón de `reporters._llm_synthesis`, endurecido):
   que uses por su `[[wikilink]]`. **No agregues información que no esté en las
   notas.** Si las notas no responden la pregunta, decí exactamente que no
   encontraste información relevante en el vault. Español, conciso."
+- **Contexto = body completo de las top-3 notas, leído desde disco** (vía
+  `vault_cache`, gratis, sin gastar embedding ni generación extra). Decidido así
+  porque los snippets de ~200 chars son demasiado finos para una síntesis útil, y
+  con 1M TPM de contexto los tokens no son restricción. Para papers, el body ya
+  contiene abstract + secciones, que es exactamente lo que se quiere. Se acota a
+  top-3 para no diluir la respuesta (ver pregunta abierta sobre el N exacto).
 - Las notas van envueltas en `<input>` (mismo blindaje que la captura:
   neutralización de tags de control vía el `classify`/helper de `llm_client`).
 - **Siempre** se muestran las notas fuente con su link debajo de la síntesis —
   el usuario verifica.
-- **Fallback a Groq** si Gemini está caído/sin quota (mismo patrón que `classify`).
+- **Fallback a Groq** (`llama-3.1-8b-instant`, ya integrado) si Gemini está
+  caído/sin quota (mismo patrón que `classify`).
 - Config `rag.auto_synthesize: false` (nuevo) reservado para, a futuro,
-  sintetizar automáticamente sin botón.
+  sintetizar automáticamente sin botón (ahora barato de habilitar — ver
+  *Presupuesto de LLM*).
 
 ---
 
@@ -216,11 +240,19 @@ generación. Prompt (patrón de `reporters._llm_synthesis`, endurecido):
 Formato de cada ítem (idéntico inline y en informe): **título · estado/área ·
 snippet · link `obsidian://`** (helper `reporters._note_block`).
 
+**Dos secciones separadas** (decisión de diseño — honesto con la procedencia):
+
+- **Resultados** — hits semánticos, ordenados por similitud.
+- **Relacionadas** — notas estructurales (backlinks/outgoing), solo si hubo
+  expansión. Agrupadas por `via`, sin score (no se mezclan con las de arriba).
+
+Modos de entrega:
+
 - **Resultados cortos (2-3)**: inline + botones `[Sintetizar]`
   `[Ver referencias completas]` `[Generar informe .md]`.
 - **Resultados largos / expansión**: informe `.md` como documento (header ASCII +
-  versión + fecha vía `reporters._report_header`).
-- **Con síntesis**: texto de síntesis primero, notas fuente con links debajo,
+  versión + fecha vía `reporters._report_header`), con las dos secciones.
+- **Con síntesis**: texto de síntesis primero, luego las notas fuente con links,
   botones para profundizar.
 
 ---
@@ -287,16 +319,31 @@ rag:
 
 ---
 
+## Decisiones tomadas (revisión 2026-07)
+
+- **Contexto de síntesis**: body completo de las top-3 notas leído desde disco
+  (no snippets). Ver *Síntesis grounded*.
+- **Presentación**: dos secciones separadas (Resultados / Relacionadas). Ver
+  *Presentación*.
+- **`last_retrieved`: descartado para Fase 7.** Es la idea de registrar cuándo una
+  nota apareció por última vez en resultados de búsqueda (para detectar "notas que
+  nunca se recuperan" → candidatas a revisión, idea post-Fase 8). Se descarta
+  porque escribir ese campo en el frontmatter en cada consulta **dispararía el
+  VaultWatcher → re-embed** de la nota, gastando quota de embeddings en cada
+  búsqueda. Si alguna vez se quiere, hacerlo out-of-band (store aparte, sin tocar
+  el `.md`).
+- **Proveedor**: seguir con Gemini (generación + embeddings) + Groq como fallback.
+  El free tier alcanza sobrado (ver *Presupuesto de LLM*); no se suma otro proveedor.
+
 ## Preguntas abiertas
 
 1. **Umbral de "resultado vacío"**: si nada supera `similarity_threshold`, ¿se
    muestra "no encontré nada" o se bajan los mejores N por debajo del umbral con
    aviso? (Propuesta: mostrar top-3 bajo umbral con nota "baja confianza".)
-2. **Longitud de contexto para síntesis**: ¿cuántas notas/snippets se le pasan al
-   LLM? Acotar para no inflar tokens (propuesta: top-5 snippets, no bodies
-   completos, salvo papers donde el abstract).
-3. **`last_retrieved`**: ¿registrar en el frontmatter cuándo una nota apareció en
-   resultados? Habilita la "detección de conocimiento obsoleto" (idea post-Fase 8)
-   pero implica escritura al vault en cada consulta — evaluar costo/beneficio.
-4. **Cache de embeddings de consulta**: consultas repetidas podrían cachear el
-   embedding. Probablemente innecesario dado el volumen personal — diferir.
+2. **N exacto de notas a la síntesis**: se decidió "body completo top-3"; queda
+   confirmar si 3 es el número o se ajusta (¿top-2 para respuestas más enfocadas,
+   top-5 para consultas amplias?). Definir al implementar 7.2 con casos reales.
+3. **Eval de calidad de retrieval**: los tests unitarios cubren el plumbing, no la
+   *calidad* (¿aparecen las notas correctas para consultas reales?). Falta un set
+   chico de consultas de referencia contra el vault real como checkpoint manual
+   antes de dar 7.0 por cerrado.
