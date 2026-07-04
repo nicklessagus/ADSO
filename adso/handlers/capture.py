@@ -138,7 +138,7 @@ async def _classify_and_preview(
 
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn(
-            "⚠️ No pude clasificar bien — guardado en Inbox como borrador. "
+            "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
             "Confirmar, corregir o cancelar.\n\n" + preview,
             reply_markup=keyboard,
             parse_mode="HTML",
@@ -174,14 +174,14 @@ async def _classify_and_preview(
 
     if mode != "capture":
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        await reply_fn("No entendí el mensaje como una nota para guardar. Intentá de nuevo.")
+        await reply_fn("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
         return
 
     payload = result["payload"]
     fm = payload.get("frontmatter")
     if not isinstance(fm, dict):
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        await reply_fn("Respuesta inesperada del LLM. Intentá de nuevo.")
+        await reply_fn("Respuesta inesperada del LLM. Intentar de nuevo.")
         return
     suggested_links: list[dict] = []
 
@@ -326,7 +326,7 @@ async def _handle_degraded(
         await git_backup.notify(fm.get("title", "Sin título"))
 
     await update.message.reply_text(
-        "No pude clasificar — guardado en Inbox. "
+        "No se pudo clasificar — guardado en Inbox. "
         "Se reintenta automáticamente."
     )
 
@@ -1086,7 +1086,7 @@ async def _classify_and_preview_arxiv(
             if update.callback_query
             else update.message.reply_text
         )
-        await reply_fn("No pude clasificar el paper. Intentá de nuevo.")
+        await reply_fn("No se pudo clasificar el paper. Intentar de nuevo.")
         return
 
     payload = result["payload"]

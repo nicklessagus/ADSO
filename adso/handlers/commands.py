@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 _HELP_TEXT = """\
 <b>Comandos disponibles</b>
 
-/reporte — Generá un reporte del vault (proyecto, área, ideas, salud, cola de lectura)
+/reporte — Generar un reporte del vault (proyecto, área, ideas, salud, cola de lectura)
 /reporte_full — Igual a /reporte pero incluye el contenido completo de cada nota
-/clasificar — Clasificá notas de Inbox sin destino asignado
+/clasificar — Clasificar notas de Inbox sin destino asignado
 /buscar &lt;consulta&gt; — Buscar notas del vault por similitud semántica
 /status — Estado del sistema (vault, embeddings, inbox)
 /reset — Cancelar cualquier operación pendiente y volver al estado inicial
@@ -53,7 +53,7 @@ async def handle_start(
 ) -> None:
     """Handler de /start."""
     await update.message.reply_text(
-        "ADSO activo. Mandame texto y lo clasifico para tu vault."
+        "ADSO activo. Enviar texto, audio, imágenes, PDFs o links y se clasifican para el vault. /help para ver los comandos."
     )
 
 
@@ -196,7 +196,7 @@ async def handle_clasificar(
     if _has_pending_keyboard(context):
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(update.message.message_id)
-        sent = await reply("Hay una acción pendiente. Resolvé los botones antes de continuar.")
+        sent = await reply("Hay una acción pendiente. Resolver los botones antes de continuar.")
         ids.append(sent.message_id)
         return
 

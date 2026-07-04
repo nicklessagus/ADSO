@@ -32,7 +32,7 @@ media_type: text                       # text | audio | image | link | document 
 status: active                         # Text enum — valores dependen del type — ver tabla abajo
 source_file: "[[archivo.pdf]]"        # opcional — wikilink al archivo en 03-Resources/, clickeable en Properties de Obsidian
 source_url: "https://..."             # opcional — URL original cuando el input es un link
-read_status: unread                    # Text enum — unread | reading | read (ver sección read_status abajo)
+read_status: unread                    # Text enum — unread | read (ver sección read_status abajo)
 ---
 ```
 
@@ -90,6 +90,8 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 `pending-classification` está disponible para todos los tipos: indica que el LLM no respondió (modo degradado). El bot intentará reclasificar automáticamente.
 
+> **Normalización de aliases:** si el LLM devuelve un status no canónico, `STATUS_ALIASES` (`llm_schema.py`) lo coacciona antes de validar: `todo`/`open`/`new` → `pending`, `draft` → `raw`, `published` → `active`.
+
 ---
 
 ## Tipos de nota (`type`)
@@ -130,9 +132,10 @@ Los papers se identifican por la presencia del tag `#paper` y/o la presencia de 
 ---
 type: reference
 tags: [paper, cosmology, machine-learning]        # generados por LLM, kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox) antes de crear nuevos
-read_status: unread                               # unread | reading | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
+read_status: unread                               # unread | read — seteado por el usuario con [Ya lo leí] / [Lo quiero leer]
 authors: ["Apellido, N.", "Apellido, N."]
 year: 2024
+journal: "Nombre de la revista o venue"           # opcional — parte del schema del LLM
 source_url: "https://arxiv.org/abs/XXXX.XXXXX"   # URL canónica — "source_url", no "url"
 doi: "10.XXXX/..."                                # extraído localmente del PDF
 keywords: ["time-series", "transformer", "self-supervised"]  # palabras clave del paper, idioma original
@@ -274,8 +277,9 @@ No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como
 | Valor | Significado |
 |---|---|
 | `unread` | Guardado pero no leído todavía |
-| `reading` | En proceso de lectura (principalmente para papers y documentos largos) |
 | `read` | Leído / revisado |
+
+Los valores válidos son solo estos dos (`VALID_READ_STATUS` en `llm_schema.py`) — cualquier otro valor que devuelva el LLM se descarta.
 
 **Cuándo se setea:**
 - Al recibir un PDF o link, el bot pregunta `[Ya lo leí]` `[Lo quiero leer]`
@@ -283,10 +287,7 @@ No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como
 - `[Lo quiero leer]` → `read_status: unread`
 - Es siempre una decisión explícita del usuario — nunca automático
 
-**Cómo se actualiza:**
-- El usuario dice "ya leí el paper X" → bot actualiza `read_status: read`
-- El usuario dice "estoy leyendo X" → `reading`
-- Desde el bot al listar inbox: botón `[Marcar como leído]` junto a cada ítem
+**Cómo se actualiza:** editando la nota en Obsidian. La actualización via bot ("ya leí el paper X" → `read`, botón `[Marcar como leído]`) es funcionalidad planificada del modo edición (Fase 7) — no está implementada.
 
 ---
 

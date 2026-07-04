@@ -141,7 +141,7 @@ async def handle_text(
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(update.message.message_id)  # mensaje del usuario
         sent = await update.message.reply_text(
-            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+            "Hay una acción pendiente. Resolver los botones antes de continuar."
         )
         ids.append(sent.message_id)  # respuesta del bot
         return
@@ -211,7 +211,7 @@ async def _handle_arxiv(
     except Exception as e:
         logger.warning("Error consultando arXiv API para %s: %s", arxiv_id, e)
         await status_msg.edit_text(
-            "No pude obtener la metadata de arXiv. "
+            "No se pudo obtener la metadata de arXiv. "
             "¿Guardar el link como nota genérica?",
             reply_markup=build_save_keyboard(),
         )
@@ -273,7 +273,7 @@ async def handle_audio(
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+            "Hay una acción pendiente. Resolver los botones antes de continuar."
         )
         ids.append(sent.message_id)
         return
@@ -347,7 +347,7 @@ async def handle_document(
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+            "Hay una acción pendiente. Resolver los botones antes de continuar."
         )
         ids.append(sent.message_id)
         return
@@ -459,7 +459,7 @@ async def handle_photo(
         ids = context.user_data.setdefault("block_msg_ids", [])
         ids.append(msg.message_id)
         sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolvé los botones antes de continuar."
+            "Hay una acción pendiente. Resolver los botones antes de continuar."
         )
         ids.append(sent.message_id)
         return
@@ -523,7 +523,7 @@ async def _process_pdf_after_read_status(
                 "pdf_metadata": pdf_meta,
             }
             await query.edit_message_text(
-                "No pude extraer texto del PDF (puede ser escaneado).",
+                "No se pudo extraer texto del PDF (puede ser escaneado).",
                 reply_markup=build_fallback_pdf_keyboard(),
             )
             return

@@ -470,7 +470,7 @@ class TestManageOperations:
         update = make_callback_query(data=CB_MANAGE_CONFIRM)
         await handle_callback(update, mock_context)
         call_args = str(update.callback_query.edit_message_text.call_args)
-        assert "próxima versión" in call_args
+        assert "todavía no está disponible" in call_args
 
 
 class TestParseDateFromText:

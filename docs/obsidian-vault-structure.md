@@ -106,7 +106,7 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 | Borrar proyecto | Doble + resolución de backlinks | Ver reglas abajo |
 | Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
 | Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
-| Mover nota | — | **Fuera de scope por ahora** — pendiente de implementar |
+| Mover nota | — | **Fuera de scope como comando del bot** — existe la primitiva `move_note()` en `vault_writer.py` (la usan otros flujos), pero no hay flujo de usuario para mover una nota suelta |
 | Borrar nota | Simple o con aviso de backlinks | Ver reglas abajo |
 
 ### Reglas de borrado de nota

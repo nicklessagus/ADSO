@@ -80,7 +80,7 @@ El LLM siempre responde en formato JSON con schema fijo. Esto limita drásticame
 
 ```python
 # Schema Gemini con constrained output — el modelo SOLO puede producir JSON en esta forma.
-# Implementado en llm_client._GEMINI_RESPONSE_SCHEMA
+# Implementado en llm_schema._GEMINI_RESPONSE_SCHEMA (re-exportado desde llm_client)
 _GEMINI_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "required": ["mode", "confidence", "payload"],
@@ -104,6 +104,13 @@ _GEMINI_RESPONSE_SCHEMA = {
                         "priority":   {"type": "STRING", "nullable": True},
                         "due_date":   {"type": "STRING", "nullable": True},
                         "scheduled":  {"type": "STRING", "nullable": True},
+                        # Campos académicos (papers) — validados/coaccionados en _validate_capture_payload
+                        "authors":    {"type": "ARRAY", "items": {"type": "STRING"}, "nullable": True},
+                        "year":       {"type": "INTEGER", "nullable": True},
+                        "journal":    {"type": "STRING", "nullable": True},
+                        "doi":        {"type": "STRING", "nullable": True},
+                        "keywords":   {"type": "ARRAY", "items": {"type": "STRING"}, "nullable": True},
+                        "read_status": {"type": "STRING", "nullable": True},   # "read" | "unread"
                     },
                 },
                 "body":      {"type": "STRING",  "nullable": True},
@@ -121,7 +128,7 @@ _GEMINI_RESPONSE_SCHEMA = {
 El JSON del LLM se valida contra el schema completo antes de escribir al vault. Si cualquier campo falla, la nota va a `00-Inbox/` con `status: pending-classification` y se loguea el intento.
 
 ```python
-# En llm_client.py — tipos que el LLM puede proponer (project-index y area-index son generados por el bot)
+# En llm_schema.py (re-exportado desde llm_client) — tipos que el LLM puede proponer (project-index y area-index son generados por el bot)
 VALID_TYPES   = {"reference", "task", "idea"}
 VALID_STATUS  = {
     "reference":     {"active", "pending-classification"},
@@ -135,9 +142,11 @@ VALID_OPERATIONS = {
     "create_section", "convert_idea_to_project", "reclassify_inbox",
 }
 
-# En vault_writer.py — tipos persistibles incluyendo los auto-generados por el bot
-VALID_TYPES_WRITER = {"reference", "task", "idea", "project-index", "area-index"}
-VALID_STATUS_WRITER = {
+# En vault_writer.py — tipos persistibles incluyendo los auto-generados por el bot.
+# Ojo: vault_writer define sus propios VALID_TYPES/VALID_STATUS (mismo nombre que en
+# llm_schema pero contenido distinto — el writer incluye project-index/area-index).
+VALID_TYPES = {"reference", "task", "idea", "project-index", "area-index"}
+VALID_STATUS = {
     "reference":    {"active", "pending-classification"},
     "task":         {"pending", "in-progress", "done", "pending-classification"},
     "idea":         {"raw", "implemented", "discarded", "pending-classification"},
@@ -145,7 +154,7 @@ VALID_STATUS_WRITER = {
     "area-index":   set(),
 }
 
-# Validación real — en llm_client.validate_llm_response() + _validate_capture_payload()
+# Validación real — en llm_schema.validate_llm_response() + _validate_capture_payload()
 def validate_llm_response(response_json: dict) -> dict:
     mode = response_json.get("mode")
     if mode not in {"capture", "query", "edit", "manage"}:
@@ -238,7 +247,7 @@ Esto previene que una nota con contenido malicioso en el vault contamine futuras
 
 ### 8. Paso de confirmación como última línea de defensa
 
-El preview que el bot muestra antes de escribir al vault es también una defensa de seguridad: si una inyección corrompe el frontmatter propuesto, el usuario lo ve antes de que se persista. El preview debe mostrar **todos** los campos del frontmatter, no solo los principales.
+El preview que el bot muestra antes de escribir al vault es también una defensa de seguridad: si una inyección corrompe el frontmatter propuesto, el usuario lo ve antes de que se persista. El preview actual (`build_preview` en `keyboards.py`) muestra un subconjunto curado: título, tipo, destino, status, prioridad, tags, due_date y un snippet del body — no todos los campos. Cuando el contenido externo dispara `check_injection_risk`, se antepone además un aviso explícito (`_INJECTION_PREVIEW_WARNING`) para que el usuario escrute antes de confirmar.
 
 ### 9. Espacio de acciones finito
 
@@ -254,7 +263,7 @@ CREATE_PROJECT, CREATE_AREA, RENAME_PROJECT, RENAME_AREA, DELETE_PROJECT, DELETE
 
 Cualquier output del LLM que no corresponda a una de estas operaciones es rechazado. No importa qué instrucciones contenga el contenido externo — el bot no puede hacer nada fuera de este conjunto.
 
-### 9b. Schema JSON del LLM — contrato `llm_client.py` ↔ `bot.py`
+### 9b. Schema JSON del LLM — contrato `llm_schema.py` ↔ handlers
 
 El LLM siempre responde con un JSON que tiene un wrapper común y un payload que varía por modo. El bot parsea el JSON y ejecuta la operación correspondiente. Si el JSON no se ajusta al schema, el input va a `00-Inbox/` con `status: pending-classification`.
 
@@ -442,12 +451,13 @@ El truncado más agresivo para contenido web previene ataques que ocultan instru
 | `TELEGRAM_TOKEN` | Variable de entorno Docker |
 | `TELEGRAM_ALLOWED_USER_ID` | Variable de entorno Docker |
 | `GEMINI_API_KEY` | Variable de entorno Docker |
-| `ANTHROPIC_API_KEY` | Variable de entorno Docker |
+| `GROQ_API_KEY` | Variable de entorno Docker (fallback LLM) |
+| `ANTHROPIC_API_KEY` | Variable de entorno Docker (reservada — ningún código la usa aún) |
 | Google OAuth credentials | Archivo JSON montado como volumen en `/credentials/google-oauth.json`, path en env var `GOOGLE_CALENDAR_CREDS` |
 
 - Nunca hardcodeados en código fuente
-- `.env` en `.gitignore`
-- Repositorio siempre privado
+- `.env` en `.gitignore` (verificado: nunca commiteado en la historia del repo)
+- El repo de código es público desde v1.0.0 — el repo del vault (backup) sigue siendo privado
 
 ---
 

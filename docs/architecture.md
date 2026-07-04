@@ -44,7 +44,7 @@ Texto / Link        Audio / Imagen
             ▼
 ┌───────────────────┐
 │     LLM API       │  Gemini API — clasificación, YAML, resumen
-│                   │  Claude API — consultas complejas (opcional)
+│                   │  Groq API — fallback cuando Gemini no responde
 └─────────┬─────────┘
           │
      ┌────┼────────────────────┐
@@ -183,7 +183,7 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Embeddings: Gemini Embedding API
 - Indexa el vault completo y mantiene el índice actualizado
 - Recibe una consulta, la convierte a vector, busca en ChromaDB y retorna las notas que superan `rag.similarity_threshold`
-- El flujo completo de una consulta RAG es: `bot.py` → `knowledge_query.py` (retrieval semántico) + `vault_search.py` (retrieval estructural) → `bot.py` → `llm_client.py` (generación con contexto) → respuesta al usuario
+- Implementado hoy (Fase 7.0): `/buscar` → `knowledge_query.retrieve()` (retrieval semántico puro) → respuesta con notas y links. El flujo completo de diseño — retrieval semántico + estructural en paralelo → `llm_client` genera síntesis con contexto — es Fase 7.2, pendiente (ver `docs/fase7-rag-design.md`)
 
 ### `embeddings.py` — Pipeline de embeddings y ChromaDB
 - Genera embeddings via Gemini Embedding API (remoto, no local)
@@ -241,7 +241,7 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 
 En una consulta RAG el bot puede usar ambos: ChromaDB encuentra notas relevantes por significado, y `vault_search.py` expande con notas conectadas por wikilinks que ChromaDB no haya encontrado.
 
-### `calendar_client.py` — Google Calendar (Fase 6)
+### `calendar_client.py` — Google Calendar (Fase 6 — **diferida, módulo no implementado aún**; lo que sigue es diseño)
 - API: Google Calendar API v3
 - **Lectura:** todos los calendarios del usuario (para consultas y contexto)
 - **Escritura:** exclusivamente en el calendario dedicado `ADSO` (creado por el bot si no existe)
@@ -746,7 +746,7 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 
 #### Formato del preview
 
-El preview se muestra como bloque de código YAML — fiel al frontmatter que se escribirá al vault, sin transformaciones. Solo se omiten los campos nulos para no saturar el mensaje. Ejemplo:
+El preview se muestra como líneas HTML etiquetadas (`build_preview` en `keyboards.py`): título, tipo, destino, status, prioridad, tags, due_date y un snippet del body en `<code>`. Es un subconjunto curado del frontmatter, no el YAML completo — los campos nulos y los secundarios se omiten. El ejemplo siguiente ilustra el contenido equivalente en YAML:
 
 ```yaml
 type: reference
@@ -876,7 +876,8 @@ services:
       - TELEGRAM_TOKEN
       - TELEGRAM_ALLOWED_USER_ID
       - GEMINI_API_KEY
-      - ANTHROPIC_API_KEY        # opcional
+      - GROQ_API_KEY             # fallback LLM
+      - ANTHROPIC_API_KEY        # opcional, reservada (sin uso actual)
       - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
       - VAULT_PATH               # default: /vault
     volumes:
@@ -986,7 +987,7 @@ Los vectores se guardan en **ChromaDB embebido** en el filesystem de la RPi4:
 
 ```
 /app/data/chroma/
-├── index/       ← vectores (768 floats por nota)
+├── index/       ← vectores (3072 floats por nota — gemini-embedding-001, dimensión default)
 └── metadata/    ← path al .md, título, tipo, proyecto, área, tags, media_type
 ```
 
@@ -1172,7 +1173,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 | Interfaz Obsidian | Escritura directa al filesystem | Obsidian CLI / Local REST API | Ver sección "Alternativa futura: Obsidian CLI" más abajo |
 | Búsqueda | ChromaDB (semántica) + parser propio (estructural) | Solo ChromaDB | ChromaDB no puede seguir wikilinks ni filtrar por frontmatter. El parser propio cubre búsqueda estructural sin dependencias externas |
 | Generación de contenido | LLM con Obsidian Skills como referencia | Spec propia de sintaxis Obsidian | Los Skills de kepano son la referencia oficial para generar markdown, properties, wikilinks, canvas y bases compatibles con Obsidian |
-| LLM primario | Gemini API | Claude API | Free tier disponible para prototipo |
+| LLM primario | Gemini API | Groq (fallback implementado) / Claude API (reservado) | Free tier disponible para prototipo |
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
 | Vector DB | ChromaDB embebido | Pinecone, Weaviate | Sin servidor externo, corre en RPi4 |
 | Calendar | Google Calendar API | Registrar en Obsidian | Separación de responsabilidades: tiempo → Calendar, conocimiento → vault |

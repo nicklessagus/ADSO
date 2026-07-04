@@ -1,7 +1,8 @@
 # Fase 7 — Consultas RAG en lenguaje natural: Diseño
 
-Estado: **propuesta** (pre-implementación). Este documento define el diseño; el
-código se implementa por etapas (ver *Plan de implementación*).
+Estado: **diseño con implementación parcial** — la etapa 7.0 (retrieval puro,
+`/buscar` + `knowledge_query.py`) está implementada; 7.1–7.3 (scope, expansión,
+síntesis) siguen pendientes (ver *Plan de implementación*).
 
 ---
 
@@ -83,12 +84,11 @@ La infraestructura de retrieval ya existe; Fase 7 es sobre todo orquestación.
   de llamada a Gemini de texto libre (a adaptar con prompt grounded).
 - **Config `rag.*`** (`config.py:22`): `similarity_threshold: 0.75`,
   `max_results: 10`, `max_expansion_depth: 2`.
-- **Botones de desambiguación** (`constants.py:15`): `CB_DISAMBIG_QUERY` ya está
-  cableado — hoy responde "disponible en próxima versión" (`callbacks.py:174`).
-  Es el punto de entrada natural a habilitar.
+- **Botones de desambiguación** (`constants.py`): `CB_DISAMBIG_QUERY` ejecuta el
+  retrieval semántico real (mismo pipeline que `/buscar`) desde la etapa 7.0.
 
-> Nota: `knowledge_query.py` figura en la doc como módulo existente pero **aún no
-> está creado**. Este diseño lo define.
+> Nota: `knowledge_query.py` ya existe (etapa 7.0) e implementa `retrieve()`;
+> `synthesize()` y el resto de este diseño siguen pendientes.
 
 ---
 

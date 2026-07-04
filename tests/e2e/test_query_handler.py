@@ -78,7 +78,7 @@ class TestHandleBuscar:
 
         await handle_buscar(update, mock_context)
 
-        assert "No encontré nada" in str(status.edit_text.call_args)
+        assert "No se encontró nada" in str(status.edit_text.call_args)
         assert "pending_query" not in mock_context.user_data
 
     @pytest.mark.asyncio

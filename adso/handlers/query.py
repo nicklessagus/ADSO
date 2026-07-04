@@ -75,7 +75,7 @@ async def run_query(
 
     if not result.notes:
         await status_msg.edit_text(
-            f"No encontré nada en el vault sobre <i>{_esc(query_text)}</i>.",
+            f"No se encontró nada en el vault sobre <i>{_esc(query_text)}</i>.",
             parse_mode="HTML",
         )
         return

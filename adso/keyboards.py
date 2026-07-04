@@ -306,7 +306,7 @@ def build_save_keyboard() -> InlineKeyboardMarkup:
 def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
     """Teclado para PDF escaneado sin texto extraíble.
 
-    OCR y Gemini Vision son placeholders (Fase 4). Describir está implementado.
+    OCR, Gemini Vision y Describir están implementados (Fase 4 completa).
     """
     return InlineKeyboardMarkup([
         [

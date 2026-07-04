@@ -334,7 +334,7 @@ async def _send_report(
     if len(report_bytes) < 400:
         context.user_data.pop("pending_report", None)
         try:
-            await query.edit_message_text("No encontré notas para este scope.")
+            await query.edit_message_text("No se encontraron notas para este scope.")
         except Exception:
             pass
         return

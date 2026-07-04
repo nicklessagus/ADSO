@@ -604,28 +604,32 @@ Si el vault crece y los tiempos se vuelven perceptibles, el siguiente paso es un
 
 ## `embeddings.py`
 
-Responsabilidad única: **gestión de embeddings y ChromaDB**. No escribe archivos al vault ni llama a LLMs de clasificación — solo calcula embeddings (via Gemini Embedding API) y opera sobre la colección de ChromaDB.
+Responsabilidad única: **gestión de embeddings y ChromaDB**. No escribe archivos al vault ni llama a LLMs de clasificación — solo calcula embeddings (via Gemini Embedding API, modelo `gemini-embedding-001`) y opera sobre la colección de ChromaDB.
+
+Toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`** — no hay funciones a nivel de módulo. La instancia se crea en el arranque del bot y se comparte via `bot_data["embeddings"]`.
 
 ### Dependencias
 
 ```
-chromadb              # vector store embebido (PersistentClient, sin servidor separado)
-google-generativeai   # Gemini Embedding API
+chromadb        # vector store embebido (PersistentClient, sin servidor separado)
+google-genai    # SDK nuevo de Gemini (from google import genai) — Embedding API
 ```
 
-### Inicialización
+### `EmbeddingsClient`
 
 ```python
-import chromadb
-
-client = chromadb.PersistentClient(path="/app/data/chroma")
-collection = client.get_or_create_collection(
-    name="vault_notes",
-    metadata={"hnsw:space": "cosine"},   # distancia coseno — estándar para embeddings de texto
-)
+class EmbeddingsClient:
+    def __init__(
+        self,
+        chroma_data_dir: Path,
+        gemini_api_key: str = "",
+        max_concurrent_embeds: int = 4,
+    ) -> None:
 ```
 
-La colección se crea una vez. El espacio de distancia (`cosine`) no se puede cambiar después de creada — requiere recrear la colección.
+- ChromaDB se inicializa **lazy** al primer uso (`_ensure_initialized`): `PersistentClient(path=chroma_data_dir)` + `get_or_create_collection(name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"})`.
+- El espacio de distancia (`cosine`) no se puede cambiar después de creada la colección — requiere recrearla.
+- `max_concurrent_embeds` limita la concurrencia contra la Embedding API con un semáforo — protege contra bursts del watcher (ej: sync masivo de Syncthing).
 
 ### Schema de metadata en ChromaDB
 
@@ -633,15 +637,17 @@ Cada documento en la colección tiene:
 
 | Campo | Tipo | Descripción |
 |---|---|---|
-| `id` | string | Stem del archivo (sin `.md`, sin path). Clave primaria. Ej: `2025-01-15-baseline-cnn` |
+| `id` | string | **Ruta relativa al vault sin extensión**. Clave primaria. Ej: `01-Projects/tesis/2025-01-15-baseline-cnn`. Evita colisiones entre archivos con el mismo nombre en distintos directorios |
 | `document` | string | Texto completo usado para generar el embedding (contenido extraído, no el YAML) |
 | `metadata.path` | string | Path relativo al vault. Ej: `01-Projects/tesis/experimentos/2025-01-15-baseline-cnn.md` |
+| `metadata.title` | string | Título del frontmatter |
 | `metadata.type` | string | `reference`, `task`, `idea`, `project-index`, `area-index` |
 | `metadata.status` | string | Status actual de la nota |
 | `metadata.project` | string | Proyecto (vacío si no tiene) |
 | `metadata.area` | string | Área (vacío si no tiene) |
 | `metadata.tags` | string | Tags separados por coma — ChromaDB no soporta listas, se serializa como `"paper,ml,cnn"` |
 | `metadata.media_type` | string | `text`, `audio`, `image`, `link`, `document` |
+| `metadata.content_hash` | string | Hash del contenido — permite reindex incremental (saltear notas sin cambios) |
 
 > **Nota:** ChromaDB no soporta valores `None` ni listas heterogéneas en metadata. Los campos nulos se almacenan como string vacío `""`. Los tags se serializan como string separado por comas.
 
@@ -651,6 +657,7 @@ Cada documento en la colección tiene:
 
 ```python
 async def index_note(
+    self,
     note_id: str,
     content: str,
     metadata: dict,
@@ -659,28 +666,24 @@ async def index_note(
 
 **Comportamiento:**
 
-1. Calcula el embedding de `content` via Gemini Embedding API (`models/text-embedding-004`).
+1. Calcula el embedding de `content` via Gemini Embedding API (`gemini-embedding-001`).
 2. Serializa `metadata` al formato ChromaDB (nulos → `""`, tags list → string separado por comas).
-3. Ejecuta `collection.upsert(ids=[note_id], embeddings=[embedding], documents=[content], metadatas=[metadata])`.
+3. Ejecuta `collection.upsert(...)` — inserta si no existe, actualiza si ya existe (idempotente).
 
-`upsert` inserta si no existe, actualiza si ya existe — idempotente.
-
-**Errores:**
-- API de Gemini no responde → loguear, no propagar (el embedding se genera en el re-index nocturno).
-- Rate limit 429 → lógica adaptativa: cuota diaria → desiste inmediato; RPM → espera `retryDelay` sugerido por la API (máx 70s); otros → backoff fijo (1s, 2s, 4s). Tras 3 fallos, desiste y loguea.
+**Errores:** `_compute_embedding` reintenta hasta 3 veces con backoff simple (1s, 2s). Si los 3 intentos fallan, **la excepción se propaga al caller** — quien indexa (`spawn_tracked(_index_note_safe(...))` en el flujo de confirmación) la captura y loguea; la nota queda sin embedding hasta el reindex nocturno.
 
 ---
 
 ### `remove_note()`
 
 ```python
-async def remove_note(note_id: str) -> None:
+async def remove_note(self, note_id: str) -> None:
 ```
 
 **Comportamiento:**
 
-1. Ejecuta `collection.delete(ids=[note_id])`.
-2. Si el `id` no existe, ChromaDB no falla — es un no-op silencioso.
+1. Verifica si el `id` existe (`collection.get`); si existe, ejecuta `collection.delete(ids=[note_id])`.
+2. Si el `id` no existe o hay error, no propaga — loguea a warning.
 
 ---
 
@@ -688,6 +691,7 @@ async def remove_note(note_id: str) -> None:
 
 ```python
 async def update_metadata(
+    self,
     note_id: str,
     metadata: dict,
 ) -> None:
@@ -705,10 +709,11 @@ async def update_metadata(
 
 ```python
 async def query_similar(
+    self,
     query_text: str,
     n_results: int = 10,
-    threshold: float | None = None,
-    where: dict | None = None,
+    threshold: Optional[float] = None,
+    where: Optional[dict] = None,
 ) -> list[SimilarNote]:
 ```
 
@@ -717,7 +722,7 @@ async def query_similar(
 ```python
 @dataclass
 class SimilarNote:
-    note_id: str         # stem del archivo
+    note_id: str         # id del documento (ruta relativa sin extensión)
     path: str            # path relativo al vault
     distance: float      # distancia coseno (0 = idéntico, 2 = opuesto)
     metadata: dict       # metadata completa de ChromaDB
@@ -729,12 +734,13 @@ class SimilarNote:
 1. Calcula el embedding de `query_text` via Gemini Embedding API.
 2. Ejecuta `collection.query(query_embeddings=[embedding], n_results=n_results, where=where, include=["documents", "metadatas", "distances"])`.
 3. Filtra resultados con `distance > threshold` (si `threshold` provisto). La distancia coseno va de 0 (idéntico) a 2 (opuesto). Para la conversión a similitud: `similitud = 1 - (distance / 2)`.
-4. Excluye notas archivadas por default: inyecta `{"status": {"$ne": "archived"}}` en el filtro `where` salvo que el caller pida explícitamente incluirlas.
-5. Retorna lista de `SimilarNote` ordenada por distancia ascendente (más similar primero).
+4. Retorna lista de `SimilarNote` ordenada por distancia ascendente (más similar primero).
+
+> El filtro `where` se pasa **verbatim** a ChromaDB — no se inyecta ninguna exclusión automática de notas archivadas. Las notas de `05-Archive/` no aparecen porque esa carpeta está en `vault.exclude_dirs` y nunca se indexa.
 
 **Uso para sugerir links (Fase 2):**
 ```python
-candidates = await query_similar(
+candidates = await embeddings.query_similar(
     query_text=note_content,
     n_results=config.links.max_suggestions,
     threshold=config.links.similarity_threshold,
@@ -744,7 +750,7 @@ suggested_links = [{"note_id": c.note_id, "title": c.metadata.get("title", "")} 
 
 **Uso para consultas RAG (Fase 7):**
 ```python
-context_notes = await query_similar(
+context_notes = await embeddings.query_similar(
     query_text=user_query,
     n_results=config.rag.max_results,
     threshold=config.rag.similarity_threshold,
@@ -758,21 +764,22 @@ context_notes = await query_similar(
 
 ```python
 async def reindex_vault(
+    self,
     vault_path: Path,
-    exclude_dirs: list[str],
-) -> dict:
+    exclude_dirs: Optional[list[str]] = None,
+) -> dict[str, int]:
 ```
 
 **Comportamiento:**
 
-1. Recorre todos los `.md` del vault (excluyendo `exclude_dirs`).
-2. Para cada nota: calcula embedding y upsert en ChromaDB.
+1. Recorre todos los `.md` del vault (excluyendo `exclude_dirs`; default `["05-Archive", ".obsidian", ".trash"]`). Ignora archivos `.sync-conflict-*` de Syncthing.
+2. **Incremental:** solo re-embede notas cuyo contenido cambió (compara `content_hash` almacenado en metadata contra el hash actual). Las notas sin cambios se cuentan como `skipped`.
 3. Detecta notas en ChromaDB que ya no existen en el vault → las elimina.
-4. Retorna estadísticas: `{"indexed": N, "removed": M, "errors": K}`.
+4. Retorna estadísticas: `{"indexed": N, "skipped": M, "removed": K, "errors": J}`.
 
 **Uso:** cron nocturno (`reindex.time` en `config.yaml`). Reconcilia ChromaDB con el vault ante cualquier drift.
 
-**Rate limiting:** procesa notas en batches con delay entre llamadas a la Embedding API para respetar los límites del free tier de Gemini. El batch size y delay se ajustan dinámicamente ante respuestas 429.
+**Rate limiting:** la concurrencia contra la Embedding API está acotada por el semáforo `max_concurrent_embeds` de la instancia; cada embedding reintenta hasta 3 veces con backoff simple.
 
 ---
 

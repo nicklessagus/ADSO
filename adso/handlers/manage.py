@@ -83,8 +83,8 @@ async def _handle_manage(
         context.user_data["manage_missing_fields"] = missing
         op_label = "proyecto" if "project" in operation else "área"
         await update.message.reply_text(
-            f"Para crear el {op_label} necesito: <b>{', '.join(missing)}</b>.\n"
-            f"Mandame el nombre y la descripción (ej: <i>Docencia — gestión de clases y materiales</i>)",
+            f"Para crear el {op_label} hacen falta: <b>{', '.join(missing)}</b>.\n"
+            f"Enviar el nombre y la descripción (ej: <i>Docencia — gestión de clases y materiales</i>)",
             parse_mode="HTML",
         )
         return
@@ -200,7 +200,7 @@ async def _cb_manage_confirm(
 
         else:
             await query.edit_message_text(
-                f"Operación '{operation}' disponible en próxima versión."
+                f"Operación '{operation}' todavía no está disponible."
             )
 
     except Exception as e:
