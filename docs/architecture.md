@@ -62,12 +62,12 @@ Docker vol    ▼               ▼         ▼
      │
      ├──→ Git backup (GitHub privado)
      │
-Syncthing (send-only desde RPi4)
+Syncthing (bidireccional)
      │
   ┌──┴──┐
   │     │
 Desktop Mobile
-Obsidian (lectura visual, opcional)
+Obsidian (pueden editar notas existentes — VaultWatcher re-embed)
 ```
 
 ---
@@ -89,12 +89,20 @@ Obsidian (lectura visual, opcional)
 
 ## Componentes
 
-### `bot.py` — Orquestador principal, inline keyboards
+### `bot.py` + `handlers/` — Orquestador principal, inline keyboards
 - Framework: `python-telegram-bot[job-queue]` v21+ (async)
+- `bot.py` es solo el bootstrap: crea la Application de PTB, registra los handlers y el gate global de autenticación. La lógica vive en el paquete `adso/handlers/`:
+  - `commands.py` — `/start` `/help` `/status` `/reset` `/clasificar`
+  - `input.py` — entrada de mensajes: texto, foto, audio, documento, URL
+  - `capture.py` — flujo de captura: clasificación, preview, corrección, confirmación
+  - `callbacks.py` — callbacks de los inline keyboards
+  - `manage.py` — crear/archivar/renombrar proyectos y áreas
+  - `query.py` — `/buscar` (retrieval semántico, Fase 7.0)
+  - `reports.py` — `/reporte` y `/reporte_full`
+  - `jobs.py` — crons (reclasificación de inbox, reindex nocturno, heartbeat, reporte semanal)
 - Entry point sincrónico (`run_bot()`); el setup async del vault se ejecuta via `post_init` de PTB antes de arrancar el polling — PTB gestiona su propio event loop
-- Handlers: texto, foto, audio, documento, URL
-- Inline keyboards (`InlineKeyboardMarkup`) para confirmación, desambiguación y navegación de resultados
-- Middleware de autenticación por `user_id`
+- Inline keyboards (`InlineKeyboardMarkup`, construidos en `keyboards.py`) para confirmación, desambiguación y navegación de resultados
+- Middleware de autenticación por `user_id` (gate global + decorador por handler)
 - Gestiona el flujo de confirmación con el usuario antes de escribir
 - Flujo manage: detecta campos obligatorios faltantes (`name`, `description`) y los solicita al usuario antes de mostrar el preview de confirmación
 
@@ -119,8 +127,8 @@ Obsidian (lectura visual, opcional)
 La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean mensajes nuevos). El texto se muestra en formato `<code>` para permitir tap-to-copy y usarlo como base para la corrección.
 
 ### `llm_client.py` — Cliente LLM
-- Proveedor primario: Gemini API (Google AI Studio, free tier)
-- Proveedor secundario: Anthropic API / Claude (opcional)
+- Proveedor primario: Gemini API (Google AI Studio, free tier) — modelo en `config.GEMINI_MODEL`
+- Proveedor fallback: Groq (`llama-3.1-8b-instant`) cuando Gemini agota cuota o no responde
 - Responsabilidades:
   - Clasificar contenido y determinar destino en la taxonomía
   - Generar Frontmatter YAML + cuerpo de la nota
@@ -1152,7 +1160,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 ## Validación de código
 
 - Todo el código generado para este proyecto es validado con **OpenAI Codex** antes de incorporarse al repositorio.
-- Estrategia de testing completa en [`testing.md`](testing.md): unit, integration y e2e con cobertura ≥ 80%.
+- Estrategia de testing completa en [`testing.md`](testing.md): unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica).
 
 ---
 

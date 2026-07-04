@@ -88,18 +88,14 @@ Si no usás Docker, la variable también funciona con la ruta local del director
 
 ## 2. Configurar el proyecto
 
-La instalación usa dos directorios separados:
-
-| Directorio | Propósito |
-|---|---|
-| `~/Repos/ADSO` | Código fuente — desarrollo y builds |
-| `~/docker/ADSO` | Despliegue — compose, config y credenciales |
-
 ```bash
-git clone git@github.com:nicklessagus/ADSO.git ~/Repos/ADSO
+git clone https://github.com/nicklessagus/ADSO.git
+cd ADSO
+cp .env.example .env
+cp config.yaml.example config.yaml
 ```
 
-El directorio de deploy (`~/docker/ADSO/`) ya contiene `.env`, `config.yaml` y la carpeta `credentials/` pre-creados. Solo hace falta completar el `.env` con las credenciales reales:
+Completar el `.env` con las credenciales reales:
 
 ```bash
 # ─── Requeridas ───────────────────────────────────────────────────────────────
@@ -113,7 +109,7 @@ GROQ_API_KEY=<tu API key de Groq>
 # LOG_LEVEL=INFO
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
-VAULT_PATH=/home/pi/NAS/Sync/ADSO
+VAULT_PATH=/ruta/al/vault
 
 # ─── Permisos de archivos (Docker) ────────────────────────────────────────────
 # Obtener con: id -u && id -g
@@ -121,21 +117,33 @@ ADSO_UID=1000
 ADSO_GID=1000
 ```
 
-El `config.yaml` por defecto es válido para empezar. Ajustá a gusto (ver `docs/configuration.md`).
+El `config.yaml` copiado del ejemplo es válido para empezar. Ajustá a gusto (ver `docs/configuration.md`).
+
+### Variante: directorio de deploy separado (opcional)
+
+Para separar el código fuente del despliegue (útil si desarrollás en la misma máquina donde corre el bot), se puede usar un directorio de deploy propio:
+
+```bash
+mkdir -p ~/docker/ADSO
+cp docker-compose.yml .env config.yaml ~/docker/ADSO/
+mkdir -p ~/docker/ADSO/credentials
+```
+
+En el compose del deploy, cambiar `build: .` por `build: { context: /ruta/al/repo/ADSO }`. El `Makefile` del repo asume esta variante: `make deploy` copia `config.yaml` a `~/docker/ADSO/` y levanta el compose de ahí. Si usás el flujo simple de un solo directorio, ignorá el Makefile y usá `docker compose` directo.
 
 ---
 
 ## 3. Crear el vault
 
-El vault vive en `~/NAS/Sync/ADSO/` para que Syncthing lo sincronice junto con el resto de los dispositivos. Crear la carpeta si no existe:
+Crear el directorio del vault (el mismo que apunta `VAULT_PATH` en `.env`) si no existe:
 
 ```bash
-mkdir -p ~/NAS/Sync/ADSO
+mkdir -p /ruta/al/vault
 ```
 
 El bot crea la estructura de carpetas (`00-Inbox`, `01-Projects`, etc.) automáticamente al arrancar.
 
-Agregar `~/NAS/Sync/ADSO` como nueva carpeta compartida en Syncthing para sincronizarla con los clientes.
+Si usás Syncthing para sincronizar el vault entre dispositivos, agregar ese directorio como carpeta compartida en Syncthing.
 
 El vault ya incluye un `.gitignore` que excluye archivos de estado local de Obsidian (workspace, cache), conflictos de Syncthing y archivos de sistema.
 
@@ -152,25 +160,32 @@ Crear un repo privado (ej: `nicklessagus/ADSO_Vault`) en GitHub. No inicializar 
 ### 4.2 Inicializar git en el vault
 
 ```bash
-git -C ~/NAS/Sync/ADSO init -b main
-git -C ~/NAS/Sync/ADSO add .
-git -C ~/NAS/Sync/ADSO commit -m "Initial vault"
-git -C ~/NAS/Sync/ADSO remote add origin git@github.com:<usuario>/ADSO_Vault.git
-git -C ~/NAS/Sync/ADSO push -u origin main
+git -C /ruta/al/vault init -b main
+git -C /ruta/al/vault add .
+git -C /ruta/al/vault commit -m "Initial vault"
+git -C /ruta/al/vault remote add origin git@github.com:<usuario>/ADSO_Vault.git
+git -C /ruta/al/vault push -u origin main
 ```
 
 Si el vault ya estaba inicializado (solo falta el remote):
 
 ```bash
-git -C ~/NAS/Sync/ADSO remote add origin git@github.com:<usuario>/ADSO_Vault.git
-git -C ~/NAS/Sync/ADSO push -u origin main
+git -C /ruta/al/vault remote add origin git@github.com:<usuario>/ADSO_Vault.git
+git -C /ruta/al/vault push -u origin main
 ```
 
 ### 4.3 SSH key para el container Docker
 
-El container necesita acceso SSH a GitHub. ADSO monta la key SSH del host en `/ssh-keys/` dentro del container. El `docker-compose.yml` del directorio de deploy (`~/docker/ADSO/`) tiene el volumen y la variable `GIT_SSH_COMMAND` configurados — no hace falta ningún paso extra si la key del host tiene acceso al repo.
+El container necesita acceso SSH a GitHub para hacer push. ADSO espera la key montada en `/ssh-keys/` dentro del container. El `docker-compose.yml` del repo no incluye ese volumen por defecto — agregarlo junto con la variable `GIT_SSH_COMMAND`:
 
-> **Nota:** el `docker-compose.yml` del repositorio de código (`~/Repos/ADSO/`) es la plantilla de referencia y no incluye el volumen SSH ni la variable `GIT_SSH_COMMAND`. El directorio de deploy (`~/docker/ADSO/`) tiene su propio compose con ambas configuraciones, separado del repo de código (ver `Makefile` — `make deploy` copia al directorio de deploy).
+```yaml
+    volumes:
+      # ... volúmenes existentes ...
+      - ${HOME}/.ssh:/ssh-keys:ro
+    environment:
+      # ... variables existentes ...
+      - GIT_SSH_COMMAND=ssh -i /ssh-keys/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+```
 
 Si querés usar una key dedicada para ADSO:
 
@@ -192,7 +207,7 @@ backup:
   debounce_seconds: 30   # segundos de inactividad antes de hacer commit+push
 ```
 
-Hacer `make deploy` para aplicar.
+Reiniciar el contenedor para aplicar (`docker compose up --build -d`, o `make deploy` si se usa el directorio de deploy separado).
 
 ### Comportamiento
 
@@ -206,12 +221,11 @@ Hacer `make deploy` para aplicar.
 
 ## 5. Arrancar
 
-Desde el repositorio de código:
+Desde el directorio del repo:
 
 ```bash
-cd ~/Repos/ADSO
-make deploy     # build + arranque en background
-make logs       # ver logs en vivo
+docker compose up --build -d    # build + arranque en background
+docker compose logs -f          # ver logs en vivo
 ```
 
 Deberías ver:
@@ -223,11 +237,13 @@ adso-bot | [apscheduler.scheduler] INFO: Scheduler started
 adso-bot | [telegram.ext.Application] INFO: Application started
 ```
 
-### Comandos disponibles (Makefile)
+### Atajos del Makefile (variante con directorio de deploy separado)
+
+Si se usa la variante de deploy separado (sección 2), el `Makefile` envuelve los comandos de compose:
 
 | comando | acción |
 |---|---|
-| `make deploy` | build + reinicia el contenedor |
+| `make deploy` | copia `config.yaml` al deploy dir + build + reinicia |
 | `make stop` | detiene sin borrar |
 | `make restart` | reinicia sin rebuild |
 | `make logs` | tail de logs en vivo |
@@ -246,9 +262,8 @@ Abrí Telegram, buscá tu bot y mandá cualquier mensaje de texto. El bot deber�
 ## Actualizar
 
 ```bash
-cd ~/Repos/ADSO
 git pull
-make deploy
+docker compose up --build -d    # o make deploy con deploy dir separado
 ```
 
 ---
@@ -256,7 +271,7 @@ make deploy
 ## Detener
 
 ```bash
-make stop
+docker compose stop             # o make stop
 ```
 
 ---

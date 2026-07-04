@@ -1,0 +1,22 @@
+# Defensa en profundidad: el Dockerfile solo hace COPY de requirements.txt y
+# adso/, pero si algún día se cambia a COPY . ., nada de esto entra a la imagen.
+.git
+.github
+.venv
+venv
+.env
+.env.*
+config.yaml
+credentials/
+data/
+vault/
+tests/
+docs/
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.egg-info/
+.coverage
+*.log
+Makefile

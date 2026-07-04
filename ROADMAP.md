@@ -12,7 +12,7 @@ Development is organized in phases. Each phase extends the previous one.
 | 4 | Images: OCR (pytesseract) + Gemini Vision | Done |
 | 5 | arXiv integration via official Atom API | Done |
 | 6 | Google Calendar + Google Tasks | Partial (Tasks done, Calendar deferred) |
-| 7 | Natural language RAG queries | Planned |
+| 7 | Natural language RAG queries | Partial (`/buscar` retrieval done; scope/expansion/synthesis pending) |
 | 8 | Vault analysis: reports, health, reading queue | Partial |
 
 ---
@@ -36,9 +36,13 @@ Design document: `docs/fase6-scheduling-design.md`
 
 ---
 
-## Phase 7 — RAG Queries
+## Phase 7 — RAG Queries (in progress)
 
 Natural language search over the vault using ChromaDB + LLM synthesis.
+
+**Done (7.0):** pure semantic retrieval via `/buscar` and the `[🔎 Buscar en el vault]` button (no LLM synthesis). Design in `docs/fase7-rag-design.md`.
+
+**Pending:**
 
 - `mode=query` in LLM classifier (currently redirected to capture)
 - Retrieval pipeline: semantic search → structural search → merge → LLM synthesis

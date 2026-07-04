@@ -29,6 +29,9 @@ ENV/
 secrets.yaml
 *.key
 
+# Configuración local (usar config.yaml.example como plantilla)
+config.yaml
+
 # Credenciales Google OAuth
 credentials/
 

@@ -19,6 +19,9 @@ git clone git@github.com:nicklessagus/ADSO.git
 cd ADSO
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+
+# pytest necesita env vars dummy (security.py las valida en import time)
+export TELEGRAM_ALLOWED_USER_ID=12345 TELEGRAM_TOKEN=dummy GEMINI_API_KEY=dummy
 pytest
 ```
 
@@ -49,7 +52,7 @@ docker compose up --build
 
 - **Hardware:** Raspberry Pi 4, 4GB RAM, ARM64
 - **Entorno:** Docker + docker-compose
-- **Lenguaje:** Python 3.9+ (dev), 3.11 (Docker), implementación asíncrona
+- **Lenguaje:** Python ≥ 3.11 (dev y Docker), implementación asíncrona
 - **Vault:** Markdown en filesystem local (Syncthing para sync en vivo + Git para backup/DR — ver `docs/architecture.md`)
 - **Health check:** `heartbeat_job` toca `/tmp/adso_heartbeat` cada 60s. Docker verifica que el archivo tenga menos de 2 minutos (`find -mmin -2`); 3 fallos consecutivos → `unhealthy`. `start_period: 30s` para absorber el arranque.
 
@@ -63,13 +66,13 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 |---|---|
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
 | LLM primario | Gemini API — modelo `gemini-3.1-flash-lite` (estable desde may-2026; free tier jul-2026: ~1.000 RPD, 15 RPM, 250k TPM — verificar cap real en AI Studio) |
-| LLM secundario | Anthropic API / Claude (opcional) |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). `ANTHROPIC_API_KEY` se lee en config pero no hay código que la use aún |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
-| Extracción web | Gemini nativo (producción) / `trafilatura` (desarrollo) |
+| Extracción web | Gemini nativo |
 | Extracción PDF | `pymupdf` (texto + metadata) — detección heurística de papers + extracción local de secciones (abstract, keywords, métodos, conclusiones); preview muestra título + abstract + keywords para papers, texto crudo para genéricos |
-| Calendar | Google Calendar API v3 — lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado |
+| Calendar | Google Calendar API v3 *(diferido — Fase 6; diseño: lectura de todos los calendarios, escritura y borrado solo en calendario `ADSO` dedicado)* |
 | Tasks | Google Tasks API — lista `ADSO` dedicada (escritura/borrado) + lectura de listas externas |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 | Backup vault | Repo git privado en GitHub — push automático con debounce configurable (`backup.debounce_seconds`) |
@@ -80,21 +83,37 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 
 ```
 adso/
-├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
+├── bot.py                  # Bootstrap de la aplicación PTB y registro de handlers — la lógica vive en handlers/
+├── handlers/
+│   ├── commands.py         # /start /help /status /reset /clasificar
+│   ├── input.py            # Entrada de mensajes: texto, audio, imagen, documento, links
+│   ├── capture.py          # Flujo de captura: clasificación, preview, corrección, confirmación
+│   ├── callbacks.py        # Callbacks de inline keyboards
+│   ├── manage.py           # Gestión: crear/archivar/renombrar proyectos y áreas
+│   ├── query.py            # /buscar — retrieval semántico (Fase 7.0)
+│   ├── reports.py          # /reporte y /reporte_full — flujo interactivo
+│   └── jobs.py             # Crons: reclassify_inbox, reindex nocturno, heartbeat, reporte semanal
+├── keyboards.py            # Construcción de inline keyboards
+├── constants.py            # Callbacks IDs y constantes compartidas
+├── bot_utils.py            # Utilidades (spawn_tracked, helpers de mensajes)
 ├── transcriber.py          # Transcripción de audio con faster-whisper
-├── llm_client.py           # Cliente Gemini/Claude: llamadas a API, retries, modo degradado, build_system_prompt
+├── llm_client.py           # Cliente Gemini/Groq: llamadas a API, retries, modo degradado, build_system_prompt
 ├── llm_schema.py           # Schema de salida de Gemini + validación de respuesta + sanitización de frontmatter + patrones de injection (re-exportados desde llm_client por compatibilidad)
+├── document_extractor.py   # Extracción de PDFs (pymupdf) y documentos de texto
+├── arxiv_client.py         # Metadata de papers via API de arXiv
 ├── vault_writer.py         # Escritura de .md al filesystem + git backup con debounce
 ├── vault_watcher.py        # Watcher de filesystem (watchdog): conflictos Syncthing + re-embed de cambios externos + limpieza de wikilinks rotos al borrar
 ├── vault_search.py         # Búsqueda estructural: backlinks ([[wikilinks]]), tags, filtros por frontmatter
 ├── vault_cache.py          # Caché de parsing de notas por (mtime, size) — evita re-parsear notas sin cambios en scans repetidos
 ├── embeddings.py           # Pipeline de embeddings y ChromaDB
 ├── knowledge_query.py      # Retrieval semántico — busca notas por similitud vectorial en ChromaDB (no llama al LLM)
-├── calendar_client.py      # Google Calendar API
+├── reporters.py            # Generación de reportes .md (scope, ideas, salud, cola de lectura)
 ├── tasks_client.py         # Google Tasks API
 ├── security.py             # Middleware de autenticación
-└── config.py               # Variables de entorno y constantes
+└── config.py               # Variables de entorno, constantes (GEMINI_MODEL) y carga de config.yaml
 ```
+
+No existe `calendar_client.py` — Google Calendar es Fase 6 diferida (solo Tasks está implementado).
 
 ---
 
@@ -295,7 +314,7 @@ Las áreas y proyectos pueden sembrarse opcionalmente desde `config.yaml` en el 
 | 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto | ✅ |
 | 4 | Imágenes y capturas (OCR + Gemini Vision) | ✅ |
 | 5 | Integraciones externas (arXiv) | ✅ |
-| 6 | Google Calendar + Google Tasks | ⏸ diferida — diseño pendiente |
+| 6 | Google Calendar + Google Tasks | 🔄 parcial — Tasks implementado; Calendar diferido |
 | 7 | Consultas RAG en lenguaje natural | 🔄 parcial — 7.0 retrieval puro (`/buscar`) implementado; scope/expansión/síntesis pendientes. Diseño en `docs/fase7-rag-design.md` |
 | 8 | Análisis del vault: reportes a pedido (scope, ideas, salud, cola de lectura), scoring de papers, detección de gaps | 🔄 parcial — reportes implementados |
 
@@ -336,7 +355,7 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 ## Validación de código
 
 - Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
-- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 80%.
+- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica).
 
 ---
 

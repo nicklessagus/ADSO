@@ -5,13 +5,13 @@ ADSO is a personal project, but contributions, issues, and discussion are welcom
 ## Development Setup
 
 ```bash
-git clone git@github.com:nicklessagus/ADSO.git
+git clone https://github.com/nicklessagus/ADSO.git
 cd ADSO
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Requires Python 3.9+. No native dependencies beyond what pip installs.
+Requires Python ≥ 3.11. No native dependencies beyond what pip installs.
 
 To run the bot locally (not just tests), create `.env` and `config.yaml`:
 
@@ -23,6 +23,14 @@ python -m adso
 
 ## Running Tests
 
+`adso/security.py` validates `TELEGRAM_ALLOWED_USER_ID` at import time, so pytest needs dummy env vars (same values CI uses):
+
+```bash
+export TELEGRAM_ALLOWED_USER_ID=12345
+export TELEGRAM_TOKEN=dummy
+export GEMINI_API_KEY=dummy
+```
+
 ```bash
 pytest                        # full suite
 pytest tests/unit/            # unit tests only
@@ -30,7 +38,7 @@ pytest -m "not integration"   # skip integration tests
 pytest --cov=adso --cov-report=term-missing
 ```
 
-Coverage threshold is 80%. Tests must pass before any PR is merged.
+Coverage threshold is 70% (CI gate, logic modules only — see `docs/testing.md`). Tests must pass before any PR is merged.
 
 ## Code Conventions
 

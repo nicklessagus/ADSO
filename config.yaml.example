@@ -6,21 +6,22 @@
 weekly_report:
   enabled: true
   day: friday          # lunes=monday ... domingo=sunday
-  time: "18:00"        # hora local del servidor (formato HH:MM)
-  include:
-    - notes_created     # notas creadas en la semana (desglose por tipo)
-    - active_project    # proyecto más activo
-    - new_methods       # métodos que aparecen por primera vez en papers
-    - paper_queue       # papers pendientes ordenados por prioridad
-    - stale_ideas       # ideas en status:raw más de N días (ver stale_idea_days)
-    - tasks_review      # tasks ADSO: completadas vs pendientes de la semana
-
-  stale_idea_days: 60     # días sin actividad para marcar una idea como estancada
+  time: "12:00"        # hora local del servidor (formato HH:MM)
+  sections:
+    notes_summary: true         # notas creadas en la semana (desglose por tipo)
+    most_active_project: true   # proyecto más activo
+    papers_queue: true          # papers pendientes ordenados por prioridad
+    inbox_suggestion: true      # sugerencia de limpieza del inbox
+    tasks_summary: true         # tasks: completadas vs pendientes de la semana
+    stale_ideas: true           # ideas en status:raw más de N días (ver stale_idea_days)
+    paper_suggestion: true      # sugerencia de próximo paper a leer
+  stale_idea_days: 60           # días sin actividad para marcar una idea como estancada
 
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto
-  max_results: 10             # máximo de notas a pasar al LLM como contexto
+  max_results: 10             # máximo de notas a retornar por consulta
+  max_expansion_depth: 2      # grados máximos de expansión desde un nodo
 
 # ─── Links automáticos ──────────────────────────────────────────────────────
 links:
@@ -34,18 +35,38 @@ vault:
     - ".obsidian"
     - ".trash"
 
+# ─── Siembra inicial de proyectos y áreas (opcional) ────────────────────────
+# Solo se aplica en el primer arranque; después se gestionan via el bot.
+# vault_seed:
+#   projects:
+#     - name: tesis
+#       description: "Tesis de doctorado"
+#   areas:
+#     - name: docencia
+#       description: "Materias y cursos"
+
 # ─── Transcripción (Fase 3) ────────────────────────────────────────────────
 whisper:
   model: base                      # tiny | base — modelos recomendados para RPi4 (< 200MB RAM)
+  model_dir: /app/data/whisper     # directorio de descarga/caché del modelo (debe ser escribible)
+  language: es                     # idioma fijo (evita detección automática, más rápido)
+
+# ─── Extracción de contenido web ────────────────────────────────────────────
+content_extraction:
+  engine: gemini                   # gemini (único valor funcional)
+
+# ─── Documentos ─────────────────────────────────────────────────────────────
+documents:
+  max_size_mb: 20                  # tamaño máximo de archivos aceptados (PDF, imagen, audio)
 
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
   enabled: true
   time: "03:00"                    # hora local del servidor (formato HH:MM)
 
-# ─── Sync (Calendar + Tasks) ──────────────────────────────────────────────
+# ─── Sync (Tasks) ───────────────────────────────────────────────────────────
 sync:
-  interval_minutes: 30           # intervalo del cron que reconcilia Calendar y Tasks con el vault
+  interval_minutes: 30           # intervalo del cron que reconcilia Google Tasks con el vault
 
 # ─── Backup (Git) ─────────────────────────────────────────────────────────
 backup:
@@ -54,6 +75,15 @@ backup:
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
-  max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
-  max_paper_tokens: 128000    # truncado de PDFs académicos
-  degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
+  max_web_tokens: 8000           # truncado de contenido web antes de enviar al LLM
+  max_paper_tokens: 128000       # truncado de PDFs académicos
+  degraded_retry_minutes: 30     # intervalo del cron que reintenta clasificar inbox pendiente
+  disambiguation_threshold: 0.7  # confianza mínima del LLM para no preguntar con botones
+
+# ─── Google Tasks ────────────────────────────────────────────────────────────
+tasks:
+  debug: false              # true: notifica por Telegram cada push exitoso a Google Tasks
+
+# ─── Watcher de vault ────────────────────────────────────────────────────────
+watcher:
+  debug: false              # true: notifica por Telegram cada cambio externo detectado

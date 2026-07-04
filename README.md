@@ -17,7 +17,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 ## ¿Qué hace?
 
 - **Captura** texto, links, imágenes, audios y documentos enviados via Telegram
-- **Procesa** el contenido con Gemini API (y opcionalmente Claude) para clasificar, titular y enrutar cada nota
+- **Procesa** el contenido con Gemini API (con fallback a Groq) para clasificar, titular y enrutar cada nota
 - **Transcribe** audios localmente con `faster-whisper`
 - **Extrae texto** de imágenes con OCR local (pytesseract) o Gemini Vision — el usuario elige en el momento
 - **Extrae metadata** de PDFs con `pymupdf`: texto, abstract, keywords, autores, DOI; detecta papers académicos automáticamente
@@ -25,7 +25,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Integra arXiv**: al recibir un link de arxiv.org recupera metadata completa via API oficial (sin scraping) y genera una nota con abstract, autores y summary en español
 - **Genera** archivos Markdown con Frontmatter YAML clasificados, con links automáticos por similitud semántica
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
-- **Busca** en el vault con dos motores complementarios: semántico (ChromaDB + Gemini Embeddings) y estructural (backlinks, tags, frontmatter)
+- **Busca** en el vault con dos motores complementarios: semántico via `/buscar` o el botón `[🔎 Buscar en el vault]` (ChromaDB + Gemini Embeddings) y estructural (backlinks, tags, frontmatter)
 - **Reporta** el estado del vault a pedido: scope por proyecto/área/inbox, ideas, cola de lectura, salud del vault (`/reporte`, `/reporte_full`)
 
 ## Stack
@@ -34,17 +34,17 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 |---|---|
 | Bot | Python 3.11+, `python-telegram-bot` (async) |
 | LLM primario | Gemini API — `gemini-3.1-flash-lite` |
-| LLM secundario | Anthropic API / Claude (opcional) |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (cuando Gemini no responde) |
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |
 | OCR / Visión | `pytesseract` (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | PDF | `pymupdf` — extracción de texto, metadata académica y detección de papers |
-| Extracción web | arXiv API (papers) / Gemini nativo (producción) / `trafilatura` (desarrollo) |
+| Extracción web | arXiv API (papers) / Gemini nativo |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Embeddings | Gemini Embedding API (remoto) |
 | Búsqueda semántica | ChromaDB (local) |
 | Búsqueda estructural | Parser propio de wikilinks, tags y frontmatter (`vault_search.py`) |
 | Infraestructura | Docker + docker-compose en Raspberry Pi 4 (4GB RAM) |
-| Calendar / Tasks | Google Calendar API v3 + Google Tasks API *(Fase 6 — diferida)* |
+| Calendar / Tasks | Google Tasks API (implementado) + Google Calendar API v3 *(diferido)* |
 | Backup | Git (repo privado en GitHub) |
 | Sync | Syncthing bidireccional + Git (backup/DR). `VaultWatcher` re-embeds cambios externos automáticamente |
 
@@ -62,7 +62,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 
 ## Estado
 
-Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, imágenes y links de arXiv; clasificación con Gemini; embeddings en ChromaDB; escritura al vault con confirmación; reportes a pedido (Fase 8 parcial). Fase 6 (Google Calendar + Tasks) diferida. Ver fases de desarrollo en [`docs/architecture.md`](docs/architecture.md).
+Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, imágenes y links de arXiv; clasificación con Gemini; embeddings en ChromaDB; escritura al vault con confirmación; retrieval semántico con `/buscar` (Fase 7 parcial); reportes a pedido (Fase 8 parcial). Fase 6 parcial: Google Tasks implementado, Google Calendar diferido. Ver el estado de las fases en [`ROADMAP.md`](ROADMAP.md).
 
 ## Requisitos previos
 
@@ -70,7 +70,7 @@ Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, im
 - Token de bot de Telegram (via @BotFather)
 - API key de Gemini (Google AI Studio — free tier, sin tarjeta de crédito)
 - API key de Groq (free tier — fallback LLM cuando Gemini no responde)
-- Google OAuth credentials (para Calendar + Tasks — Fase 6)
+- Google OAuth credentials (opcional — para la integración con Google Tasks)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
 
 Ver instrucciones detalladas en [`docs/installation.md`](docs/installation.md).

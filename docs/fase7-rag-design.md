@@ -41,7 +41,7 @@ de conocimiento verificable de un chatbot que alucina sobre notas personales.
 
 Implicancias para el diseño:
 
-- **Generación ya no es el cuello de botella.** A 1.500 RPD y 1M TPM, sintetizar
+- **Generación ya no es el cuello de botella.** A ~1.000 RPD y 250k TPM, sintetizar
   en cada consulta es perfectamente viable. La síntesis on-demand se mantiene por
   **decisión de producto** (retrieval honesto primero, no gastar en respuestas que
   no se piden), no por escasez de quota.

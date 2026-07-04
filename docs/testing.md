@@ -34,7 +34,7 @@ Define cómo se testea ADSO: qué se testea, a qué nivel, con qué herramientas
 pytest                  # framework principal
 pytest-asyncio          # soporte para tests async (todo ADSO es async)
 pytest-cov              # cobertura de código
-pytest-tmp-files        # directorios temporales para vault y ChromaDB (o tmp_path built-in)
+tmp_path (built-in)     # directorios temporales para vault y ChromaDB
 unittest.mock           # mocks y patches (stdlib, sin deps extra)
 ```
 
@@ -54,13 +54,16 @@ tests/
 │   ├── test_classification.py     # parsing del modo (capture/manage) y validación de schema
 │   ├── test_security.py           # auth middleware: allow, reject, edge cases
 │   ├── test_vault_search.py       # parsing de wikilinks, tags, frontmatter YAML
+│   ├── test_vault_cache.py        # caché de parsing por (mtime, size), invalidación, LRU
 │   ├── test_arxiv_client.py       # parsing de metadata arXiv (Atom feed)
 │   ├── test_tasks_client.py       # Google Tasks API async
 │   ├── test_vault_watcher.py      # eventos watchdog, deduplicación inotify
 │   ├── test_vault_writer_ops.py   # operaciones vault_writer (read, append, set_property)
 │   ├── test_embeddings.py         # ChromaDB: index, remove, query_similar
+│   ├── test_knowledge_query.py    # retrieval semántico (Fase 7.0)
 │   ├── test_document_extractor.py # detección de papers, extracción de secciones
 │   ├── test_transcriber.py        # faster-whisper: modelo, idioma, fallback
+│   ├── test_jobs.py               # crons: reclassify_inbox, heartbeat, skip por flujo activo
 │   └── test_reporters.py          # formateo de reportes (reporte, reporte_full)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -72,13 +75,13 @@ tests/
 │   ├── test_capture_message.py    # Update simulado → respuesta + vault escrito
 │   ├── test_confirmation_flow.py  # Update → preview → confirm/reject → resultado
 │   ├── test_media_handlers.py     # audio, imagen, documento → flujo completo
+│   ├── test_query_handler.py      # /buscar — retrieval semántico (Fase 7.0)
 │   └── test_bot_extra.py          # casos edge: /reset, modo corrección, estado pendiente
 ```
 
 Tests planificados (no implementados aún):
 - `tests/integration/test_calendar_sync.py` — mock Google API (Fase 6 Calendar, diferida)
-- `tests/e2e/test_query_message.py` — RAG queries (Fase 7)
-- `tests/e2e/test_task_creation.py` — Google Tasks + Calendar con fecha (Fase 6)
+- e2e de síntesis RAG con scope y expansión (Fase 7 completa)
 
 ---
 
@@ -192,7 +195,7 @@ Qué se testea:
 - `media_type` correcto aunque no haya clasificación
 - Mensaje al usuario informando del modo degradado
 
-#### `test_embeddings_pipeline.py`
+#### `test_embeddings_integration.py`
 
 Setup:
 - ChromaDB temporal (directorio efímero)
@@ -206,7 +209,7 @@ Qué se testea:
 - Nota editada → embedding actualizado (no duplicado)
 - Nota borrada → embedding removido de ChromaDB
 
-#### `test_edit_flow.py`
+#### `test_edit_flow.py` *(planificado — modo edición es Fase 7)*
 
 Setup:
 - Vault temporal con nota pre-existente
@@ -217,7 +220,7 @@ Qué se testea:
 - Contenido anterior preservado si la edición es parcial (append)
 - Re-indexado en ChromaDB post-edición
 
-#### `test_rename_flow.py`
+#### `test_rename_flow.py` *(planificado)*
 
 Setup:
 - Vault temporal con nota A y notas B, C que la referencian con `[[A]]`
@@ -258,7 +261,7 @@ Qué se testea:
 - **Vault vacío:** no falla, retorna resultados vacíos
 - **Notas con frontmatter inválido:** se ignoran sin romper la búsqueda
 
-#### `test_calendar_sync.py`
+#### `test_calendar_sync.py` *(planificado — Fase 6 Calendar, diferida)*
 
 Setup:
 - Mock de Google Calendar API con eventos de ejemplo
@@ -288,24 +291,27 @@ Qué se testea:
 - Mensaje con link → extracción de contenido → preview → vault
 - `media_type` correcto en cada caso
 
-#### `test_query_message.py`
+#### `test_query_handler.py`
 
-Qué se testea:
-- "qué tengo sobre X" → búsqueda semántica en ChromaDB → respuesta con notas relevantes
-- Query sin resultados → mensaje claro "No encontré nada relevante sobre X"
+Cubre la Fase 7.0 (retrieval puro con `/buscar`):
+- `/buscar <texto>` → búsqueda semántica en ChromaDB → respuesta con notas relevantes
+- Query sin resultados → mensaje claro
+- Botón `[🔎 Buscar en el vault]` desde el teclado de texto/audio
+
+Escenarios planificados para la Fase 7 completa (scope, expansión, síntesis):
 - Query con scope seleccionado via inline keyboard → busca en proyecto, luego ofrece ampliar
 - Expansión desde nodo: "todo lo relacionado con [[nota]]" → backlinks + vecinos semánticos
 - Query mixta: filtro estructural + semántico ("papers pendientes sobre ML")
 - Resultado corto (≤ 3 notas) → respuesta inline con botón `[Informe .md]`
 - Resultado largo → bot envía archivo `.md` con links `obsidian://`
 
-#### `test_task_creation.py`
+#### `test_task_creation.py` *(planificado — parcialmente cubierto por `test_tasks_client.py` unit)*
 
 Qué se testea:
 - Mensaje clasificado como task → task creada en vault y Google Tasks mock
 - Task con `scheduled` (fecha/hora) → evento en Calendar ADSO mock
 - Task con `due_date` (solo fecha) → chip de fecha en Google Tasks
-- Campo `notes` de Google Tasks contiene: descripción + subtareas como bullets + links `obsidian://`
+- Campo `notes` de Google Tasks contiene: descripción + proyecto/área + prioridad (sin links `obsidian://` — no funcionan desde Google Tasks)
 - Confirmación antes de crear task
 
 #### `test_confirmation_flow.py`
@@ -479,6 +485,14 @@ def make_callback_query():
 ---
 
 ## Cómo correr los tests
+
+**Requisito:** `adso/security.py` valida `TELEGRAM_ALLOWED_USER_ID` en tiempo de import — sin estas variables de entorno, `pytest` falla en la colección. Exportar valores dummy (los mismos que usa CI):
+
+```bash
+export TELEGRAM_ALLOWED_USER_ID=12345
+export TELEGRAM_TOKEN=dummy
+export GEMINI_API_KEY=dummy
+```
 
 ```bash
 # Todos los tests

@@ -31,7 +31,7 @@ Es un proyecto de uso personal, no un servicio público. Tiene un único usuario
 - **Hardware:** Raspberry Pi 4, 4 GB RAM, ARM64
 - **Entorno:** Docker + docker-compose
 - **Lenguaje:** Python 3.11+, implementación completamente asíncrona (`async/await`)
-- **Vault:** archivos Markdown en filesystem local, sincronizado con Syncthing (send-only desde RPi4) y respaldado con Git (repo privado en GitHub)
+- **Vault:** archivos Markdown en filesystem local, sincronizado con Syncthing (bidireccional) y respaldado con Git (repo privado en GitHub)
 
 **Restricción crítica:** toda propuesta de implementación debe ser viable en RPi4 con 4 GB de RAM. Mencioná siempre el impacto estimado en recursos.
 
@@ -52,7 +52,7 @@ Es un proyecto de uso personal, no un servicio público. Tiene un único usuario
 | Tasks | Google Tasks API |
 | Vault | Markdown + YAML Frontmatter en filesystem |
 | Backup | Git — repo privado en GitHub, push automático con debounce configurable |
-| Sync | Syncthing send-only desde RPi4 (clientes Obsidian son read-only) |
+| Sync | Syncthing bidireccional — los clientes Obsidian pueden editar; VaultWatcher re-embed cambios externos |
 
 ---
 
@@ -60,14 +60,14 @@ Es un proyecto de uso personal, no un servicio público. Tiene un único usuario
 
 ```
 adso/
-├── bot.py                  # Orquestador principal, handlers de Telegram, inline keyboards
+├── bot.py                  # Bootstrap PTB y registro de handlers — la lógica vive en handlers/
+├── handlers/               # commands, input, capture, callbacks, manage, query (/buscar), reports, jobs
 ├── transcriber.py          # Transcripción de audio con faster-whisper
-├── llm_client.py           # Cliente Gemini/Claude — clasificación, generación de notas, respuestas RAG
+├── llm_client.py           # Cliente Gemini/Groq — clasificación, generación de notas, respuestas RAG
 ├── vault_writer.py         # Escritura de .md al filesystem + git backup con debounce
 ├── vault_search.py         # Búsqueda estructural: backlinks ([[wikilinks]]), tags, filtros por frontmatter
 ├── embeddings.py           # Pipeline de embeddings (Gemini Embedding API) y ChromaDB
 ├── knowledge_query.py      # Retrieval semántico — busca notas por similitud vectorial (no llama al LLM)
-├── calendar_client.py      # Google Calendar API — lectura de todos los calendarios, escritura solo en calendario ADSO
 ├── tasks_client.py         # Google Tasks API — lista ADSO dedicada (escritura/borrado) + lectura de listas externas
 ├── security.py             # Middleware de autenticación por Telegram user_id
 └── config.py               # Carga de variables de entorno y config.yaml, defaults y validación
@@ -570,7 +570,7 @@ Si Gemini no responde después de reintentos (cuota diaria → degradado inmedia
 
 ## Sync del vault
 
-- **Syncthing** — sync en vivo entre RPi4 y clientes. Send-only desde RPi4 (ADSO es el único escritor).
+- **Syncthing** — sync en vivo entre RPi4 y clientes, bidireccional. ADSO es el escritor principal; los clientes Obsidian pueden editar notas existentes (VaultWatcher detecta y re-embed).
 - **Git** — backup e historial. No es mecanismo de sync. Commit+push automático con debounce.
 - **Conflictos Syncthing:** ADSO monitorea el vault con `watchdog` (filesystem watcher) y alerta por Telegram cuando detecta archivos `.sync-conflict-*`. Nunca auto-resuelve. El usuario resuelve manualmente.
 
@@ -605,7 +605,7 @@ Si Gemini no responde después de reintentos (cuota diaria → degradado inmedia
 - **Type hints** en todas las firmas de función
 - **Docstrings** en funciones públicas (descripción, args, comportamiento ante error)
 - **Modular:** cada módulo tiene responsabilidad única
-- **Testing:** unit, integration y e2e con cobertura ≥ 80%. Tests nunca llaman a APIs externas reales.
+- **Testing:** unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica). Tests nunca llaman a APIs externas reales.
 
 ---
 

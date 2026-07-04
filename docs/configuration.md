@@ -69,9 +69,9 @@ whisper:
 
 # ─── Extracción de contenido web ───────────────────────────────────────────
 content_extraction:
-  engine: gemini                 # gemini | trafilatura
-                                 # gemini: Gemini lee la URL directamente (producción, default)
-                                 # trafilatura: fetch local con trafilatura Python (desarrollo/testing)
+  engine: gemini                 # gemini (único valor funcional — Gemini lee la URL directamente)
+                                 # la opción trafilatura está reservada pero NO implementada:
+                                 # ningún código la consume y la dependencia no está instalada
 
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
