@@ -176,28 +176,32 @@ git -C /ruta/al/vault push -u origin main
 
 ### 4.3 SSH key para el container Docker
 
-El container necesita acceso SSH a GitHub para hacer push. ADSO espera la key montada en `/ssh-keys/` dentro del container. El `docker-compose.yml` del repo no incluye ese volumen por defecto — agregarlo junto con la variable `GIT_SSH_COMMAND`:
+El container necesita acceso SSH a GitHub para hacer push. ADSO espera la key montada en `/ssh-keys/` dentro del container. El `docker-compose.yml` del repo no incluye ese volumen por defecto.
+
+Crear una key **dedicada** para ADSO (no reutilizar la personal ni montar `~/.ssh` completo al container) y precargar el host key de GitHub para que SSH pueda verificar el servidor:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/adso_vault -C "adso-vault-backup" -N ""
+# Agregar ~/.ssh/adso_vault.pub como deploy key en el repo del vault en GitHub
+# (Settings → Deploy keys → marcar "Allow write access")
+
+# Host key de GitHub, para verificación estricta del servidor
+ssh-keyscan github.com > ~/.ssh/adso_known_hosts
+```
+
+Agregar en `docker-compose.yml` el volumen y la variable:
 
 ```yaml
     volumes:
       # ... volúmenes existentes ...
-      - ${HOME}/.ssh:/ssh-keys:ro
+      - ${HOME}/.ssh/adso_vault:/ssh-keys/adso_vault:ro
+      - ${HOME}/.ssh/adso_known_hosts:/ssh-keys/known_hosts:ro
     environment:
       # ... variables existentes ...
-      - GIT_SSH_COMMAND=ssh -i /ssh-keys/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      - GIT_SSH_COMMAND=ssh -i /ssh-keys/adso_vault -o UserKnownHostsFile=/ssh-keys/known_hosts -o StrictHostKeyChecking=yes
 ```
 
-Si querés usar una key dedicada para ADSO:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/adso_vault -C "adso-vault-backup" -N ""
-# Agregar ~/.ssh/adso_vault.pub como deploy key en el repo de GitHub (Settings → Deploy keys → write access)
-```
-
-Luego cambiar en `docker-compose.yml`:
-```yaml
-- GIT_SSH_COMMAND=ssh -i /ssh-keys/adso_vault -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-```
+> **No usar `StrictHostKeyChecking=no` / `UserKnownHostsFile=/dev/null`:** deshabilita la verificación de identidad del servidor, y un atacante en la red podría hacerse pasar por GitHub y recibir el contenido completo del vault en el próximo push. Montar solo la key dedicada, nunca `~/.ssh` entero.
 
 ### 4.4 Activar en config.yaml
 

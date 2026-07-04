@@ -328,6 +328,11 @@ Qué se testea:
 
 ## Fixtures globales (`conftest.py`)
 
+> Ejemplo ilustrativo del patrón. El `tests/conftest.py` real expone:
+> `vault_path`, `sample_config`, `llm_fixture`, `make_update`,
+> `make_callback_query`, `mock_context` (+ helpers `make_user`/`make_chat`/
+> `make_message`) — ver el archivo para las firmas exactas.
+
 ```python
 import pytest
 import pytest_asyncio

@@ -82,7 +82,7 @@ La infraestructura de retrieval ya existe; Fase 7 es sobre todo orquestación.
 - **`reporters.py`** — generador de informes `.md` con header ASCII + versión +
   fecha, `_note_block()` para renderizar notas, y `_llm_synthesis()` como patrón
   de llamada a Gemini de texto libre (a adaptar con prompt grounded).
-- **Config `rag.*`** (`config.py:22`): `similarity_threshold: 0.75`,
+- **Config `rag.*`** (`RagConfig` en `config.py`): `similarity_threshold: 0.75`,
   `max_results: 10`, `max_expansion_depth: 2`.
 - **Botones de desambiguación** (`constants.py`): `CB_DISAMBIG_QUERY` ejecuta el
   retrieval semántico real (mismo pipeline que `/buscar`) desde la etapa 7.0.
@@ -162,6 +162,12 @@ async def synthesize(
 ) -> Optional[str]:
     """Síntesis grounded. 1 llamada de generación. None si falla (fallback Groq)."""
 ```
+
+> Nota: la firma shipeada en 7.0 difiere levemente de este diseño: `retrieve()`
+> todavía no tiene el parámetro `expand` (llega con la expansión estructural de
+> 7.2) y `QueryResult` expone `below_threshold: bool` (indica que los resultados
+> se obtuvieron relajando el umbral) en lugar de `expanded`. Firmas reales en
+> `adso/knowledge_query.py`.
 
 - `retrieve` es puro retrieval (embedding + ChromaDB + filesystem). Testeable con
   ChromaDB mockeado.
