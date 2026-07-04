@@ -174,7 +174,9 @@ async def handle_callback(
     elif data == CB_DISAMBIG_QUERY:
         from adso.handlers.query import run_query
         pending_text = context.user_data.pop("pending_raw_content", None)
+        # Limpiar estado de captura pendiente: el usuario eligió buscar, no guardar.
         context.user_data.pop("pending_note", None)
+        context.user_data.pop("pending_capture_ctx", None)
         if pending_text:
             await run_query(update, context, pending_text)
         else:

@@ -213,7 +213,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 
 | Momento | Botones |
 |---|---|
-| **Texto / audio recibido** | `[Cancelar]` `[Tarea]` `[Nota]` — el usuario elige el tipo; el LLM infiere el resto |
+| **Texto / audio recibido** | fila 1: `[Cancelar]` `[Tarea]` `[Nota]` — el usuario elige el tipo; el LLM infiere el resto. fila 2: `[🔎 Buscar en el vault]` — busca ese texto (retrieval semántico) en vez de guardarlo (`CB_DISAMBIG_QUERY`) |
 | **PDF recibido** | `[Cancelar]` `[Ya lo leí]` `[Lo quiero leer]` — setea `read_status` en frontmatter |
 | **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
 | **Resultado OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` — dos filas; Gemini Vision descarta el OCR y reprocesa |

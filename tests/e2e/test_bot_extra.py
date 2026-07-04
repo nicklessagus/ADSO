@@ -224,6 +224,13 @@ class TestCallbackPaths:
         assert mock_run.await_args[0][2] == "papers de tesis"
         assert "pending_raw_content" not in mock_context.user_data
 
+    def test_save_keyboard_has_search_button(self) -> None:
+        # El teclado de texto/audio recibido debe ofrecer buscar, no solo guardar.
+        from adso.keyboards import build_save_keyboard
+        kb = build_save_keyboard()
+        datas = [b.callback_data for row in kb.inline_keyboard for b in row]
+        assert CB_DISAMBIG_QUERY in datas
+
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_disambig_capture(self, make_callback_query, mock_context) -> None:

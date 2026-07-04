@@ -286,12 +286,21 @@ def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
 
 
 def build_save_keyboard() -> InlineKeyboardMarkup:
-    """Teclado de elección: tarea o nota."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
-        InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
-    ]])
+    """Teclado de elección para texto/audio recibido: guardar o buscar.
+
+    Fila 1: capturar (cancelar / tarea / nota). Fila 2: buscar ese texto en el
+    vault (retrieval semántico, Fase 7) en vez de guardarlo.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+            InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
+            InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
+        ],
+        [
+            InlineKeyboardButton("🔎 Buscar en el vault", callback_data=CB_DISAMBIG_QUERY),
+        ],
+    ])
 
 
 def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
