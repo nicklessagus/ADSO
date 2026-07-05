@@ -5,6 +5,17 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.1.1] — 2026-07-05
+
+Bugfix release after a live incident (Telegram network timeouts mid-capture, 2026-07-05).
+
+### Fixed
+- `VaultWatcher` no longer treats the atomic-write temp files (`.adso-tmp-*.md`) as external changes — they were being indexed into ChromaDB as phantom notes and polluting backup commit messages; any hidden dotfile is now ignored
+- Global PTB error handler registered (previously "No error handlers are registered"): benign `BadRequest`s ("message is not modified", "query is too old") are ignored, network errors are logged without attempting to notify over the same dead connection, and any other unhandled error notifies the user with a clear message suggesting `/reset`
+- A stale `query.answer()` ("query is too old" after network lag) no longer aborts inline-button processing, and "message is not modified" on confirm is treated as silent success — the note was already saved
+
+---
+
 ## [1.1.0] — 2026-07-04
 
 Performance and hardening release, driven by a post-release audit (performance / security / docs).
