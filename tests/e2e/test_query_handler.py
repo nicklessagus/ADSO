@@ -95,6 +95,44 @@ class TestHandleBuscar:
         assert kwargs["filename"] == "consulta.md"
 
 
+class TestRunQueryKeyboardMsg:
+
+    @pytest.mark.asyncio
+    async def test_keyboard_msg_reused_as_status(self, make_update, mock_context) -> None:
+        # Invocada desde un inline keyboard, run_query edita ese mensaje como
+        # estado (retira los botones) en vez de crear un mensaje nuevo.
+        from adso.handlers.query import run_query
+
+        hits = [_hit("a", 0.2, "Nota Alfa")]
+        update, _ = _prep(mock_context, make_update, "exoplanetas", hits)
+        edited = _status_msg()
+        kb_msg = MagicMock()
+        kb_msg.edit_text = AsyncMock(return_value=edited)
+
+        await run_query(update, mock_context, "exoplanetas", keyboard_msg=kb_msg)
+
+        kb_msg.edit_text.assert_awaited_once()
+        update.message.reply_text.assert_not_awaited()
+        assert "Nota Alfa" in str(edited.edit_text.call_args)
+
+    @pytest.mark.asyncio
+    async def test_keyboard_msg_edit_fails_falls_back(self, make_update, mock_context) -> None:
+        # Si el mensaje del teclado ya no es editable, cae a un mensaje nuevo.
+        from telegram.error import BadRequest
+
+        from adso.handlers.query import run_query
+
+        hits = [_hit("a", 0.2, "Nota Alfa")]
+        update, status = _prep(mock_context, make_update, "exoplanetas", hits)
+        kb_msg = MagicMock()
+        kb_msg.edit_text = AsyncMock(side_effect=BadRequest("message to edit not found"))
+
+        await run_query(update, mock_context, "exoplanetas", keyboard_msg=kb_msg)
+
+        update.message.reply_text.assert_awaited_once()
+        assert "Nota Alfa" in str(status.edit_text.call_args)
+
+
 class TestCbQueryReport:
 
     @pytest.mark.asyncio

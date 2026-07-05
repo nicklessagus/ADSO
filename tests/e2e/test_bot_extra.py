@@ -222,6 +222,9 @@ class TestCallbackPaths:
             await handle_callback(update, mock_context)
         mock_run.assert_awaited_once()
         assert mock_run.await_args[0][2] == "papers de tesis"
+        # El mensaje del teclado viaja como keyboard_msg para que run_query lo
+        # edite (quita los botones) en vez de dejarlo colgado.
+        assert mock_run.await_args.kwargs["keyboard_msg"] is update.callback_query.message
         assert "pending_raw_content" not in mock_context.user_data
 
     def test_save_keyboard_has_search_button(self) -> None:

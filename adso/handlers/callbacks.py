@@ -193,7 +193,7 @@ async def handle_callback(
         context.user_data.pop("pending_note", None)
         context.user_data.pop("pending_capture_ctx", None)
         if pending_text:
-            await run_query(update, context, pending_text)
+            await run_query(update, context, pending_text, keyboard_msg=query.message)
         else:
             await query.edit_message_text("No hay texto para buscar.")
 

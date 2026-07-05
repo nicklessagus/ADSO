@@ -252,7 +252,7 @@ Los botones son el mecanismo principal de interacción después del lenguaje nat
 **Failsafe global:** `/reset` cancela cualquier estado pendiente (teclados, correcciones, capturas) y vuelve al estado inicial. Funciona siempre, sin confirmación.
 
 ### Desambiguación de intención
-Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` ejecuta el retrieval semántico real (Fase 7.0, mismo pipeline que `/buscar` via `CB_DISAMBIG_QUERY`).
+Si el LLM no tiene confianza alta en el modo, el bot pregunta con botones en vez de asumir. `[Buscar en vault]` ejecuta el retrieval semántico real (Fase 7.0, mismo pipeline que `/buscar` via `CB_DISAMBIG_QUERY`). Al buscar desde un teclado, `run_query` recibe el mensaje de los botones como `keyboard_msg` y lo edita como mensaje de estado — el teclado se retira, como en cualquier otro callback (si la edición falla por mensaje viejo, cae a un mensaje nuevo).
 
 El LLM no usa `mode=query` ni `mode=edit` (removidos del prompt hasta Fase 7). Todo input que no sea `manage` se clasifica como `capture`. Si el LLM devuelve `query` o `edit` de todas formas, el código los redirige a `capture` automáticamente.
 

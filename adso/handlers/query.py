@@ -13,7 +13,8 @@ import io
 import logging
 from typing import Any, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from adso.config import Settings
@@ -48,17 +49,32 @@ async def run_query(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     query_text: str,
+    keyboard_msg: Optional[Message] = None,
 ) -> None:
-    """Ejecuta la consulta y presenta resultados. Reutilizable (comando o botón)."""
+    """Ejecuta la consulta y presenta resultados. Reutilizable (comando o botón).
+
+    Si la consulta viene de un inline keyboard, ``keyboard_msg`` es el mensaje
+    con los botones: se edita como mensaje de estado (retirando el teclado) en
+    vez de dejarlo colgado. Si la edición falla (mensaje viejo/borrado), se cae
+    a un mensaje nuevo.
+    """
     settings: Settings = context.bot_data["settings"]
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
     reply = update.effective_message.reply_text
 
+    async def _status(text: str) -> Message:
+        if keyboard_msg is not None:
+            try:
+                return await keyboard_msg.edit_text(text, parse_mode="HTML")
+            except BadRequest:
+                pass
+        return await reply(text, parse_mode="HTML")
+
     if embeddings is None:
-        await reply("El índice semántico no está disponible.")
+        await _status("El índice semántico no está disponible.")
         return
 
-    status_msg = await reply(f"🔎 Buscando: <i>{_esc(query_text)}</i>…", parse_mode="HTML")
+    status_msg = await _status(f"🔎 Buscando: <i>{_esc(query_text)}</i>…")
 
     try:
         result = await retrieve(
