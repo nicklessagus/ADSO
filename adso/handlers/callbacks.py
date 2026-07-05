@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from adso.bot_utils import _has_destination
@@ -96,7 +97,12 @@ async def handle_callback(
 ) -> None:
     """Handler de inline keyboard callbacks."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as e:
+        # "Query is too old": el ack llegó tarde a Telegram (lag de red). No
+        # abortar — el tap del usuario sigue siendo válido y debe procesarse.
+        logger.info("query.answer() falló (se procesa igual): %s", e)
     data = query.data
 
     # Borrar mensajes de bloqueo acumulados
@@ -112,6 +118,14 @@ async def handle_callback(
     if data == CB_CONFIRM:
         try:
             await _cb_confirm(query, context, vault_path)
+        except BadRequest as e:
+            if "message is not modified" in str(e).lower():
+                # Edición con contenido idéntico: la confirmación ya se aplicó
+                # (reintento tras timeout o doble tap). No es un error.
+                logger.info("Edición idéntica ignorada en _cb_confirm.")
+            else:
+                logger.exception("Error en _cb_confirm: %s", e)
+                await query.edit_message_text(f"Error al guardar: {e}")
         except Exception as e:
             logger.exception("Error en _cb_confirm: %s", e)
             await query.edit_message_text(f"Error al guardar: {e}")

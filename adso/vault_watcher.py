@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]+\.md$", re.IGNORECASE)
 
 
+def _is_hidden(path: Path) -> bool:
+    """Archivos ocultos no son notas: temporales .adso-tmp-* de la escritura
+    atómica del bot, dotfiles de Syncthing/Obsidian, etc. Sin este filtro el
+    watcher los indexa en ChromaDB como notas fantasma."""
+    return path.name.startswith(".")
+
+
 @dataclass(frozen=True)
 class _VaultEvent:
     path: Path
@@ -57,7 +64,7 @@ class _VaultEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix != ".md":
+        if path.suffix != ".md" or _is_hidden(path):
             return
         if CONFLICT_RE.search(path.name):
             asyncio.run_coroutine_threadsafe(
@@ -75,7 +82,7 @@ class _VaultEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix == ".md" and not CONFLICT_RE.search(path.name):
+        if path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name):
             asyncio.run_coroutine_threadsafe(
                 self._queue.put(_VaultEvent(path=path, is_conflict=False)),
                 self._loop,
@@ -86,7 +93,7 @@ class _VaultEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix == ".md" and not CONFLICT_RE.search(path.name):
+        if path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name):
             asyncio.run_coroutine_threadsafe(
                 self._queue.put(_VaultEvent(path=path, is_conflict=False, is_delete=True)),
                 self._loop,

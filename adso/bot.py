@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from telegram import Update
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application,
     ApplicationHandlerStop,
@@ -127,6 +128,41 @@ async def _post_shutdown(app: Application) -> None:
         await watcher.stop()
 
 
+# BadRequests esperables que no ameritan log de error ni aviso al usuario:
+# - "message is not modified": reintento de edición con contenido idéntico —
+#   el contenido ya está aplicado (típico tras un timeout de red a mitad de flujo).
+# - "query is too old": el callback llegó tarde a Telegram (>~30s por lag de red);
+#   la interacción en sí ya se procesó o el usuario va a re-tapear.
+_BENIGN_BADREQUEST = ("message is not modified", "query is too old")
+
+
+async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Error handler global de PTB: loguea excepciones no capturadas y avisa al usuario.
+
+    Sin esto registrado, PTB solo emite "No error handlers are registered" y el
+    usuario no recibe ninguna señal cuando un handler muere a mitad de flujo.
+    Los errores de red (TimedOut, etc.) solo se loguean: intentar notificar por
+    la misma red caída fallaría de nuevo.
+    """
+    err = context.error
+    if isinstance(err, BadRequest) and any(m in str(err).lower() for m in _BENIGN_BADREQUEST):
+        _bot_logger.info("BadRequest benigno ignorado: %s", err)
+        return
+    _bot_logger.error("Error no manejado procesando update: %s", err, exc_info=err)
+    if isinstance(err, NetworkError):
+        return
+    chat_id = update.effective_chat.id if isinstance(update, Update) and update.effective_chat else None
+    if chat_id is None:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Ocurrió un error inesperado. Reintentar la operación o usar /reset.",
+        )
+    except Exception:
+        _bot_logger.debug("No se pudo notificar el error al usuario.")
+
+
 async def _global_auth_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Descarta updates de usuarios no autorizados antes de cualquier handler.
 
@@ -183,6 +219,7 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     # descarta updates no autorizados. Los handlers siguen decorados con
     # @authorized como segunda barrera.
     app.add_handler(TypeHandler(Update, _global_auth_gate), group=-1)
+    app.add_error_handler(_global_error_handler)
 
     # Handlers
     app.add_handler(CommandHandler("start", handle_start))

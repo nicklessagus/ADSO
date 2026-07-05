@@ -96,6 +96,39 @@ class TestVaultEventHandler:
         assert item.is_conflict is False
 
     @pytest.mark.asyncio
+    async def test_on_created_ignores_atomic_write_tmp(self) -> None:
+        """on_created ignora los temporales .adso-tmp-* de la escritura atómica del bot."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/00-Inbox/.adso-tmp-pejoj6nh.md"
+
+        handler.on_created(event)
+        await asyncio.sleep(0.01)
+
+        assert queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_on_modified_and_deleted_ignore_hidden_files(self) -> None:
+        """on_modified y on_deleted ignoran cualquier dotfile (temporales, ocultos de sync)."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/01-Projects/ADSO/.adso-tmp-38kxvvnz.md"
+
+        handler.on_modified(event)
+        handler.on_deleted(event)
+        await asyncio.sleep(0.01)
+
+        assert queue.empty()
+
+    @pytest.mark.asyncio
     async def test_on_modified_ignores_conflict_files(self) -> None:
         """on_modified ignora .sync-conflict-* (los detecta on_created)."""
         loop = asyncio.get_running_loop()
