@@ -12,6 +12,11 @@
 \___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
 </pre>
 
+[![CI](https://github.com/nicklessagus/ADSO/actions/workflows/ci.yml/badge.svg)](https://github.com/nicklessagus/ADSO/actions/workflows/ci.yml)
+[![Security](https://github.com/nicklessagus/ADSO/actions/workflows/security.yml/badge.svg)](https://github.com/nicklessagus/ADSO/actions/workflows/security.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
 Bot orquestador de Telegram que actúa como escriba, observador y clasificador del conocimiento: captura información no estructurada, la clasifica mediante LLMs, la persiste como notas Markdown en un vault de Obsidian y permite recuperarla mediante consultas en lenguaje natural.
 
 ## ¿Qué hace?
