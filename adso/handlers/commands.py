@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -94,6 +96,32 @@ def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
 
 
 @authorized
+def _gather_vault_counts(vault_path: Path) -> tuple[int, int, int, int]:
+    """Cuenta notas totales y del inbox (con desglose de pendientes).
+
+    Corre bajo ``asyncio.to_thread``: el rglob del vault y el parseo de las notas
+    del inbox son I/O bloqueante y en la RPi4 con SD lenta congelarían el event
+    loop. Usa ``parse_cached`` para reutilizar el caché de parsing en vez de
+    releer cada nota.
+
+    Returns:
+        Tupla ``(total_notes, inbox_count, pending_auto, pending_manual)``.
+    """
+    total_notes = sum(1 for _ in vault_path.rglob("*.md"))
+    inbox_dir = vault_path / "00-Inbox"
+    inbox_count = pending_auto = pending_manual = 0
+    if inbox_dir.exists():
+        for f in inbox_dir.glob("*.md"):
+            inbox_count += 1
+            note = vault_cache.parse_cached(f)
+            if note is not None and note.frontmatter.get("status") == "pending-classification":
+                if note.frontmatter.get("project") or note.frontmatter.get("area"):
+                    pending_auto += 1
+                else:
+                    pending_manual += 1
+    return total_notes, inbox_count, pending_auto, pending_manual
+
+
 async def handle_status(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -105,23 +133,9 @@ async def handle_status(
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
-    total_notes = len(list(vault_path.rglob("*.md")))
-    inbox_dir = vault_path / "00-Inbox"
-    inbox_count = 0
-    pending_auto = 0
-    pending_manual = 0
-    if inbox_dir.exists():
-        for f in inbox_dir.glob("*.md"):
-            inbox_count += 1
-            try:
-                note = await read_note(f)
-                if note.frontmatter.get("status") == "pending-classification":
-                    if note.frontmatter.get("project") or note.frontmatter.get("area"):
-                        pending_auto += 1
-                    else:
-                        pending_manual += 1
-            except Exception:
-                pass
+    total_notes, inbox_count, pending_auto, pending_manual = await asyncio.to_thread(
+        _gather_vault_counts, vault_path
+    )
     total_pending = pending_auto + pending_manual
 
     llm_model = GEMINI_MODEL
@@ -262,7 +276,6 @@ async def handle_clasificar(
     context.user_data["clasificar_inbox_path"] = str(ref.path)
 
     preview_text = "♻️ <b>Nota de Inbox</b>\n\n" + build_preview(new_fm, body, [])
-    has_dest = bool(new_fm.get("project") or new_fm.get("area"))
-    keyboard = build_capture_keyboard(new_fm, has_dest)
+    keyboard = build_capture_keyboard()
 
     await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")

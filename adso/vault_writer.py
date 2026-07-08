@@ -98,7 +98,11 @@ def _atomic_write_sync(path: Path, content: str) -> None:
 
     Debe correr en un thread (``asyncio.to_thread``): hace I/O bloqueante.
     """
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".adso-tmp-", suffix=path.suffix)
+    # Sufijo `.tmp` (no `.suffix` de la nota): el temporal vive en un directorio
+    # observado por VaultWatcher; con un sufijo distinto de `.md` el filtro del
+    # handler lo saltea aunque el nombre no empezara con `.` — defensa extra sobre
+    # `_is_hidden`, y evita que un `git add -A` concurrente lo commitee.
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".adso-tmp-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
@@ -887,6 +891,25 @@ class GitBackup:
                 )
 
             self._timer = loop.call_later(self.debounce_seconds, _schedule_backup)
+
+    async def flush(self) -> None:
+        """Fuerza el backup pendiente de inmediato, cancelando el debounce.
+
+        Se llama en el shutdown (``_post_shutdown``): una nota escrita dentro de
+        la ventana de ``debounce_seconds`` (default 30s) antes de detener el bot
+        quedaría sin commit/push hasta la *próxima* escritura — potencial pérdida
+        de datos si el contenedor no vuelve a arrancar. Regla de oro: sin pérdida
+        de datos.
+        """
+        async with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            if not self._pending_titles:
+                return
+        # _do_backup vuelve a tomar el lock y drena _pending_titles; ejecutarlo
+        # fuera del `async with` evita el deadlock por lock no reentrante.
+        await self._do_backup()
 
     @staticmethod
     def _build_message(titles: list[str]) -> str:

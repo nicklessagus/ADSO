@@ -51,6 +51,29 @@ def spawn_tracked(coro: Awaitable, *, name: str | None = None) -> "asyncio.Task"
     return task
 
 
+# Tope del set bot_written_paths. En operación normal el set se drena solo (el
+# VaultWatcher consume cada entrada al procesar el evento inotify de la escritura,
+# ahora que on_moved está implementado). El cap es una red de seguridad: si algún
+# evento se pierde y una entrada nunca se drena, el set no crece sin límite en
+# uptime largo. 512 es muy holgado para un bot single-user.
+_BOT_WRITTEN_CAP = 512
+
+
+def mark_bot_written(bot_data: dict, path: Path) -> None:
+    """Registra un path escrito por el bot para que VaultWatcher saltee su evento.
+
+    El watcher chequea este set y descarta el evento inotify de la propia
+    escritura del bot (evita doble embed). Acota el tamaño del set: descartar una
+    entrada aún no drenada solo provoca un re-embed redundante (idempotente),
+    nunca pérdida de datos.
+    """
+    paths: set = bot_data.setdefault("bot_written_paths", set())
+    paths.add(path)
+    if len(paths) > _BOT_WRITTEN_CAP:
+        for stale in list(paths)[: len(paths) - _BOT_WRITTEN_CAP]:
+            paths.discard(stale)
+
+
 def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """True si hay una acción con teclado inline pendiente de resolución.
 
@@ -96,15 +119,6 @@ def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
     if ud.get("pending_extraction", {}).get("awaiting_correction"):
         return True
     if ud.get("pending_note", {}).get("awaiting_correction"):
-        return True
-    return False
-
-
-def _has_destination(fm: dict) -> bool:
-    """Determina si el frontmatter tiene un destino claro."""
-    if fm.get("type") == "task":
-        return True  # task va a inbox si no tiene destino
-    if fm.get("project") or fm.get("area"):
         return True
     return False
 
@@ -195,33 +209,40 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
     01-Projects/ y 02-Areas/ directamente. Si existe un _index.md con
     campo project:/area: y description:, los usa; si no, usa el nombre del
     directorio como nombre y descripción vacía.
+
+    El escaneo (iterdir + parse de cada _index.md) es I/O bloqueante y corre en
+    todo flujo de clasificación antes de cada classify(); se ejecuta en un thread
+    para no congelar el event loop en la RPi4 con SD lenta.
     """
-    def _read_index(dir_path: Path, field: str) -> dict:
-        index = dir_path / "_index.md"
-        name = dir_path.name
-        description = ""
-        note = parse_cached(index)
-        if note is not None:
-            name = note.frontmatter.get(field, name)
-            description = note.frontmatter.get("description", "")
-        return {"name": name, "description": description}
+    def _scan() -> tuple[list[dict], list[dict]]:
+        def _read_index(dir_path: Path, field: str) -> dict:
+            index = dir_path / "_index.md"
+            name = dir_path.name
+            description = ""
+            note = parse_cached(index)
+            if note is not None:
+                name = note.frontmatter.get(field, name)
+                description = note.frontmatter.get("description", "")
+            return {"name": name, "description": description}
 
-    projects_dir = vault_path / "01-Projects"
-    areas_dir = vault_path / "02-Areas"
+        projects_dir = vault_path / "01-Projects"
+        areas_dir = vault_path / "02-Areas"
 
-    projects = [
-        _read_index(d, "project")
-        for d in sorted(projects_dir.iterdir())
-        if d.is_dir()
-    ] if projects_dir.exists() else []
+        projects = [
+            _read_index(d, "project")
+            for d in sorted(projects_dir.iterdir())
+            if d.is_dir()
+        ] if projects_dir.exists() else []
 
-    areas = [
-        _read_index(d, "area")
-        for d in sorted(areas_dir.iterdir())
-        if d.is_dir()
-    ] if areas_dir.exists() else []
+        areas = [
+            _read_index(d, "area")
+            for d in sorted(areas_dir.iterdir())
+            if d.is_dir()
+        ] if areas_dir.exists() else []
 
-    return projects, areas
+        return projects, areas
+
+    return await asyncio.to_thread(_scan)
 
 
 async def _get_existing_tags(vault_path: Path, limit: int = 100) -> list[str]:

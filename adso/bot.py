@@ -126,6 +126,14 @@ async def _post_shutdown(app: Application) -> None:
     watcher: Optional[VaultWatcher] = app.bot_data.get("vault_watcher")
     if watcher:
         await watcher.stop()
+    # Vaciar el debounce del backup: una nota escrita en los últimos segundos
+    # quedaría sin commit/push hasta la próxima escritura si no forzamos el flush.
+    git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
+    if git_backup:
+        try:
+            await git_backup.flush()
+        except Exception as exc:  # noqa: BLE001 — el shutdown no debe fallar por el backup
+            _bot_logger.warning("Error en flush de git backup al shutdown: %s", exc)
 
 
 # BadRequests esperables que no ameritan log de error ni aviso al usuario:

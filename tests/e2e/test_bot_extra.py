@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from adso.handlers.input import handle_text, handle_audio
 from adso.handlers.callbacks import handle_callback
 from adso.handlers.capture import _parse_date_from_text, _apply_task_corrections
-from adso.bot_utils import _is_awaiting_text_input
+from adso.bot_utils import _is_awaiting_text_input, mark_bot_written
+from adso import bot_utils
 from adso.constants import CB_NOTE_CORRECT
 from adso.keyboards import (
     build_preview,
@@ -18,7 +21,6 @@ from adso.keyboards import (
     build_manage_keyboard,
     _esc,
 )
-from adso.bot_utils import _has_destination
 from adso.constants import (
     CB_CONFIRM,
     CB_CANCEL,
@@ -110,41 +112,25 @@ class TestEsc:
         assert _esc("<b>&test</b>") == "&lt;b&gt;&amp;test&lt;/b&gt;"
 
 
-class TestHasDestination:
+class TestMarkBotWritten:
 
-    def test_task_inbox_has_destination(self) -> None:
-        assert _has_destination({"type": "task"})
+    def test_adds_path_to_set(self) -> None:
+        bot_data: dict = {}
+        p = Path("/vault/00-Inbox/nota.md")
+        mark_bot_written(bot_data, p)
+        assert p in bot_data["bot_written_paths"]
 
-    def test_task_has_destination(self) -> None:
-        assert _has_destination({"type": "task"})
-
-    def test_idea_with_area_has_destination(self) -> None:
-        assert _has_destination({"type": "idea", "area": "investigacion"})
-
-    def test_idea_without_dest(self) -> None:
-        assert not _has_destination({"type": "idea"})
-
-    def test_note_with_project(self) -> None:
-        assert _has_destination({"type": "reference", "project": "tesis"})
-
-    def test_note_with_area(self) -> None:
-        assert _has_destination({"type": "reference", "area": "investigacion"})
-
-    def test_note_without_dest(self) -> None:
-        assert not _has_destination({"type": "reference"})
+    def test_caps_set_size(self) -> None:
+        bot_data: dict = {}
+        for i in range(bot_utils._BOT_WRITTEN_CAP + 50):
+            mark_bot_written(bot_data, Path(f"/vault/nota-{i}.md"))
+        assert len(bot_data["bot_written_paths"]) <= bot_utils._BOT_WRITTEN_CAP
 
 
 class TestKeyboards:
 
-    def test_capture_keyboard_with_destination(self) -> None:
-        kb = build_capture_keyboard({}, True)
-        texts = [b.text for row in kb.inline_keyboard for b in row]
-        assert "Confirmar" in texts
-        assert "Reubicar" in texts
-        assert "Cancelar" in texts
-
-    def test_capture_keyboard_without_destination(self) -> None:
-        kb = build_capture_keyboard({}, False)
+    def test_capture_keyboard(self) -> None:
+        kb = build_capture_keyboard()
         texts = [b.text for row in kb.inline_keyboard for b in row]
         assert "Cancelar" in texts
         assert "Corregir" in texts

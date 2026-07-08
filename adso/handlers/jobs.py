@@ -9,7 +9,7 @@ from typing import Optional
 
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags, spawn_tracked
+from adso.bot_utils import _get_existing_items, _get_existing_tags, mark_bot_written, spawn_tracked
 from adso.config import Settings
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.capture import _index_note_safe
@@ -153,7 +153,7 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
             if git_backup:
-                context.bot_data.setdefault("bot_written_paths", set()).add(new_path)
+                mark_bot_written(context.bot_data, new_path)
                 await git_backup.notify(new_fm.get("title", "Sin título"))
 
             embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")

@@ -116,18 +116,11 @@ def build_preview(
     return "\n".join(lines)
 
 
-def build_capture_keyboard(
-    frontmatter: dict,
-    has_destination: bool,
-) -> InlineKeyboardMarkup:
-    """Construye inline keyboard para captura.
+def build_capture_keyboard() -> InlineKeyboardMarkup:
+    """Construye inline keyboard para captura (notas y tareas).
 
-    Args:
-        frontmatter: Dict del frontmatter propuesto.
-        has_destination: Si True, el LLM propuso un destino claro.
-
-    Returns:
-        InlineKeyboardMarkup.
+    El teclado es idéntico para todos los tipos y con o sin destino: fila 1
+    ``[Cancelar] [Corregir] [Reubicar]``, fila 2 ``[Confirmar]``.
     """
     return InlineKeyboardMarkup([
         [

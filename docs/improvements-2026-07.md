@@ -18,6 +18,12 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ## Bloque 1 — Quick wins: pérdida de datos y drift de docs (~1 sesión)
 
+> **✅ IMPLEMENTADO (2026-07-08).** Todos los ítems 1.1–1.8 aplicados. Además se
+> eliminó `docs/gemini-gem-instructions.md` (la gema de Gemini quedó fuera de uso;
+> el desarrollo es 100% Claude). Tests: 562 pasando.
+
+
+
 ### 1.1 `GitBackup.flush()` al shutdown
 
 - **Estado:** confirmado · **Impacto:** alto · **Esfuerzo:** bajo · **Decisión:** pendiente

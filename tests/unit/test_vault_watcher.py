@@ -181,6 +181,75 @@ class TestVaultEventHandler:
         assert queue.empty()
 
     @pytest.mark.asyncio
+    async def test_on_moved_emits_delete_for_src_and_change_for_dest(self) -> None:
+        """Un rename externo (A.md → B.md) emite un delete para el origen y un
+        change para el destino."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/01-Projects/tesis/vieja.md"
+        event.dest_path = "/vault/01-Projects/tesis/nueva.md"
+
+        handler.on_moved(event)
+        await asyncio.sleep(0.01)
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        assert len(items) == 2
+        delete_evt = next(i for i in items if i.is_delete)
+        change_evt = next(i for i in items if not i.is_delete)
+        assert delete_evt.path == Path(event.src_path)
+        assert change_evt.path == Path(event.dest_path)
+        assert change_evt.is_conflict is False
+
+    @pytest.mark.asyncio
+    async def test_on_moved_skips_hidden_temp_src(self) -> None:
+        """La escritura atómica del bot (temp .adso-tmp-*.tmp → nota.md) no debe
+        emitir delete del temporal, solo el change del destino real."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/00-Inbox/.adso-tmp-abc123.tmp"
+        event.dest_path = "/vault/00-Inbox/nota.md"
+
+        handler.on_moved(event)
+        await asyncio.sleep(0.01)
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        assert len(items) == 1
+        assert items[0].is_delete is False
+        assert items[0].path == Path(event.dest_path)
+
+    @pytest.mark.asyncio
+    async def test_on_moved_dest_conflict_flagged(self) -> None:
+        """Si el destino de un move es un .sync-conflict-*, se marca is_conflict."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        handler = _VaultEventHandler(queue, loop)
+
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = "/vault/.adso-tmp-xyz.tmp"
+        event.dest_path = "/vault/nota.sync-conflict-20240315-143022-ABC.md"
+
+        handler.on_moved(event)
+        await asyncio.sleep(0.01)
+
+        assert not queue.empty()
+        item = queue.get_nowait()
+        assert item.is_conflict is True
+        assert queue.empty()
+
+    @pytest.mark.asyncio
     async def test_ignores_non_md_files(self) -> None:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()

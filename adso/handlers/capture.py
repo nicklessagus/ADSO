@@ -21,7 +21,7 @@ from adso.bot_utils import (
     _cleanup_pending,
     _get_existing_items,
     _get_existing_tags,
-    _has_destination,
+    mark_bot_written,
     spawn_tracked,
 )
 from adso.config import Settings
@@ -134,7 +134,7 @@ async def _classify_and_preview(
         result["payload"]["suggested_links"] = []
 
         preview = build_preview(fm, payload.get("body", text), [])
-        keyboard = build_capture_keyboard(fm, False)
+        keyboard = build_capture_keyboard()
 
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn(
@@ -244,9 +244,8 @@ async def _classify_and_preview(
     result["payload"]["suggested_links"] = suggested_links
     result["payload"]["_body_embedding"] = body_embedding
 
-    has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard(fm, has_dest)
+    keyboard = build_capture_keyboard()
 
     # Contenido extraído (PDF/OCR/Vision/documento) que trae un patrón de posible
     # inyección: el <input> ya va blindado en classify(), pero avisar para que el
@@ -260,84 +259,6 @@ async def _classify_and_preview(
         preview,
         reply_markup=keyboard,
         parse_mode="HTML",
-    )
-
-
-async def _handle_capture(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    result: dict,
-) -> None:
-    """Procesa modo capture: muestra preview + teclado."""
-    payload = result["payload"]
-    fm = payload["frontmatter"]
-    body = payload.get("body", "")
-    suggested_links: list[dict] = []
-
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    fm["date_created"] = now
-    fm["date_modified"] = now
-    fm["source"] = "telegram"
-    fm["media_type"] = "text"
-
-    body_embedding: Optional[list] = None
-    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
-    if embeddings and body:
-        try:
-            settings: Settings = context.bot_data["settings"]
-            body_embedding = await embeddings.compute_embedding(body)
-            similar = await embeddings.query_similar(
-                query_text=body,
-                n_results=settings.links.max_suggestions,
-                threshold=settings.links.similarity_threshold,
-                query_embedding=body_embedding,
-            )
-            if similar:
-                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
-        except Exception as e:
-            logger.warning("Error buscando links similares: %s", e)
-
-    context.user_data["pending_note"] = result
-    result["payload"]["suggested_links"] = suggested_links
-    result["payload"]["_body_embedding"] = body_embedding
-    context.user_data["original_content"] = update.message.text
-
-    has_dest = _has_destination(fm)
-    preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard(fm, has_dest)
-
-    await update.message.reply_text(
-        preview,
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-
-
-async def _handle_degraded(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    original_text: str,
-    result: dict,
-) -> None:
-    """Modo degradado: guarda en Inbox con pending-classification."""
-    settings: Settings = context.bot_data["settings"]
-    vault_path = settings.vault_path
-
-    payload = result["payload"]
-    fm = payload["frontmatter"]
-    fm["source"] = "telegram"
-    fm["media_type"] = "text"
-
-    written_path = await create_note(fm, payload["body"], vault_path)
-
-    git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
-    if git_backup:
-        context.bot_data.setdefault("bot_written_paths", set()).add(written_path)
-        await git_backup.notify(fm.get("title", "Sin título"))
-
-    await update.message.reply_text(
-        "No se pudo clasificar — guardado en Inbox. "
-        "Se reintenta automáticamente."
     )
 
 
@@ -576,9 +497,8 @@ async def _handle_text_correction(
 
     body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])
-    has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard(fm, has_dest)
+    keyboard = build_capture_keyboard()
 
     if locked_msg_id:
         pending["awaiting_correction"] = False
@@ -667,9 +587,8 @@ async def _handle_capture_from_callback(
 
     context.user_data["pending_note"] = result
 
-    has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard(fm, has_dest)
+    keyboard = build_capture_keyboard()
 
     await query.edit_message_text(
         preview,
@@ -829,7 +748,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     if git_backup:
-        context.bot_data.setdefault("bot_written_paths", set()).add(path)
+        mark_bot_written(context.bot_data, path)
         await git_backup.notify(fm.get("title", "Sin título"))
 
     # Indexar el embedding inline (mismo patrón que jobs.reclassify_inbox). El path
@@ -889,7 +808,7 @@ async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.edit_message_text("Cancelado.")
 
 
-async def _cb_correct(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
+async def _cb_correct(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra selector de destino."""
     keyboard = build_destination_keyboard()
     await query.edit_message_reply_markup(reply_markup=keyboard)
@@ -950,7 +869,7 @@ async def _cb_dest(
 
     await query.edit_message_text(
         preview + "\n\n¿Confirmar?",
-        reply_markup=build_capture_keyboard(fm, has_destination=True),
+        reply_markup=build_capture_keyboard(),
         parse_mode="HTML",
     )
 
@@ -1167,9 +1086,8 @@ async def _classify_and_preview_arxiv(
     result["payload"]["suggested_links"] = suggested_links
     context.user_data["pending_note"] = result
 
-    has_dest = _has_destination(fm)
     preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard(fm, has_dest)
+    keyboard = build_capture_keyboard()
 
     # Abstract/metadata de arXiv con patrón de posible inyección → avisar.
     if check_injection_risk(content):

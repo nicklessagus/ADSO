@@ -15,7 +15,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, Optional
 
-from watchdog.events import FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileSystemEventHandler
+from watchdog.events import (
+    FileCreatedEvent,
+    FileDeletedEvent,
+    FileModifiedEvent,
+    FileMovedEvent,
+    FileSystemEventHandler,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +55,8 @@ class WatcherStats:
 
 
 class _VaultEventHandler(FileSystemEventHandler):
-    """Handler de watchdog: detecta conflictos (on_created) y cambios externos (on_modified)."""
+    """Handler de watchdog: detecta conflictos, cambios y borrados externos
+    (on_created/on_modified/on_deleted/on_moved)."""
 
     def __init__(
         self,
@@ -96,6 +103,40 @@ class _VaultEventHandler(FileSystemEventHandler):
         if path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name):
             asyncio.run_coroutine_threadsafe(
                 self._queue.put(_VaultEvent(path=path, is_conflict=False, is_delete=True)),
+                self._loop,
+            )
+
+    def on_moved(self, event: FileMovedEvent) -> None:
+        """Encola renames/moves: inotify los reporta como FileMovedEvent.
+
+        Cubre dos casos críticos que on_created/on_modified no ven:
+        1. Syncthing aplica cambios remotos escribiendo un temporal y
+           renombrándolo sobre la nota → sin esto, las ediciones sincronizadas
+           desde otros dispositivos no disparaban re-embed hasta el reindex
+           nocturno (el caso de uso central del watcher).
+        2. Editores externos con guardado atómico (vim, etc.).
+
+        También lo dispara la escritura atómica del propio bot (temp → nota); el
+        temp es hidden y su suffix es `.tmp`, así que el origen se saltea y el
+        destino (la nota) cae en bot_written_paths → no genera doble embed.
+
+        Emite un delete para el origen (su embedding queda huérfano) y un change
+        —o conflicto— para el destino, respetando los filtros de siempre.
+        """
+        if event.is_directory:
+            return
+        src = Path(event.src_path)
+        if src.suffix == ".md" and not _is_hidden(src) and not CONFLICT_RE.search(src.name):
+            asyncio.run_coroutine_threadsafe(
+                self._queue.put(_VaultEvent(path=src, is_conflict=False, is_delete=True)),
+                self._loop,
+            )
+        dest = Path(event.dest_path)
+        if dest.suffix == ".md" and not _is_hidden(dest):
+            asyncio.run_coroutine_threadsafe(
+                self._queue.put(
+                    _VaultEvent(path=dest, is_conflict=bool(CONFLICT_RE.search(dest.name)))
+                ),
                 self._loop,
             )
 

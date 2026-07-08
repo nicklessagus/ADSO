@@ -73,6 +73,37 @@ class TestGitBackup:
         assert (git_vault / "test.md").exists()
 
     @pytest.mark.asyncio
+    async def test_flush_commits_before_debounce_elapses(self, git_vault: Path) -> None:
+        """flush() fuerza el commit pendiente de inmediato, sin esperar el debounce.
+
+        Simula el shutdown: una nota escrita dentro de la ventana de debounce no
+        debe perderse.
+        """
+        import git
+        backup = GitBackup(git_vault, debounce_seconds=300)  # debounce largo: no dispararía solo
+
+        (git_vault / "urgente.md").write_text("---\ntitle: Urgente\n---\nBody\n")
+        await backup.notify("Nota urgente")
+
+        # Sin flush el commit no existiría (debounce de 300s); flush lo fuerza ya.
+        await backup.flush()
+
+        repo = git.Repo(str(git_vault))
+        assert "Add note: Nota urgente" in repo.head.commit.message
+
+    @pytest.mark.asyncio
+    async def test_flush_without_pending_is_noop(self, git_vault: Path) -> None:
+        """flush() sin trabajo pendiente no crea commits."""
+        import git
+        backup = GitBackup(git_vault, debounce_seconds=0)
+        repo = git.Repo(str(git_vault))
+        initial_count = len(list(repo.iter_commits()))
+
+        await backup.flush()
+
+        assert len(list(repo.iter_commits())) == initial_count
+
+    @pytest.mark.asyncio
     async def test_no_changes_no_commit(self, git_vault: Path) -> None:
         """Sin cambios → no crea commit."""
         import git

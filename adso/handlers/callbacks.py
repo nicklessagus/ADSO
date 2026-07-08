@@ -13,7 +13,6 @@ from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _has_destination
 from adso.config import Settings
 from adso.constants import (
     CB_ARXIV_CREATE_ANYWAY,
@@ -134,7 +133,7 @@ async def handle_callback(
         await _cb_cancel(query, context)
 
     elif data == CB_CORRECT:
-        await _cb_correct(query, context, vault_path)
+        await _cb_correct(query, context)
 
     elif data == CB_NOTE_CORRECT:
         await _cb_note_correct(query, context)
@@ -161,8 +160,7 @@ async def handle_callback(
     elif data == CB_BACK:
         pending = context.user_data.get("pending_note")
         if pending:
-            fm = pending["payload"]["frontmatter"]
-            keyboard = build_capture_keyboard(fm, _has_destination(fm))
+            keyboard = build_capture_keyboard()
             await query.edit_message_reply_markup(reply_markup=keyboard)
 
     elif data == CB_INTENT_SAVE:
