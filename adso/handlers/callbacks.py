@@ -216,10 +216,11 @@ async def handle_callback(
         if pt:
             pt["awaiting_correction"] = True
             pt["msg_id"] = query.message.message_id
-            snippet = pt["text"][:500] + ("..." if len(pt["text"]) > 500 else "")
             await query.edit_message_text(
-                f"<b>Transcripción actual:</b>\n\n<code>{_esc(snippet)}</code>\n\n"
-                "Texto corregido (escribir a continuación):",
+                _build_extract_preview(
+                    "Transcripción actual", pt["text"],
+                    footer="Texto corregido (escribir a continuación):",
+                ),
                 parse_mode="HTML",
             )
 
@@ -241,12 +242,11 @@ async def handle_callback(
         if pe:
             pe["awaiting_correction"] = True
             pe["msg_id"] = query.message.message_id
-            snippet = pe.get("text", "")[:500]
-            if len(pe.get("text", "")) > 500:
-                snippet += "..."
             await query.edit_message_text(
-                f"<b>Texto extraído:</b>\n\n<code>{_esc(snippet)}</code>\n\n"
-                "Texto corregido (escribir a continuación):",
+                _build_extract_preview(
+                    "Texto extraído", pe.get("text", ""),
+                    footer="Texto corregido (escribir a continuación):",
+                ),
                 parse_mode="HTML",
             )
 
@@ -345,7 +345,7 @@ def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> list[tu
 _PREVIEW_LIMIT = 3900  # margen bajo el límite de 4096 caracteres de un mensaje de Telegram
 
 
-def _build_extract_preview(label: str, text: str) -> str:
+def _build_extract_preview(label: str, text: str, footer: str = "") -> str:
     """Arma el preview HTML del texto extraído (OCR/Vision) para Telegram.
 
     Muestra el máximo posible dentro del límite de un mensaje (~4096 chars),
@@ -353,13 +353,17 @@ def _build_extract_preview(label: str, text: str) -> str:
     un toque. Solo trunca si el texto excede lo que entra en un mensaje; en ese
     caso avisa que la versión completa se guarda igual al confirmar (el texto
     íntegro vive en ``pending_transcript``).
+
+    ``footer`` es una instrucción opcional (ej. en modo corrección) que se
+    agrega después del bloque copiable y se cuenta dentro del presupuesto.
     """
     header = f"<b>{label}:</b>\n\n"
     note = "\n\n<i>[…texto truncado en el preview; se guarda completo al confirmar]</i>"
+    foot = f"\n\n{footer}" if footer else ""
     body = text
     truncated = False
     while True:
-        suffix = note if truncated else ""
+        suffix = (note if truncated else "") + foot
         rendered = f"{header}<code>{_esc(body)}</code>{suffix}"
         if len(rendered) <= _PREVIEW_LIMIT or not body:
             return rendered

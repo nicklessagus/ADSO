@@ -1049,6 +1049,28 @@ class TestExtractPreview:
         assert len(rendered) <= 3900
         assert "truncado" in rendered
 
+    def test_footer_shown_in_full_after_code_block(self) -> None:
+        """En modo corrección, el texto va entero y la instrucción como footer."""
+        from adso.handlers.callbacks import _build_extract_preview
+
+        rendered = _build_extract_preview(
+            "Transcripción actual", "a" * 1200,
+            footer="Texto corregido (escribir a continuación):",
+        )
+        assert "truncado" not in rendered
+        assert "a" * 1200 in rendered  # texto completo, no recortado a 500
+        assert rendered.rstrip().endswith("Texto corregido (escribir a continuación):")
+
+    def test_footer_survives_truncation(self) -> None:
+        from adso.handlers.callbacks import _build_extract_preview
+
+        rendered = _build_extract_preview(
+            "Texto extraído", "a" * 10_000,
+            footer="Texto corregido (escribir a continuación):",
+        )
+        assert len(rendered) <= 3900
+        assert rendered.rstrip().endswith("Texto corregido (escribir a continuación):")
+
 
 # ---------------------------------------------------------------------------
 # CB_DESCRIBE — usa el caption directo si la imagen ya trae descripción
