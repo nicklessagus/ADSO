@@ -998,3 +998,106 @@ class TestVisionCallback:
 
         update.callback_query.answer.assert_called_once()
         assert "pending_extraction" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_vision_propagates_caption_to_transcript(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        """El caption de la imagen (user_context) sobrevive al pasar por Vision."""
+        from adso.handlers.callbacks import _cb_vision
+
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+            "user_context": "diagrama del pipeline",
+        }
+
+        update = make_callback_query(CB_VISION)
+
+        with patch("adso.llm_client.describe_image_with_vision", new_callable=AsyncMock) as mock_vision:
+            mock_vision.return_value = "Descripción."
+            await _cb_vision(update, mock_context)
+
+        assert mock_context.user_data["pending_transcript"]["user_context"] == "diagrama del pipeline"
+
+
+# ---------------------------------------------------------------------------
+# Preview del texto extraído (OCR / Vision) — visible y copiable entero
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPreview:
+
+    def test_short_text_shown_in_full_and_escaped(self) -> None:
+        from adso.handlers.callbacks import _build_extract_preview
+
+        rendered = _build_extract_preview(
+            "Texto extraído (Gemini Vision)", "línea con <tag> y & símbolo"
+        )
+        assert "truncado" not in rendered
+        assert "&lt;tag&gt;" in rendered
+        assert "&amp;" in rendered
+        assert "<code>" in rendered  # copiable de un toque en Telegram
+
+    def test_long_text_truncated_within_telegram_limit(self) -> None:
+        from adso.handlers.callbacks import _build_extract_preview
+
+        rendered = _build_extract_preview("Texto extraído (OCR)", "a" * 10_000)
+        assert len(rendered) <= 3900
+        assert "truncado" in rendered
+
+
+# ---------------------------------------------------------------------------
+# CB_DESCRIBE — usa el caption directo si la imagen ya trae descripción
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeWithCaption:
+
+    @pytest.mark.asyncio
+    @AUTH
+    @patch("adso.handlers.capture._classify_and_preview", new_callable=AsyncMock)
+    async def test_describe_uses_caption_directly(
+        self, mock_classify, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+            "user_context": "boceto de la arquitectura",
+        }
+
+        update = make_callback_query(CB_DESCRIBE)
+        await handle_callback(update, mock_context)
+
+        mock_classify.assert_called_once()
+        args, kwargs = mock_classify.call_args
+        assert args[2] == "boceto de la arquitectura"
+        assert kwargs.get("preserve_body") is True
+        assert "pending_description" not in mock_context.user_data
+        assert "pending_fallback_pdf" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    @AUTH
+    async def test_describe_without_caption_prompts(
+        self, make_callback_query, mock_context, tmp_path,
+    ) -> None:
+        img_path = tmp_path / "foto.jpg"
+        img_path.write_bytes(b"\xff\xd8\xff")
+        mock_context.user_data["pending_fallback_pdf"] = {
+            "temp_path": str(img_path),
+            "original_filename": "foto.jpg",
+            "media_type": "image",
+            "user_context": None,
+        }
+
+        update = make_callback_query(CB_DESCRIBE)
+        await handle_callback(update, mock_context)
+
+        assert "pending_description" in mock_context.user_data
+        assert "pending_fallback_pdf" not in mock_context.user_data

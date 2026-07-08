@@ -257,10 +257,27 @@ async def handle_callback(
     elif data == CB_DESCRIBE:
         pdf_info = context.user_data.pop("pending_fallback_pdf", None)
         if pdf_info:
-            context.user_data["pending_description"] = pdf_info
-            await query.edit_message_text(
-                "Describir el contenido del archivo para clasificarlo:"
-            )
+            caption = pdf_info.get("user_context")
+            if caption:
+                # El usuario ya escribió una descripción al enviar la imagen
+                # (caption): usarla directamente en vez de volver a pedírsela.
+                from adso.handlers.capture import _classify_and_preview
+
+                await query.edit_message_text("Clasificando...")
+                await _classify_and_preview(
+                    update, context, caption,
+                    media_type=pdf_info.get("media_type", "image"),
+                    resource_file={
+                        "temp_path": pdf_info["temp_path"],
+                        "filename": pdf_info.get("original_filename", "imagen.jpg"),
+                    },
+                    preserve_body=True,
+                )
+            else:
+                context.user_data["pending_description"] = pdf_info
+                await query.edit_message_text(
+                    "Describir el contenido del archivo para clasificarlo:"
+                )
 
     elif data == CB_OCR:
         await _cb_ocr(update, context)
@@ -323,6 +340,31 @@ def _render_pdf_pages(tmp_path: "Path", n_pages: int, dpi: int = 200) -> list[tu
             pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
             result.append((pix.tobytes("png"), "image/png"))
     return result
+
+
+_PREVIEW_LIMIT = 3900  # margen bajo el límite de 4096 caracteres de un mensaje de Telegram
+
+
+def _build_extract_preview(label: str, text: str) -> str:
+    """Arma el preview HTML del texto extraído (OCR/Vision) para Telegram.
+
+    Muestra el máximo posible dentro del límite de un mensaje (~4096 chars),
+    dentro de un bloque ``<code>`` para que el usuario pueda copiarlo entero de
+    un toque. Solo trunca si el texto excede lo que entra en un mensaje; en ese
+    caso avisa que la versión completa se guarda igual al confirmar (el texto
+    íntegro vive en ``pending_transcript``).
+    """
+    header = f"<b>{label}:</b>\n\n"
+    note = "\n\n<i>[…texto truncado en el preview; se guarda completo al confirmar]</i>"
+    body = text
+    truncated = False
+    while True:
+        suffix = note if truncated else ""
+        rendered = f"{header}<code>{_esc(body)}</code>{suffix}"
+        if len(rendered) <= _PREVIEW_LIMIT or not body:
+            return rendered
+        truncated = True
+        body = body[: max(0, int(len(body) * 0.9))]
 
 
 async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -389,6 +431,7 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["pending_transcript"] = {
         "text": text,
         "media_type": media_type,
+        "user_context": pending.get("user_context"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),
@@ -396,9 +439,8 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     }
 
     from adso.keyboards import build_ocr_result_keyboard
-    snippet = text[:500] + ("..." if len(text) > 500 else "")
     sent = await query.edit_message_text(
-        f"<b>Texto extraído (OCR):</b>\n\n<code>{_esc(snippet)}</code>",
+        _build_extract_preview("Texto extraído (OCR)", text),
         reply_markup=build_ocr_result_keyboard(),
         parse_mode="HTML",
     )
@@ -428,6 +470,7 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "temp_path": transcript["resource_file"]["temp_path"],
                 "media_type": transcript.get("media_type", "image"),
                 "original_filename": transcript["resource_file"].get("filename", "imagen.jpg"),
+                "user_context": transcript.get("user_context"),
             }
             from_ocr = True
         else:
@@ -469,6 +512,7 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     context.user_data["pending_transcript"] = {
         "text": text,
         "media_type": media_type,
+        "user_context": pending.get("user_context"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),
@@ -476,10 +520,8 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     }
 
     from adso.keyboards import build_transcript_keyboard
-    snippet = text[:500] + ("..." if len(text) > 500 else "")
-    label = "Texto extraído (Gemini Vision)"
     sent = await query.edit_message_text(
-        f"<b>{label}:</b>\n\n<code>{_esc(snippet)}</code>",
+        _build_extract_preview("Texto extraído (Gemini Vision)", text),
         reply_markup=build_transcript_keyboard(),
         parse_mode="HTML",
     )

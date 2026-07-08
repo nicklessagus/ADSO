@@ -991,6 +991,7 @@ async def _cb_transcript_ok(
             update, context, text,
             media_type=media_type,
             resource_file=resource_file,
+            user_context=pt.get("user_context"),
             preserve_body=True,
         )
 
