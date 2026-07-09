@@ -384,6 +384,36 @@ class TestHandleTextModes:
         assert "pending_raw_content" in mock_context.user_data
 
 
+class TestHandleStatus:
+
+    @pytest.mark.asyncio
+    @patch("adso.security.ALLOWED_USER_IDS", {42})
+    async def test_status_responds_without_error(self, make_update, mock_context) -> None:
+        """Regresión: /status debe responder el estado, no un error.
+
+        _gather_vault_counts es un helper síncrono llamado via asyncio.to_thread;
+        no debe estar decorado con @authorized (que lo volvería un coroutine que
+        espera (update, context)) o el unpacking de la tupla falla y el handler
+        cae en el error genérico.
+        """
+        from adso.handlers.commands import handle_status
+
+        update = make_update(text="/status")
+        await handle_status(update, mock_context)
+        body = str(update.message.reply_text.call_args)
+        assert "Estado" in body
+        assert "Notas en vault" in body
+
+    def test_gather_vault_counts_returns_tuple(self, vault_path) -> None:
+        """El helper devuelve una tupla de 4 ints, no un coroutine."""
+        from adso.handlers.commands import _gather_vault_counts
+
+        result = _gather_vault_counts(vault_path)
+        assert isinstance(result, tuple)
+        assert len(result) == 4
+        assert all(isinstance(n, int) for n in result)
+
+
 class TestManageOperations:
 
     @pytest.mark.asyncio

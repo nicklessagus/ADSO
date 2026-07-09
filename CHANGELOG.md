@@ -5,6 +5,31 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.2.0] — 2026-07-08
+
+Bloque 1 de la auditoría 2026-07 (`docs/improvements-2026-07.md` §1): quick wins de pérdida de datos y drift, más un bugfix de regresión en `/status`.
+
+### Fixed
+- `/status` volvía a responder "Ocurrió un error inesperado": el helper síncrono `_gather_vault_counts` (extraído para correr en `asyncio.to_thread`) quedó decorado con `@authorized`, que lo convertía en un coroutine que espera `(update, context)` — el unpacking de la tupla fallaba y el handler caía en el error genérico. El decorador no corresponde en un helper interno; se removió. Regresión introducida en el bloque 1 (ítem 1.6)
+
+### Data safety
+- `GitBackup.flush()` se awaitea en `_post_shutdown`: una nota escrita dentro de la ventana de debounce ya no se pierde ante un `docker stop`
+- `VaultWatcher.on_moved`: inotify reporta renames como `FileMovedEvent`. Cubre Syncthing (temp+rename) y editores atómicos → re-embed inmediato. La escritura del propio bot (`os.replace`) ahora drena `bot_written_paths`, que antes crecía sin límite (leak) y volvía inefectivo el guard anti-doble-embed. Nuevo helper `mark_bot_written` con cap (512)
+- Los temporales de escritura atómica usan sufijo `.tmp` (no `.md`): defensa extra sobre `_is_hidden` y evita que `git add -A` los commitee
+
+### Performance (RPi4)
+- `/status` cuenta el vault en `asyncio.to_thread` + `parse_cached` (antes `rglob` bloqueante en el event loop)
+- `_get_existing_items` corre en `asyncio.to_thread` (antes síncrono en cada captura)
+
+### Removed
+- Código muerto: `_handle_capture`/`_handle_degraded` (~76 líneas), params fantasma de `build_capture_keyboard`, `_has_destination`, `vault_path` de `_cb_correct`
+- `docs/gemini-gem-instructions.md` — la gema de Gemini quedó fuera de uso; el desarrollo es 100% Claude
+
+### Docs
+- CLAUDE.md: reporte semanal y Tasks bidireccional marcados como diseño no implementado
+
+---
+
 ## [1.1.1] — 2026-07-05
 
 Bugfix release after a live incident (Telegram network timeouts mid-capture, 2026-07-05).

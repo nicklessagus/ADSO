@@ -95,7 +95,6 @@ def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
     return lines
 
 
-@authorized
 def _gather_vault_counts(vault_path: Path) -> tuple[int, int, int, int]:
     """Cuenta notas totales y del inbox (con desglose de pendientes).
 
