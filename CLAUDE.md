@@ -65,7 +65,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Componente | Tecnología |
 |---|---|
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
-| LLM primario | Gemini API — modelo `gemini-3.1-flash-lite` (estable desde may-2026; free tier jul-2026: ~1.000 RPD, 15 RPM, 250k TPM — verificar cap real en AI Studio) |
+| LLM primario | Gemini API — modelo `gemini-3.5-flash-lite` (línea flash-lite estable; free tier jul-2026: ~1.000-1.500 RPD, 15 RPM, 250k TPM — Google ya no publica el cap del free tier en la doc, verificarlo por proyecto en AI Studio) |
 | LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). `ANTHROPIC_API_KEY` se lee en config pero no hay código que la use aún |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |

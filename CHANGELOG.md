@@ -5,6 +5,13 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.2.1] — 2026-07-22
+
+### Changed
+- LLM primario migrado de `gemini-3.1-flash-lite` a `gemini-3.5-flash-lite`: sucesor directo en la misma familia flash-lite (mismo free tier holgado ~15 RPM, mismo soporte de schema-constrained JSON), más capaz. Swap 1:1 en `config.GEMINI_MODEL` — sin cambios de código en los call sites. Los tiers "flash" (`gemini-3.6-flash`, `gemini-3.5-flash`) se descartaron: más lentos, más caros en tokens y con free tier más ajustado (~10 RPM), overkill para clasificación estructurada. Nota de rate limits: Google ya no publica los números del free tier en la doc pública; se consultan por proyecto en AI Studio
+
+---
+
 ## [1.2.0] — 2026-07-08
 
 Bloque 1 de la auditoría 2026-07 (`docs/improvements-2026-07.md` §1): quick wins de pérdida de datos y drift, más un bugfix de regresión en `/status`.

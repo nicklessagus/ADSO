@@ -20,9 +20,10 @@ class ConfigError(Exception):
 
 # Modelo de generación de Gemini usado en todo el bot (clasificación, síntesis
 # de reportes, Gemini Vision). Fuente única de verdad: cambiar el modelo es una
-# sola línea. Estable desde may-2026; free tier jul-2026 ~1.000 RPD / 15 RPM /
-# 250k TPM (verificar cap real por proyecto en AI Studio).
-GEMINI_MODEL = "gemini-3.1-flash-lite"
+# sola línea. Línea flash-lite estable; free tier jul-2026 ~1.000-1.500 RPD /
+# 15 RPM / 250k TPM (verificar cap real por proyecto en AI Studio — Google ya no
+# publica los números del free tier en la doc, solo en el dashboard de AI Studio).
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 # ---------------------------------------------------------------------------
