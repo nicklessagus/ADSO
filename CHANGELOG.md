@@ -5,6 +5,13 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [Unreleased]
+
+### Changed
+- CodeQL bloquea en serio: se removió el `continue-on-error: true` del job `codeql` en `security.yml`. Estaba puesto porque el repo privado no tenía GitHub Advanced Security para subir SARIF; el repo es público desde 2026-07-25 y code scanning es gratis
+
+---
+
 ## [1.2.1] — 2026-07-22
 
 ### Changed
