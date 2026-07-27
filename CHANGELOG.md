@@ -7,8 +7,12 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+### Fixed
+- CI / Lint roto por drift de ruff: el job instalaba `ruff` sin pinear y la 0.16.0 (liberada ~2026-07-26) cambió las reglas default (isort etc.) → 312 hallazgos nuevos en un push que no tocó Python. Se pinea `ruff~=0.15.10` en el CI y en las dev deps de `pyproject.toml` (local y CI corren lo mismo). Adoptar la 0.16 con sus fixes queda como tarea aparte
+
 ### Changed
 - CodeQL bloquea en serio: se removió el `continue-on-error: true` del job `codeql` en `security.yml`. Estaba puesto porque el repo privado no tenía GitHub Advanced Security para subir SARIF; el repo es público desde 2026-07-25 y code scanning es gratis
+- Bump de GitHub Actions por deprecaciones: `actions/checkout` v4→v5 y `actions/setup-python` v5→v6 (Node 20 deprecado en los runners), `github/codeql-action` v3→v4 (v3 se deprecaba en diciembre 2026). `codecov-action@v4` y trufflehog (pineado a SHA) quedan como estaban
 
 ---
 

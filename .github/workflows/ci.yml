@@ -15,10 +15,10 @@ jobs:
         python-version: ["3.11"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -51,16 +51,18 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
 
       - name: Install linters
-        run: pip install ruff mypy types-PyYAML
+        # ruff pineado a la serie 0.15: la 0.16.0 cambió las reglas default
+        # (isort etc.) y rompe con ~312 hallazgos nuevos. Adoptarla es tarea aparte.
+        run: pip install "ruff~=0.15.10" mypy types-PyYAML
 
       - name: ruff check
         run: ruff check adso/ tests/
@@ -73,7 +75,7 @@ jobs:
     name: Docker build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build Docker image
         run: docker build --no-cache -t adso:ci .
