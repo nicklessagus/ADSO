@@ -290,6 +290,55 @@ def _clean_frontmatter(fm: dict) -> dict:
     return result
 
 
+def _build_post(body: str, clean_fm: dict) -> frontmatter.Post:
+    """Construye un `frontmatter.Post` asignando la metadata por atributo.
+
+    Nunca usar `frontmatter.Post(body, **fm)`: la firma real es
+    `Post(content, handler=None, **metadata)`, así que una clave `handler` en el
+    frontmatter (posible via fallback de Groq sin schema, prompt injection o
+    edición externa) se interpretaría como handler de serialización y
+    `frontmatter.dumps()` escribiría ese string como contenido total del archivo
+    —perdiendo body y frontmatter en silencio—, y una clave `content` lanzaría
+    `TypeError`. Asignar `post.metadata` deja ambas como campos normales.
+
+    Args:
+        body: Cuerpo markdown de la nota.
+        clean_fm: Frontmatter ya pasado por `_clean_frontmatter`.
+
+    Returns:
+        El Post listo para `frontmatter.dumps()`.
+    """
+    post = frontmatter.Post(body)
+    post.metadata = clean_fm
+    return post
+
+
+def load_post(raw: str) -> frontmatter.Post:
+    """Parsea un `.md` con frontmatter tolerando claves `handler`/`content`.
+
+    `frontmatter.loads()` hace `Post(content, handler, **metadata)` internamente,
+    así que una nota editada externamente cuyo YAML tenga una clave `handler` o
+    `content` lo hace lanzar `TypeError` y rompe cualquier scan que la toque.
+    Este helper cae a `frontmatter.parse()` (que no tiene el choque de kwargs) y
+    reconstruye el Post con `_build_post`.
+
+    Args:
+        raw: Contenido completo del archivo `.md`.
+
+    Returns:
+        El Post parseado.
+
+    Raises:
+        Lo mismo que `frontmatter.loads` para YAML inválido (`yaml.YAMLError`).
+    """
+    try:
+        return frontmatter.loads(raw)
+    except TypeError:
+        handler = frontmatter.detect_format(raw, frontmatter.handlers)
+        metadata, content = frontmatter.parse(raw, handler=handler)
+        return _build_post(content, dict(metadata))
+
+
 # ---------------------------------------------------------------------------
 # Funciones públicas
 # ---------------------------------------------------------------------------
@@ -360,7 +409,7 @@ async def create_note(
 
     # Construir contenido con python-frontmatter
     clean_fm = _clean_frontmatter(fm)
-    post = frontmatter.Post(body, **clean_fm)
+    post = _build_post(body, clean_fm)
     content = frontmatter.dumps(post)
 
     # Escribir archivo (atómico: temp + fsync + replace)
@@ -387,7 +436,7 @@ async def read_note(note_path: Path) -> NoteData:
         raise FileNotFoundError(f"Nota no encontrada: {note_path}")
 
     raw = await asyncio.to_thread(note_path.read_text, "utf-8")
-    post = frontmatter.loads(raw)
+    post = load_post(raw)
 
     if not post.metadata:
         raise ValueError(f"Sin frontmatter YAML válido: {note_path}")
@@ -420,7 +469,7 @@ async def append_to_note(
     note.frontmatter["date_modified"] = _now_iso()
 
     clean_fm = _clean_frontmatter(note.frontmatter)
-    post = frontmatter.Post(new_body, **clean_fm)
+    post = _build_post(new_body, clean_fm)
     output = frontmatter.dumps(post)
 
     await asyncio.to_thread(_atomic_write_sync, note_path, output)
@@ -492,7 +541,7 @@ async def set_property(
         fm["date_modified"] = _now_iso()
 
     clean_fm = _clean_frontmatter(fm)
-    post = frontmatter.Post(note.body, **clean_fm)
+    post = _build_post(note.body, clean_fm)
     output = frontmatter.dumps(post)
 
     await asyncio.to_thread(_atomic_write_sync, note_path, output)
@@ -590,9 +639,9 @@ async def update_wikilinks(
 
     if new_content != raw:
         # Actualizar date_modified en frontmatter
-        post = frontmatter.loads(new_content)
+        post = load_post(new_content)
         clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": _now_iso()})
-        final_post = frontmatter.Post(post.content, **clean_meta)
+        final_post = _build_post(post.content, clean_meta)
         output = frontmatter.dumps(final_post)
         await asyncio.to_thread(_atomic_write_sync, note_path, output)
         logger.info("Wikilinks actualizados en: %s", note_path)

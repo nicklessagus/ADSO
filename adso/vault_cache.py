@@ -21,9 +21,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
-import frontmatter
 
-from adso.vault_writer import NoteData
+from adso.vault_writer import NoteData, load_post
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ def parse_cached(path: Path) -> Optional[NoteData]:
         logger.debug("No se pudo leer nota %s: %s", path, exc)
         return None
     try:
-        post = frontmatter.loads(raw)
+        post = load_post(raw)
     except Exception as exc:
         # YAML corrupto (típicamente edición externa a mano). La nota queda
         # invisible a los scans — hay que poder diagnosticarlo, no silenciarlo.

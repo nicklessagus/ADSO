@@ -16,7 +16,10 @@ Referencia: docs/security.md (JSON schema)
 
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Validation constants
@@ -39,6 +42,30 @@ STATUS_ALIASES: dict[str, str] = {
 }
 VALID_PRIORITY = {"low", "medium", "high"}
 VALID_READ_STATUS = {"read", "unread"}
+# Claves legítimas del frontmatter según docs/frontmatter-schema.md. Cualquier
+# otra clave que devuelva el LLM se descarta en `_validate_capture_payload`.
+# Motivo de seguridad además de higiene: claves como `handler` o `content`
+# rompían la escritura del archivo cuando se pasaban como kwargs a
+# `frontmatter.Post` (ver `_build_post` en vault_writer.py); el whitelisteo cierra
+# el vector en origen, tanto para el fallback de Groq (sin schema constrained)
+# como para una prompt injection en un PDF/OCR.
+ALLOWED_FRONTMATTER_KEYS = frozenset({
+    # Base
+    "title", "date_created", "date_modified", "type", "tags", "source",
+    "media_type", "status", "source_file", "source_url", "read_status",
+    # Destino
+    "project", "section", "area",
+    # Contenido / relaciones
+    "summary", "related", "priority", "relevance", "context",
+    # Tareas
+    "due_date", "scheduled",
+    # Académicos (pipeline de extracción + LLM)
+    "authors", "year", "journal", "doi", "keywords",
+    "contribution", "methods", "dataset", "conclusions",
+    # Índices de proyecto/área (auto-generados, no del LLM, pero legítimos)
+    "description", "sections",
+})
+
 VALID_OPERATIONS = {
     "create_project", "create_area", "archive_project", "unarchive_project",
     "delete_project", "delete_area", "rename_project", "rename_area",
@@ -251,6 +278,16 @@ def _validate_capture_payload(payload: dict) -> None:
     fm = payload.get("frontmatter")
     if not isinstance(fm, dict):
         raise LLMResponseError("capture.payload.frontmatter missing or not an object")
+
+    # Whitelist de claves: cualquier clave fuera del schema documentado se
+    # descarta. Sin esto, el fallback de Groq (sin schema constrained) o una
+    # prompt injection en un PDF/OCR podían meter claves arbitrarias en el
+    # frontmatter que terminaban serializadas en la nota — y `handler`/`content`
+    # llegaban a corromper el archivo entero al escribirlo.
+    unknown = [k for k in fm if k not in ALLOWED_FRONTMATTER_KEYS]
+    for key in unknown:
+        logger.warning("Clave de frontmatter fuera del schema, descartada: %r", key)
+        del fm[key]
 
     title = fm.get("title", "")
     # Strip markdown heading markers and label prefixes (e.g. "# Tarea: foo" → "foo")

@@ -148,8 +148,12 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.info("Reclasificación: flujo iniciado durante classify(), posponiendo.")
                 return
 
-            await delete_note(ref.path)
+            # Crear primero, borrar después (mismo orden que _cb_confirm): si
+            # create_note falla, la nota original sigue en el Inbox y el próximo
+            # ciclo reintenta. Con el orden inverso el contenido solo vivía en
+            # memoria y se perdía. Una colisión de nombre la resuelve _unique_path.
             new_path = await create_note(new_fm, body, vault_path)
+            await delete_note(ref.path)
 
             git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
             if git_backup:

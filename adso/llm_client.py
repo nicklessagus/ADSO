@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Schema, validación y sanitización viven en llm_schema.py. Se re-exportan aquí
 # para no romper los imports existentes (`from adso.llm_client import ...`).
 from adso.llm_schema import (  # noqa: E402
+    ALLOWED_FRONTMATTER_KEYS,
     INJECTION_PATTERNS,
     STATUS_ALIASES,
     VALID_MODES,
@@ -43,6 +44,7 @@ from adso.llm_schema import (  # noqa: E402
 # Símbolos re-exportados desde llm_schema por compatibilidad. Declararlos en
 # __all__ marca el re-export como intencional (evita F401 en ruff).
 __all__ = [
+    "ALLOWED_FRONTMATTER_KEYS",
     "INJECTION_PATTERNS",
     "STATUS_ALIASES",
     "VALID_MODES",

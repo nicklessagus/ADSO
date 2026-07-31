@@ -163,3 +163,72 @@ class TestCleanFrontmatter:
         fm = {"title": "Test", "tags": []}
         clean = _clean_frontmatter(fm)
         assert clean["tags"] == []
+
+
+class TestDangerousFrontmatterKeys:
+    """A1 — `handler`/`content` en el frontmatter no deben corromper el archivo.
+
+    `frontmatter.Post(body, **fm)` interpretaba `handler` como handler de
+    serialización (el archivo quedaba con ese string como contenido total) y
+    `content` lanzaba TypeError. `_build_post` asigna `post.metadata` en su lugar.
+    """
+
+    @pytest.mark.asyncio
+    async def test_handler_key_preserves_body_and_frontmatter(self, vault: Path) -> None:
+        fm = {
+            "title": "Nota peligrosa",
+            "type": "reference",
+            "status": "active",
+            "project": "tesis",
+            "handler": "boom",
+        }
+        path = await create_note(fm, "Body importante.", vault)
+
+        raw = path.read_text(encoding="utf-8")
+        assert raw.startswith("---")
+        assert raw != "boom"
+
+        note = await read_note(path)
+        assert note.body.strip() == "Body importante."
+        assert note.frontmatter["title"] == "Nota peligrosa"
+        assert note.frontmatter["handler"] == "boom"
+
+    @pytest.mark.asyncio
+    async def test_content_key_does_not_raise(self, vault: Path) -> None:
+        fm = {
+            "title": "Nota con content",
+            "type": "reference",
+            "status": "active",
+            "project": "tesis",
+            "content": "otra cosa",
+        }
+        path = await create_note(fm, "Body real.", vault)
+
+        note = await read_note(path)
+        assert note.body.strip() == "Body real."
+        assert note.frontmatter["content"] == "otra cosa"
+
+    @pytest.mark.asyncio
+    async def test_append_and_set_property_survive_dangerous_keys(self, vault: Path) -> None:
+        """Notas editadas externamente con esas claves siguen siendo editables."""
+        from adso.vault_writer import append_to_note, set_property
+
+        fm = {
+            "title": "Editada afuera",
+            "type": "reference",
+            "status": "active",
+            "project": "tesis",
+            "handler": "boom",
+            "content": "otra cosa",
+        }
+        path = await create_note(fm, "Body original.", vault)
+
+        await append_to_note(path, "Agregado.")
+        note = await read_note(path)
+        assert "Body original." in note.body
+        assert "Agregado." in note.body
+
+        await set_property(path, "status", "pending-classification")
+        note = await read_note(path)
+        assert note.frontmatter["status"] == "pending-classification"
+        assert "Body original." in note.body

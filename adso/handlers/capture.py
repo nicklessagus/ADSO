@@ -674,9 +674,16 @@ async def _push_task_safe(
 
 
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
-    """Confirma y escribe la nota al vault."""
-    pending = context.user_data.pop("pending_note", None)
-    inbox_path_str: Optional[str] = context.user_data.pop("clasificar_inbox_path", None)
+    """Confirma y escribe la nota al vault.
+
+    El estado pendiente (``pending_note`` / ``clasificar_inbox_path``) se descarta
+    recién después de que ``create_note`` retorne. Si la escritura falla (disco
+    lleno, I/O de la SD), el estado sigue en ``user_data`` y un segundo
+    ``[Confirmar]`` reintenta — sin esto se perdía el texto de audio, OCR o
+    Vision, que no existe en ningún otro lado. Regla de oro: sin pérdida de datos.
+    """
+    pending = context.user_data.get("pending_note")
+    inbox_path_str: Optional[str] = context.user_data.get("clasificar_inbox_path")
 
     if not pending:
         await query.edit_message_text("No hay nota pendiente.")
@@ -703,6 +710,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         body = body.rstrip() + "\n\n## Ver también\n\n" + "\n".join(link_lines)
 
     resource_file = pending.get("_resource_file")
+    resource_temp: Optional[Path] = None
     if resource_file:
         try:
             res_path = await save_resource(
@@ -712,7 +720,10 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             )
             body += f"\n\n![[{res_path.name}]]"
             fm.setdefault("source_file", f"[[{res_path.name}]]")
-            Path(resource_file["temp_path"]).unlink(missing_ok=True)
+            # El temporal se borra recién tras escribir la nota: si create_note
+            # falla, el reintento vuelve a necesitarlo (save_resource dedup por
+            # hash, así que no duplica el archivo en 03-Resources/).
+            resource_temp = Path(resource_file["temp_path"])
         except Exception as e:
             logger.warning("Error guardando recurso: %s", e)
 
@@ -723,6 +734,14 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
         fm["status"] = _STATUS_CONFIRMED.get(fm.get("type", ""), "active")
 
     path = await create_note(fm, body, vault_path)
+
+    # Nota escrita: recién ahora se descarta el estado pendiente. Todo lo que
+    # sigue es post-procesamiento (Tasks, backup, embeddings) y no debe poder
+    # perder la captura.
+    context.user_data.pop("pending_note", None)
+    context.user_data.pop("clasificar_inbox_path", None)
+    if resource_temp is not None:
+        resource_temp.unlink(missing_ok=True)
 
     if fm.get("type") == "task":
         tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")

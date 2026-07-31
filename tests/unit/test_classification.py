@@ -392,3 +392,77 @@ class TestToKebab:
         from adso.llm_client import _TYPE_TAGS
         for bad_tag in ["tarea", "task", "nota", "note", "idea", "paper"]:
             assert bad_tag in _TYPE_TAGS
+
+
+class TestFrontmatterKeyWhitelist:
+    """A1 — claves fuera del schema se descartan antes de llegar al vault.
+
+    `handler` y `content` son las peligrosas (corrompían el archivo al escribirlo),
+    pero el whitelisteo aplica a cualquier clave desconocida.
+    """
+
+    def test_handler_and_content_keys_dropped(self) -> None:
+        result = validate_llm_response(_capture(handler="boom", content="x"))
+        fm = result["payload"]["frontmatter"]
+        assert "handler" not in fm
+        assert "content" not in fm
+
+    def test_arbitrary_key_dropped(self) -> None:
+        result = validate_llm_response(_capture(**{"evil-key": "x"}))
+        assert "evil-key" not in result["payload"]["frontmatter"]
+
+    def test_academic_fields_preserved(self) -> None:
+        result = validate_llm_response(_capture(
+            authors=["Smith, J."],
+            year=2024,
+            doi="10.1234/abc",
+            keywords=["ml"],
+            journal="Nature",
+            read_status="unread",
+            methods=["transformer"],
+            dataset=["ImageNet"],
+            contribution="nuevo modelo",
+            conclusions="funciona",
+            relevance="para el cap 3",
+            context="comparar",
+            summary="resumen",
+            source_url="https://arxiv.org/abs/2301.12345",
+            source_file="[[paper.pdf]]",
+            related=["[[otra]]"],
+        ))
+        fm = result["payload"]["frontmatter"]
+        for key in (
+            "authors", "year", "doi", "keywords", "journal", "read_status",
+            "methods", "dataset", "contribution", "conclusions", "relevance",
+            "context", "summary", "source_url", "source_file", "related",
+        ):
+            assert key in fm, key
+
+    def test_destination_and_task_fields_preserved(self) -> None:
+        result = validate_llm_response({
+            "mode": "capture",
+            "payload": {
+                "frontmatter": {
+                    "title": "Hacer algo",
+                    "type": "task",
+                    "status": "pending",
+                    "priority": "high",
+                    "project": "tesis",
+                    "section": "experimentos",
+                    "area": "investigacion",
+                    "due_date": "2026-08-01",
+                    "scheduled": "2026-08-01T10:00:00",
+                    "tags": ["escritura"],
+                },
+                "body": "b",
+            },
+        })
+        fm = result["payload"]["frontmatter"]
+        for key in ("priority", "project", "section", "area", "due_date", "scheduled"):
+            assert key in fm, key
+
+    def test_all_schema_keys_are_whitelisted(self) -> None:
+        from adso.llm_schema import ALLOWED_FRONTMATTER_KEYS
+        assert "title" in ALLOWED_FRONTMATTER_KEYS
+        assert "handler" not in ALLOWED_FRONTMATTER_KEYS
+        assert "content" not in ALLOWED_FRONTMATTER_KEYS
