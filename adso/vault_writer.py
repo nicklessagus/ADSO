@@ -134,12 +134,18 @@ def _parse_date_value(value: str) -> "date | datetime | str":
     Devuelve date para fechas sin hora (YYYY-MM-DD) y datetime para fechas con hora.
     Los objetos nativos son serializados por PyYAML como timestamps YAML sin comillas,
     lo que permite que Obsidian los reconozca como tipo Date & time en Properties.
-    Devuelve el valor original si no coincide con ningún patrón.
+    Devuelve el valor original si no coincide con ningún patrón o si la fecha es
+    sintácticamente válida pero imposible (`2026-02-30`): el regex solo valida
+    forma y `fromisoformat` lanzaría `ValueError` al escribir la nota, es decir
+    después de que el usuario ya confirmó — pérdida de la captura.
     """
-    if _DATE_ONLY_RE.match(value):
-        return date.fromisoformat(value)
-    if _DATETIME_RE.match(value):
-        return datetime.fromisoformat(value)
+    try:
+        if _DATE_ONLY_RE.match(value):
+            return date.fromisoformat(value)
+        if _DATETIME_RE.match(value):
+            return datetime.fromisoformat(value)
+    except ValueError:
+        logger.warning("Fecha inválida en el frontmatter, se deja como string: %r", value)
     return value
 
 
@@ -912,6 +918,11 @@ class GitBackup:
         self._pending_titles: list[str] = []
         self._timer: Optional[asyncio.TimerHandle] = None
         self._lock = asyncio.Lock()
+        # Task (o task del caller) que está corriendo `_do_backup` ahora mismo.
+        # Sirve para dos cosas: que `flush()` espere un backup en vuelo antes de
+        # decidir que no hay nada pendiente, y que dos `_do_backup` nunca corran
+        # git en paralelo (colisión de `index.lock`).
+        self._running: Optional[asyncio.Task] = None
         self._bot = bot
         self._chat_id = chat_id
         self._debug = debug
@@ -941,6 +952,26 @@ class GitBackup:
 
             self._timer = loop.call_later(self.debounce_seconds, _schedule_backup)
 
+    async def _await_running(self) -> None:
+        """Espera a que termine el `_do_backup` en vuelo, si hay alguno.
+
+        No se toma ``self._lock``: el backup en vuelo lo necesita para drenar los
+        títulos y esperar acá con el lock tomado sería un deadlock. La referencia
+        se lee y se espera sin lock — sólo el event loop la muta.
+        """
+        current = asyncio.current_task()
+        while True:
+            running = self._running
+            if running is None or running is current:
+                return
+            try:
+                await asyncio.shield(running)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 — el backup ya logueó el error
+                logger.debug("Backup en vuelo terminó con error: %s", e)
+                return
+
     async def flush(self) -> None:
         """Fuerza el backup pendiente de inmediato, cancelando el debounce.
 
@@ -949,16 +980,27 @@ class GitBackup:
         quedaría sin commit/push hasta la *próxima* escritura — potencial pérdida
         de datos si el contenedor no vuelve a arrancar. Regla de oro: sin pérdida
         de datos.
+
+        Si el debounce ya disparó y hay un backup en vuelo, espera a que termine
+        antes de evaluar ``_pending_titles``: de otro modo encontraría la cola
+        vacía (ya drenada) y el shutdown continuaría sin que el push se haya
+        completado.
         """
         async with self._lock:
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
+
+        await self._await_running()
+
+        async with self._lock:
             if not self._pending_titles:
                 return
         # _do_backup vuelve a tomar el lock y drena _pending_titles; ejecutarlo
-        # fuera del `async with` evita el deadlock por lock no reentrante.
-        await self._do_backup()
+        # fuera del `async with` evita el deadlock por lock no reentrante. Se
+        # lanza como task propia (y no inline) para que `self._running` apunte a
+        # una task dedicada al backup y no a la del caller de `flush()`.
+        await asyncio.ensure_future(self._do_backup())
 
     @staticmethod
     def _build_message(titles: list[str]) -> str:
@@ -1005,7 +1047,27 @@ class GitBackup:
         return ("pushed", "")
 
     async def _do_backup(self) -> None:
-        """Ejecuta git add + commit + push (parte bloqueante en un thread)."""
+        """Ejecuta git add + commit + push (parte bloqueante en un thread).
+
+        Se serializa con cualquier otro `_do_backup` en vuelo: dos ejecuciones
+        concurrentes colisionarían en `index.lock` y el batch drenado se perdería
+        del mensaje de commit.
+
+        Ante un fallo de `add`/`commit` (disco lleno, `index.lock` de un git
+        manual, repo corrupto) los títulos drenados se re-encolan y se notifica al
+        usuario — sin eso el vault podía quedar sin backup indefinidamente y en
+        silencio.
+        """
+        await self._await_running()
+        self._running = asyncio.current_task()
+        try:
+            await self._run_backup_once()
+        finally:
+            if self._running is asyncio.current_task():
+                self._running = None
+
+    async def _run_backup_once(self) -> None:
+        """Cuerpo del backup, ya serializado por `_do_backup`."""
         async with self._lock:
             self._timer = None
             if not self._pending_titles:
@@ -1019,6 +1081,22 @@ class GitBackup:
             status, detail = await asyncio.to_thread(self._sync_backup, message)
         except Exception as e:  # noqa: BLE001
             logger.error("Error en git backup: %s", e)
+            # Re-encolar al frente: el próximo backup debe incluir estas notas.
+            async with self._lock:
+                self._pending_titles[:0] = titles
+            if self._bot and self._chat_id:
+                try:
+                    await self._bot.send_message(
+                        chat_id=self._chat_id,
+                        text=(
+                            "⚠️ Git backup falló — vault seguro en disco, "
+                            "se reintenta en la próxima escritura.\n"
+                            f"<code>{html.escape(str(e))}</code>"
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception as send_err:  # noqa: BLE001
+                    logger.warning("No se pudo notificar el fallo de backup: %s", send_err)
             return
 
         if status == "pushed":

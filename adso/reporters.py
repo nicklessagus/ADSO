@@ -50,6 +50,24 @@ _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2, None: 3, "": 3}
 # ---------------------------------------------------------------------------
 
 
+def _to_naive(dt: Optional[datetime]) -> Optional[datetime]:
+    """Devuelve el datetime sin tzinfo para poder compararlo con otros naive.
+
+    Las notas que escribe ADSO usan fechas naive, pero un plugin de Obsidian (o
+    una edición a mano) puede dejar un offset. Mezclar aware y naive en una
+    comparación lanza `TypeError` y tira abajo el reporte entero.
+
+    Args:
+        dt: Datetime aware o naive, o None.
+
+    Returns:
+        El mismo datetime sin tzinfo, o None si la entrada era None.
+    """
+    if dt is not None and dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
 def _parse_fm_date(val) -> Optional[datetime]:
     """Parsea un valor de fecha del frontmatter a datetime.
 
@@ -117,7 +135,10 @@ def _report_header(title: str, today: Optional[date] = None, full: bool = False)
 def _priority_key(note: NoteData) -> int:
     """Clave de ordenamiento por prioridad (high < medium < low < null)."""
     p = note.frontmatter.get("priority")
-    return _PRIORITY_ORDER.get(p, 3)
+    if p is not None and not isinstance(p, str):
+        # Valor no-string (o no hasheable) de una nota editada a mano.
+        p = str(p)
+    return _PRIORITY_ORDER.get(p.lower() if isinstance(p, str) else p, 3)
 
 
 async def _llm_synthesis(report_summary: str) -> Optional[str]:
@@ -281,7 +302,7 @@ async def scope_report(
     # Última actividad
     last_modified: Optional[datetime] = None
     for note in all_notes:
-        dt = _parse_fm_date(note.frontmatter.get("date_modified"))
+        dt = _to_naive(_parse_fm_date(note.frontmatter.get("date_modified")))
         if dt and (last_modified is None or dt > last_modified):
             last_modified = dt
 
@@ -321,7 +342,7 @@ async def scope_report(
     active_refs = [n for n in references if n.frontmatter.get("status") != "pending-classification"]
     lines.append(f"## Referencias activas ({len(active_refs)})\n")
     if active_refs:
-        for n in sorted(active_refs, key=lambda x: x.frontmatter.get("title", "") or ""):
+        for n in sorted(active_refs, key=lambda x: str(x.frontmatter.get("title") or "")):
             lines.append(_render(vault_path, n))
     else:
         lines.append("_Sin referencias activas._")
@@ -354,7 +375,7 @@ async def scope_report(
         if group:
             has_ideas = True
             lines.append(f"### {st.capitalize()} ({len(group)})\n")
-            for n in sorted(group, key=lambda x: x.frontmatter.get("title", "") or ""):
+            for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
                 lines.append(_render(vault_path, n))
             lines.append("")
     if not has_ideas:
@@ -448,7 +469,7 @@ async def ideas_report(
         if not group:
             continue
         lines.append(f"## {st.capitalize()} ({len(group)})\n")
-        for n in sorted(group, key=lambda x: x.frontmatter.get("title", "") or ""):
+        for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
             proj = n.frontmatter.get("project") or ""
             ar = n.frontmatter.get("area") or ""
             loc = proj or ar
@@ -550,11 +571,11 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         if dt.tzinfo is not None:
             dt = dt.replace(tzinfo=None)
 
-        proj = fm.get("project")
+        proj = str(fm.get("project") or "")
         if proj:
             if proj not in project_activity or dt > project_activity[proj]:
                 project_activity[proj] = dt
-        ar = fm.get("area")
+        ar = str(fm.get("area") or "")
         if ar:
             if ar not in area_activity or dt > area_activity[ar]:
                 area_activity[ar] = dt
@@ -581,7 +602,9 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
             continue
         if str(fm.get("status", "")).lower() != "raw":
             continue
-        scope_key = fm.get("project") or fm.get("area") or "Sin scope"
+        # str(): una nota editada a mano puede traer `project: 2024` (int) y
+        # `sorted()` sobre keys mixtas str/int lanza TypeError.
+        scope_key = str(fm.get("project") or fm.get("area") or "Sin scope")
         raw_ideas_by_scope.setdefault(scope_key, []).append(note)
 
     # Síntesis LLM
@@ -652,7 +675,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         for scope_key in sorted(raw_ideas_by_scope):
             group = raw_ideas_by_scope[scope_key]
             lines.append(f"### {scope_key} ({len(group)})\n")
-            for n in sorted(group, key=lambda x: x.frontmatter.get("title", "") or ""):
+            for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
                 lines.append(_render(vault_path, n))
             lines.append("")
     else:
@@ -735,7 +758,9 @@ async def reading_queue(
     groups: dict[str, list[NoteData]] = {}
     for note in all_notes:
         fm = note.frontmatter
-        key = fm.get("project") or fm.get("area") or "Sin scope"
+        # str() por el mismo motivo que en `health_report`: keys mixtas
+        # str/int rompen el `sorted(groups)` de abajo.
+        key = str(fm.get("project") or fm.get("area") or "Sin scope")
         groups.setdefault(key, []).append(note)
 
     for scope_key in sorted(groups):

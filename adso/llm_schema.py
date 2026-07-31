@@ -273,6 +273,44 @@ def _to_kebab(tag: str) -> str:
     return tag.strip("-")
 
 
+def _clean_title(raw: object) -> str:
+    """Coacciona el título a string y le quita headings y prefijos de label.
+
+    Aplica `_TITLE_CLEANUP_RE` en bucle porque ambas alternativas del patrón
+    están ancladas en `^`: `"## Tarea: X"` necesita dos pasadas (heading y
+    después label) y `re.sub` no reintenta sobre el resultado.
+
+    Args:
+        raw: Valor crudo del LLM (puede ser `None` o un tipo inesperado).
+
+    Returns:
+        El título limpio, o `""` si no había contenido utilizable.
+    """
+    title = str(raw or "").strip()
+    while True:
+        cleaned = _TITLE_CLEANUP_RE.sub("", title).strip()
+        if cleaned == title:
+            return cleaned
+        title = cleaned
+
+
+def _norm_enum(value: object) -> str:
+    """Normaliza un valor de enum del LLM a minúsculas sin espacios sobrantes.
+
+    Acepta cualquier tipo (incluidos dict/list no hasheables que el fallback de
+    Groq puede devolver) sin lanzar: se stringifica antes de normalizar.
+
+    Args:
+        value: Valor crudo del LLM.
+
+    Returns:
+        El valor normalizado; `""` si era `None`.
+    """
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def _validate_capture_payload(payload: dict) -> None:
     """Validate the capture mode payload."""
     fm = payload.get("frontmatter")
@@ -289,23 +327,30 @@ def _validate_capture_payload(payload: dict) -> None:
         logger.warning("Clave de frontmatter fuera del schema, descartada: %r", key)
         del fm[key]
 
-    title = fm.get("title", "")
-    # Strip markdown heading markers and label prefixes (e.g. "# Tarea: foo" → "foo")
-    title = _TITLE_CLEANUP_RE.sub("", title).strip()
+    # El título puede venir null o no-string (Groq sin schema constrained);
+    # coaccionar antes de limpiarlo evita un TypeError en el `re.sub`.
+    title = _clean_title(fm.get("title"))
     if not title or title == "Sin título":
         fm["title"] = ""  # will be filled with content fallback in classify()
     else:
         fm["title"] = title
 
-    note_type = fm.get("type")
+    # Enums: normalizar case/espacios antes de validar. Groq devuelve
+    # habitualmente "Task"/"Pending"/"High" y una respuesta semánticamente
+    # correcta no debe tirar todo el fallback a modo degradado.
+    note_type = _norm_enum(fm.get("type"))
     if note_type not in VALID_TYPES:
-        raise LLMResponseError(f"Invalid type: {note_type!r}")
+        raise LLMResponseError(f"Invalid type: {fm.get('type')!r}")
+    fm["type"] = note_type
 
     status = fm.get("status")
     if status is not None:
+        norm_status = _norm_enum(status)
         valid = VALID_STATUS.get(note_type, set())
-        if valid and status not in valid:
-            normalized = STATUS_ALIASES.get(status)
+        if not valid or norm_status in valid:
+            fm["status"] = norm_status
+        else:
+            normalized = STATUS_ALIASES.get(norm_status)
             if normalized and normalized in valid:
                 fm["status"] = normalized
             else:
@@ -314,17 +359,23 @@ def _validate_capture_payload(payload: dict) -> None:
                 )
 
     priority = fm.get("priority")
-    if priority is not None and priority not in VALID_PRIORITY:
-        raise LLMResponseError(f"Invalid priority: {priority!r}")
+    if priority is not None:
+        norm_priority = _norm_enum(priority)
+        if norm_priority not in VALID_PRIORITY:
+            raise LLMResponseError(f"Invalid priority: {priority!r}")
+        fm["priority"] = norm_priority
 
     # Normalize tags to kebab-case; remove type-duplicating and temporal tags
     tags = fm.get("tags")
+    if isinstance(tags, str):
+        # Groq (sin schema) devuelve a veces "python, ml" como string suelto.
+        tags = tags.split(",")
     if isinstance(tags, list):
         fm["tags"] = [
             t for t in (_to_kebab(str(tag)) for tag in tags)
             if t and t not in _TYPE_TAGS and t not in _TEMPORAL_TAGS
         ]
-    elif tags is None:
+    else:
         fm["tags"] = []
 
     # Sanitize due_date and scheduled: must be valid ISO 8601, else discard
@@ -365,8 +416,11 @@ def _validate_capture_payload(payload: dict) -> None:
         rs = str(read_status).strip().lower()
         fm["read_status"] = rs if rs in VALID_READ_STATUS else None
 
-    if "body" not in payload:
-        payload["body"] = ""  # small models occasionally omit the body
+    # `body` puede venir ausente (modelos chicos lo omiten) o explícitamente
+    # null — el schema de Gemini lo permite (`nullable: True`). Ambos casos se
+    # normalizan a "" para que el preview no reviente con AttributeError.
+    if not payload.get("body"):
+        payload["body"] = ""
 
 
 def _validate_manage_payload(payload: dict) -> None:

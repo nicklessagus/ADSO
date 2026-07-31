@@ -84,11 +84,14 @@ def _parse_note_safe(path: Path) -> Optional[NoteData]:
 
 def _note_ref_from_data(note: NoteData, snippet: Optional[str] = None) -> NoteRef:
     """Construye un NoteRef desde un NoteData."""
+    # Los valores se coaccionan a str: una nota editada a mano puede traer
+    # `title: 2024` (int) o `status:` vacío (None) y NoteRef declara str.
+    fm = note.frontmatter
     return NoteRef(
         path=note.path,
-        title=note.frontmatter.get("title", note.path.stem),
-        note_type=note.frontmatter.get("type", ""),
-        status=note.frontmatter.get("status", ""),
+        title=str(fm.get("title") or note.path.stem),
+        note_type=str(fm.get("type") or ""),
+        status=str(fm.get("status") or ""),
         snippet=snippet,
     )
 
@@ -110,9 +113,12 @@ def _extract_tags_from_note(note: NoteData) -> set[str]:
 
     # Tags del frontmatter
     fm_tags = note.frontmatter.get("tags", [])
+    if isinstance(fm_tags, str):
+        # Nota editada a mano con `tags: foo, bar` (string en vez de lista).
+        fm_tags = [p for p in fm_tags.split(",") if p.strip()]
     if isinstance(fm_tags, list):
         for t in fm_tags:
-            tags.add(str(t).lower().lstrip("#"))
+            tags.add(str(t).strip().lower().lstrip("#"))
 
     # Tags inline del body
     clean_body = _strip_code_blocks(note.body)
@@ -226,16 +232,16 @@ async def search(
             skip = False
 
             if "type" in tokens:
-                if fm.get("type", "").lower() not in tokens["type"]:
+                if str(fm.get("type") or "").lower() not in tokens["type"]:
                     skip = True
             if "status" in tokens:
-                if fm.get("status", "").lower() not in tokens["status"]:
+                if str(fm.get("status") or "").lower() not in tokens["status"]:
                     skip = True
             if "project" in tokens:
-                if fm.get("project", "").lower() not in tokens["project"]:
+                if str(fm.get("project") or "").lower() not in tokens["project"]:
                     skip = True
             if "area" in tokens:
-                if fm.get("area", "").lower() not in tokens["area"]:
+                if str(fm.get("area") or "").lower() not in tokens["area"]:
                     skip = True
             if "tag" in tokens:
                 note_tags = _extract_tags_from_note(note)
@@ -259,7 +265,7 @@ async def search(
                 continue
 
             # Búsqueda por texto libre
-            title = fm.get("title", "").lower()
+            title = str(fm.get("title") or "").lower()
             body_lower = note.body.lower()
 
             if free_text in title:
