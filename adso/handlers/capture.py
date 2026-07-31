@@ -31,7 +31,14 @@ from adso.keyboards import (
     build_destination_keyboard,
     build_preview,
 )
-from adso.llm_client import VALID_TYPES, check_injection_risk, classify, extract_original_from_degraded
+from adso.llm_client import (
+    VALID_TYPES,
+    check_injection_risk,
+    classify,
+    extract_original_from_degraded,
+    make_degraded_result,
+)
+from adso.llm_schema import LLMResponseError, _validate_capture_payload
 from adso.vault_search import find_by_property
 from adso.tasks_client import TasksClient, build_task_notes
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
@@ -42,6 +49,48 @@ _INJECTION_PREVIEW_WARNING = (
     "⚠️ El contenido extraído contiene un patrón de posible inyección de "
     "instrucciones. Revisar el preview con atención antes de confirmar.\n\n"
 )
+
+
+def _redirect_unimplemented_mode(result: dict, content: str) -> str:
+    """Redirige los modos no implementados (query, edit) a capture, re-validando.
+
+    ``validate_llm_response`` no corre ``_validate_capture_payload`` sobre los
+    payloads de ``query``/``edit`` (se validan en fases futuras), así que el
+    redirect a capture entregaba un frontmatter sin sanitizar al vault: tipo
+    inválido, claves fuera del schema, tags sin kebab, fechas no-ISO, o
+    directamente ``frontmatter: null`` (legal en el schema de Gemini), que
+    después crasheaba el flujo. Este helper valida el payload redirigido y, si
+    no se puede sanear, cae a modo degradado (Inbox + pending-classification).
+
+    Args:
+        result: Respuesta del LLM (se muta in-place: ``mode`` y, si hace falta,
+            todo el dict pasa a degradado).
+        content: Texto original, usado para construir el payload degradado.
+
+    Returns:
+        El modo resultante: el original si no era query/edit, ``"capture"`` si
+        el payload se validó, o ``"degraded"`` si no.
+    """
+    mode = result.get("mode", "")
+    if mode not in ("query", "edit"):
+        return mode
+
+    payload = result.get("payload")
+    try:
+        if not isinstance(payload, dict):
+            raise LLMResponseError("payload missing or not an object")
+        _validate_capture_payload(payload)
+    except (LLMResponseError, TypeError, ValueError, AttributeError) as e:
+        logger.warning(
+            "Payload de mode=%r no sanitizable al redirigir a capture (%s) — degradado",
+            mode, e,
+        )
+        result.clear()
+        result.update(make_degraded_result(content))
+        return "degraded"
+
+    result["mode"] = "capture"
+    return "capture"
 
 
 async def _classify_and_preview(
@@ -105,7 +154,9 @@ async def _classify_and_preview(
         user_context=user_context,
     )
 
-    mode = result.get("mode", "")
+    # Modos no implementados (query, edit) → tratar como captura, re-validando
+    # el payload (validate_llm_response no lo sanitiza para esos modos).
+    mode = _redirect_unimplemented_mode(result, text)
 
     # Guardar info de recurso para el confirm
     if resource_file:
@@ -144,11 +195,6 @@ async def _classify_and_preview(
             parse_mode="HTML",
         )
         return
-
-    # Modos no implementados (query, edit) → tratar como captura
-    if mode in ("query", "edit"):
-        mode = "capture"
-        result["mode"] = "capture"
 
     # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
     if force_capture and mode != "capture":
@@ -1039,10 +1085,7 @@ async def _classify_and_preview_arxiv(
         on_retry=on_retry,
     )
 
-    mode = result.get("mode", "")
-    if mode in ("query", "edit"):
-        result["mode"] = "capture"
-        mode = "capture"
+    mode = _redirect_unimplemented_mode(result, content)
 
     if mode not in ("capture", "degraded"):
         reply_fn = (
@@ -1054,7 +1097,12 @@ async def _classify_and_preview_arxiv(
         return
 
     payload = result["payload"]
-    fm = payload.get("frontmatter", {})
+    fm = payload.get("frontmatter")
+    if not isinstance(fm, dict):
+        # `frontmatter: null` es legal en el schema de Gemini — nunca indexar
+        # sobre None (defensa en profundidad; el redirect ya lo cubre).
+        fm = {}
+        payload["frontmatter"] = fm
 
     # Sobreescribir con datos literales de la API (tienen prioridad absoluta sobre el LLM)
     fm["title"] = metadata["title"] or fm.get("title", "")

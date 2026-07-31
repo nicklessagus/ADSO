@@ -131,6 +131,37 @@ def make_degraded_body(content: str) -> str:
     return f"{_DEGRADED_HEADER}\n{_DEGRADED_REASON}\n{content_lines}"
 
 
+def make_degraded_result(content: str) -> dict:
+    """Build a degraded-mode response dict for the given raw content.
+
+    Used when the LLM is unavailable (or its answer cannot be sanitized): the
+    note is saved to 00-Inbox/ with ``status: pending-classification`` and a
+    cron reclassifies it later.
+
+    Args:
+        content: Original raw text from the user.
+
+    Returns:
+        Response dict with ``mode="degraded"`` and a minimal valid payload.
+    """
+    return {
+        "mode": "degraded",
+        "confidence": 0.0,
+        "needs_disambiguation": False,
+        "payload": {
+            "frontmatter": {
+                "title": "[Sin clasificar] " + content[:60].strip() if content else "[Sin clasificar]",
+                "type": "idea",
+                "tags": [],
+                "status": "pending-classification",
+            },
+            "body": make_degraded_body(content),
+            "suggested_links": [],
+            "summary": None,
+        },
+    }
+
+
 def extract_original_from_degraded(body: str) -> str:
     """Extract the original content from a degraded-mode callout body.
 
@@ -426,22 +457,7 @@ async def classify(
 
     # Degraded mode
     logger.error("LLM failed after %d attempts — degraded mode", MAX_RETRIES)
-    return {
-        "mode": "degraded",
-        "confidence": 0.0,
-        "needs_disambiguation": False,
-        "payload": {
-            "frontmatter": {
-                "title": "[Sin clasificar] " + content[:60].strip() if content else "[Sin clasificar]",
-                "type": "idea",
-                "tags": [],
-                "status": "pending-classification",
-            },
-            "body": make_degraded_body(content),
-            "suggested_links": [],
-            "summary": None,
-        },
-    }
+    return make_degraded_result(content)
 
 
 async def _try_groq_fallback(

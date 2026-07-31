@@ -76,7 +76,14 @@ from adso.handlers.capture import (
 from adso.bot_utils import _cleanup_pending
 from adso.handlers.commands import handle_clasificar
 from adso.handlers.input import _process_pdf_after_read_status
-from adso.handlers.manage import _cb_intent_create, _cb_intent_note, _cb_intent_save, _cb_intent_task, _cb_manage_confirm
+from adso.handlers.manage import (
+    _cb_intent_create,
+    _cb_intent_note,
+    _cb_intent_save,
+    _cb_intent_task,
+    _cb_manage_confirm,
+    pop_manage_state,
+)
 from adso.keyboards import (
     _esc,
     build_area_selector,
@@ -204,7 +211,7 @@ async def handle_callback(
 
     elif data == CB_MANAGE_CANCEL:
         await query.edit_message_text("Operación cancelada.")
-        context.user_data.pop("pending_operation", None)
+        pop_manage_state(context)
 
     elif data == CB_TRANSCRIPT_OK:
         await _cb_transcript_ok(update, context)

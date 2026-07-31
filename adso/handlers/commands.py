@@ -121,6 +121,7 @@ def _gather_vault_counts(vault_path: Path) -> tuple[int, int, int, int]:
     return total_notes, inbox_count, pending_auto, pending_manual
 
 
+@authorized
 async def handle_status(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

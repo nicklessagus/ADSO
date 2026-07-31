@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -18,6 +18,24 @@ from adso.llm_client import classify
 from adso.vault_writer import _safe_component, create_note
 
 logger = logging.getLogger(__name__)
+
+
+def pop_manage_state(context: ContextTypes.DEFAULT_TYPE) -> Optional[dict]:
+    """Saca el estado del flujo de gestión de ``user_data`` y devuelve la operación.
+
+    Popea ``pending_operation`` y ``manage_missing_fields`` juntas: ambas están
+    en ``_PENDING_FLOW_KEYS``, así que dejar la segunda colgada hace que
+    ``reclassify_inbox`` posponga cada pasada indefinidamente (el inbox nunca se
+    drena) hasta un ``/reset`` que el usuario no tiene motivo de ejecutar.
+
+    Args:
+        context: Bot context con ``user_data``.
+
+    Returns:
+        El dict de la operación pendiente, o None si no había ninguna.
+    """
+    context.user_data.pop("manage_missing_fields", None)
+    return context.user_data.pop("pending_operation", None)
 
 
 async def _handle_manage_missing_fields(
@@ -115,7 +133,7 @@ async def _cb_manage_confirm(
     vault_path: Path,
 ) -> None:
     """Ejecuta operación de gestión confirmada."""
-    pending = context.user_data.pop("pending_operation", None)
+    pending = pop_manage_state(context)
     if not pending:
         await query.edit_message_text("No hay operación pendiente.")
         return
