@@ -254,9 +254,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class TestClavesDesconocidas:
 
-    def test_config_yaml_del_repo_esta_alineado_con_el_loader(self) -> None:
-        """El config.yaml que `make deploy` copia a producción no debe drift."""
-        settings = load_settings(REPO_ROOT / "config.yaml")
+    def test_config_yaml_local_esta_alineado_con_el_loader(self) -> None:
+        """El config.yaml que `make deploy` copia a producción no debe drift.
+
+        `config.yaml` está gitignoreado desde la publicación del repo (tiene
+        configuración del usuario), así que en CI no existe y el test se
+        saltea. Sigue valiendo en la máquina de desarrollo, que es donde vive
+        el archivo que efectivamente se despliega.
+        """
+        local = REPO_ROOT / "config.yaml"
+        if not local.exists():
+            pytest.skip("config.yaml no está en el repo (gitignoreado) — nada que validar")
+        settings = load_settings(local)
         assert settings.unknown_keys == [], (
             f"config.yaml tiene claves que el loader ignora: {settings.unknown_keys}"
         )
