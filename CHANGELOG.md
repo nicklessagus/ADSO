@@ -8,6 +8,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 ## [Unreleased]
 
 ### Changed
+- **`CLAUDE.md` reorganizado:** `## Decisiones clave` había crecido a 21KB (el 40% del archivo) mezclando políticas que restringen trabajo futuro con post-mortems de fixes puntuales. Los 14 post-mortems se movieron **verbatim** a `docs/decisions-log.md`, agrupados por módulo y con punteros desde CLAUDE.md; quedan los 21 bullets de taxonomía, invariantes y políticas. La sección baja a 13KB y el archivo de 53KB a 45KB. El contenido movido ya vivía además como comentario en el propio código y en el CHANGELOG — la duplicación costaba contexto en cada sesión sin agregar nada
 - **Gemini Vision usa su propio modelo** (`GEMINI_VISION_MODEL = "gemini-3.6-flash"`, overridable con `ADSO_GEMINI_VISION_MODEL`): la quota del free tier de Google es **por modelo**, así que rasterizar un PDF escaneado de 20 páginas ya no consume RPD del mismo bucket que la clasificación de notas, que es el flujo de todos los días. El split no lo motiva la calidad — el resultado de Vision se muestra en el preview y lo valida el usuario antes de confirmar. `/status` muestra ambos modelos y el harness acepta `--vision-model` para evaluar candidatos por separado
 
 ---

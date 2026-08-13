@@ -1,0 +1,72 @@
+# Log de decisiones de implementación
+
+Post-mortems de fixes puntuales: el *porqué* detrás de una línea de código que
+parece arbitraria. Se movieron acá desde `CLAUDE.md` para que ese archivo —que se
+carga entero en contexto en cada sesión— quede con lo que restringe trabajo
+futuro (taxonomía, invariantes, políticas) y no con el historial de cada bug.
+
+Nada se perdió: el texto de cada entrada es verbatim el que estaba en CLAUDE.md.
+La mayoría también vive como comentario en el propio código, y el detalle
+cronológico está en `CHANGELOG.md`.
+
+**Cuándo leer esto:** antes de tocar `vault_writer`, `vault_watcher`, `GitBackup`,
+el flujo de confirmación de `capture.py`/`callbacks.py` o el manejo de errores de
+PTB — si algo parece innecesariamente defensivo, probablemente esté explicado acá.
+
+---
+
+## Limpieza del estado de gestión (`pop_manage_state` en `manage.py`)
+
+confirmar o cancelar una operación de gestión popea `pending_operation` **y** `manage_missing_fields` juntas. Ambas están en `_PENDING_FLOW_KEYS`; dejar la segunda colgada hacía que `reclassify_inbox` pospusiera cada pasada indefinidamente (el inbox nunca se drenaba) hasta un `/reset`. El helper cubre también las salidas tempranas de `_cb_manage_confirm` (nombre o proyecto inválido, elemento ya existente).
+
+## Construcción del `frontmatter.Post` (`_build_post` / `load_post` en `vault_writer.py`)
+
+nunca se usa `frontmatter.Post(body, **fm)`. La firma real es `Post(content, handler=None, **metadata)`, así que una clave `handler` en el frontmatter se interpretaba como handler de serialización y `frontmatter.dumps()` escribía ese string como **contenido total del archivo** (body y frontmatter perdidos en silencio), y una clave `content` lanzaba `TypeError`. Los cuatro sitios de escritura (`create_note`, `append_to_note`, `set_property`, `update_wikilinks`) usan `_build_post`, que asigna `post.metadata`. Del lado de lectura, `frontmatter.loads()` tiene el mismo choque de kwargs: `load_post()` lo envuelve y cae a `frontmatter.parse()` si lanza `TypeError`, para que una nota editada externamente con esas claves no rompa `read_note` ni los scans de `vault_cache`.
+
+## Limpieza de wikilinks acotada al bloque (`_strip_broken_links_in_ver_tambien`)
+
+`remove_broken_wikilinks` solo borra items `- [[stem]]` que están **dentro** del bloque `## Ver también` (recorrido por líneas con estado de bloque), nunca en prosa u otras listas del usuario. Antes un regex global podía borrar líneas del usuario que contuvieran el wikilink.
+
+## Git backup fuera del event loop (`GitBackup._sync_backup`)
+
+`Repo`/`add`/`is_dirty`/`commit`/`push` corren en `asyncio.to_thread` (antes solo el `push`). En la RPi4 con SD lenta esto evita congelar el bot durante el backup. `_do_backup` limpia `_timer` bajo lock y las notificaciones a Telegram quedan en el event loop según el status devuelto.
+
+## Flush del backup al shutdown (`GitBackup.flush`)
+
+`_post_shutdown` (en `bot.py`) awaitea `git_backup.flush()` tras detener el watcher. Sin esto, una nota escrita dentro de la ventana de debounce (`backup.debounce_seconds`, default 30s) justo antes de un `docker stop` quedaba sin commit/push hasta la *próxima* escritura — potencial pérdida de datos si el contenedor no volvía a arrancar. `flush()` cancela el `_timer` bajo lock, **espera el backup en vuelo** (`_await_running`) y recién después evalúa `_pending_titles` — si el debounce ya había disparado, la cola está drenada y sin esa espera el shutdown continuaba con el push a medio hacer. `_do_backup` se serializa consigo mismo por la misma referencia (`_running`): dos backups nunca corren git en paralelo (colisión de `index.lock`). `notify()` no espera el backup en vuelo — bloquearía la confirmación del usuario durante el push; la serialización ya la garantiza `_do_backup`. Ante un fallo de `add`/`commit` (disco lleno, `index.lock` de un git manual, repo corrupto) los títulos drenados se **re-encolan** al frente de `_pending_titles` y se notifica por Telegram, igual que en `push_failed`: antes el error solo se logueaba y el vault podía quedar sin backup indefinidamente y en silencio.
+
+## Watcher `on_moved` + drenado de `bot_written_paths` (`vault_watcher.py`, `bot_utils.mark_bot_written`)
+
+inotify reporta renames como `FileMovedEvent`. El handler ahora implementa `on_moved`: emite un delete para el origen y un change (o conflicto) para el destino. Cubre (1) Syncthing aplicando cambios remotos via temp+rename → re-embed inmediato en vez de esperar el reindex nocturno; (2) editores con guardado atómico. La propia escritura atómica del bot (temp `.adso-tmp-*.tmp` → nota) también dispara un move: el origen es hidden y no-`.md` (se saltea) y el destino cae en `bot_written_paths`, que `_reindex_external_note` consume y descarta — sin doble embed. Antes `on_moved` no existía, así que la escritura del bot (que es un `os.replace` = move) nunca drenaba el set → leak de memoria y guard anti-doble-embed inefectivo. Los tres sitios que registran escrituras propias (`_cb_confirm`, `reclassify_inbox`, y el flujo degradado) usan `mark_bot_written`, que además acota el set a `_BOT_WRITTEN_CAP` (512) como red de seguridad ante eventos perdidos.
+
+## Embedding inline al confirmar (`_cb_confirm`)
+
+la nota se indexa en ChromaDB inline con `spawn_tracked(_index_note_safe(...))`, igual que `jobs.reclassify_inbox`. El path se registra en `bot_written_paths` para que el `VaultWatcher` saltee el evento inotify de esa escritura (sin doble embed). Antes se delegaba al watcher, que justamente saltea esos paths → la nota quedaba sin embedding hasta el reindex nocturno.
+
+## Frontmatter no-string en notas editadas a mano
+
+YAML parsea `title: 2024` como `int` y `project:` vacío como `None` (el default de `.get()` no aplica). Todos los filtros de `vault_search.py` (`type`/`status`/`project`/`area`/`title`), `_note_ref_from_data`, `_extract_tags_from_note` (acepta `tags` como string), las keys de agrupamiento de `reporters.py` (`sorted()` sobre keys mixtas str/int lanzaba `TypeError`) y `_priority_key` coaccionan con `str(... or "")`. Antes **una sola nota editada a mano tiraba abajo la búsqueda o el reporte entero**. En la misma línea, `_to_naive()` (reporters) normaliza los datetimes antes de compararlos: `_parse_fm_date` devuelve aware para fechas con offset (plugins de Obsidian) y naive para las que escribe ADSO. Y `_parse_date_value` (`vault_writer.py`) envuelve `fromisoformat` en `try/except`: una fecha sintácticamente válida pero imposible (`2026-02-30`) ya no revienta la escritura *después* de la confirmación — se deja como string.
+
+## Frontmatter YAML corrupto (`vault_cache.parse_cached`)
+
+una nota con YAML inválido (edición externa a mano) se omite de los scans pero se loguea a `warning` con el path (antes: `debug` silencioso). Los errores de I/O (`OSError`) siguen a `debug` por ser transitorios.
+
+## Render de PDFs escaneados fuera del event loop (`_render_pdf_pages` en `callbacks.py`)
+
+función síncrona que se llama siempre via `asyncio.to_thread` (rasterizar a 200 DPI tarda segundos en la RPi4 y antes congelaba el bot entero). Devuelve los PNG en memoria (`pix.tobytes`), sin archivos temporales. El DPI efectivo se reduce si la página declara dimensiones enormes (cap `_MAX_RENDER_PIXELS` = 16MP por página — protege contra OOM por PDFs maliciosos/malformados). `_pdf_page_count` es el helper threadizado para contar páginas.
+
+## Preview completo y copiable del texto extraído (`_build_extract_preview` en `callbacks.py`)
+
+el resultado de OCR y de Gemini Vision se muestra íntegro dentro de un bloque `<code>` (copiable de un toque en Telegram), no truncado a 500 chars como antes. El helper ajusta el cuerpo para no pasar el límite de ~4096 chars de un mensaje (`_PREVIEW_LIMIT = 3900`, con margen para el escape HTML); solo si el texto excede lo que entra en un mensaje se trunca el **preview** con un aviso, pero el texto íntegro sigue en `pending_transcript["text"]` y es lo que se guarda al confirmar. Usado por `_cb_ocr` y `_cb_vision`, y también por el modo corrección (`CB_TRANSCRIPT_CORRECT` para OCR/Vision/audio y `CB_EXTRACTION_CORRECT` para texto de PDF/documento) via el parámetro `footer`, que agrega la instrucción "Texto corregido…" después del bloque copiable contándola en el presupuesto — así al corregir se ve/copia el texto actual entero, no un recorte de 500 chars.
+
+## Caption de imagen reutilizado como descripción (`user_context`)
+
+cuando el usuario manda una imagen con caption, ese texto viaja como `user_context` en `pending_fallback_pdf` y ahora se propaga por todo el flujo — `_cb_ocr`/`_cb_vision` lo copian a `pending_transcript`, y `_cb_transcript_ok` lo pasa a `_classify_and_preview` (influye en la clasificación). Además, si el usuario elige `[Describir]` y la imagen ya trae caption, el bot **no vuelve a pedir la descripción**: usa el caption directo como body (`preserve_body=True`) y clasifica. Sin caption, mantiene el prompt "Describir el contenido…".
+
+## Límite de tamaño post-descarga (`_exceeds_size_after_download` en `input.py`)
+
+si Telegram no informa `file_size` (None), el pre-check se saltea — el límite se aplica sobre el archivo ya descargado (se borra el temporal si excede). Transcripción con `beam_size=1` (greedy): en CPU ARM int8 el beam de 5 era 3-5x más lento con ganancia marginal para notas de voz.
+
+## Error handler global de PTB (`_global_error_handler` en `bot.py`)
+
+registrado con `add_error_handler`. Los `BadRequest` benignos (`message is not modified`, `query is too old` — típicos tras timeouts de red a mitad de flujo) se ignoran con log a `info`. Los errores de red (`NetworkError`/`TimedOut`) solo se loguean — notificar por la misma red caída fallaría. El resto se loguea y notifica al usuario con mensaje genérico + `/reset`. Complementos en `handle_callback`: `query.answer()` vencido no aborta el procesamiento del tap, y `_cb_confirm` trata "message is not modified" como éxito silencioso (la confirmación ya se había aplicado).

@@ -63,6 +63,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - [`docs/testing.md`](docs/testing.md) — Estrategia de testing: niveles, cobertura y fixtures
 - [`docs/security.md`](docs/security.md) — Modelo de amenaza, mitigaciones, JSON schema del LLM y checklist de deploy
 - [`docs/vault-interface.md`](docs/vault-interface.md) — Firmas de funciones de vault_writer, vault_search y embeddings
+- [`docs/decisions-log.md`](docs/decisions-log.md) — Post-mortems: el porqué detrás de código que parece innecesariamente defensivo
 
 ## Estado
 
