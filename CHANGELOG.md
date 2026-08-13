@@ -7,6 +7,14 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+### Added
+- **Regla test-first obligatoria** (`CLAUDE.md` § Validación de código): ninguna funcionalidad ni fix entra sin test que lo cubra, y el test se escribe **antes** que el código — planificar, escribir el test, implementar, verificar. Escribir el test después produce tests que confirman lo implementado en vez de especificar el comportamiento buscado
+
+### Removed
+- **Limpieza de código muerto** (parte del Bloque H de `docs/audit-2026-07-31.md`): `_scope_match` (`reporters.py`, cero callers — lo reemplazó el filtrado por `scope` de `scan_notes`) y `_deserialize_tags` (`embeddings.py`, inverso de `_serialize_metadata` que ningún path de lectura usaba; 5 líneas triviales de reescribir si Fase 7 necesita leer tags desde ChromaDB en vez del disco), con sus 3 tests
+- **`vault` era un gitlink huérfano** (modo `160000` en el índice, commiteado en `e995dd4`) **sin `.gitmodules`**: un clone fresco recibía un directorio vacío y `git submodule update` fallaba. Se saca del índice y se agrega `vault/` a `.gitignore` — el repo es público y un vault local tiene notas personales
+- Fixtures muertas: `tests/fixtures/sample_notes/` entero (7 archivos, cero referencias en la suite) y `llm_responses/empty_response.json` (el test homónimo construye `{}` inline)
+
 ### Changed
 - **`CLAUDE.md` reorganizado:** `## Decisiones clave` había crecido a 21KB (el 40% del archivo) mezclando políticas que restringen trabajo futuro con post-mortems de fixes puntuales. Los 14 post-mortems se movieron **verbatim** a `docs/decisions-log.md`, agrupados por módulo y con punteros desde CLAUDE.md; quedan los 21 bullets de taxonomía, invariantes y políticas. La sección baja a 13KB y el archivo de 53KB a 45KB. El contenido movido ya vivía además como comentario en el propio código y en el CHANGELOG — la duplicación costaba contexto en cada sesión sin agregar nada
 - **Gemini Vision usa su propio modelo** (`GEMINI_VISION_MODEL = "gemini-3.6-flash"`, overridable con `ADSO_GEMINI_VISION_MODEL`): la quota del free tier de Google es **por modelo**, así que rasterizar un PDF escaneado de 20 páginas ya no consume RPD del mismo bucket que la clasificación de notas, que es el flujo de todos los días. El split no lo motiva la calidad — el resultado de Vision se muestra en el preview y lo valida el usuario antes de confirmar. `/status` muestra ambos modelos y el harness acepta `--vision-model` para evaluar candidatos por separado

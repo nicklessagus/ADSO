@@ -182,29 +182,6 @@ async def _llm_synthesis(report_summary: str) -> Optional[str]:
         return None
 
 
-def _scope_match(note: NoteData, project: Optional[str], area: Optional[str], inbox: bool) -> bool:
-    """Verifica si una nota pertenece al scope solicitado.
-
-    Args:
-        note: NoteData de la nota.
-        project: Nombre de proyecto a filtrar, o None.
-        area: Nombre de área a filtrar, o None.
-        inbox: True si el scope es el inbox.
-
-    Returns:
-        True si la nota pertenece al scope.
-    """
-    fm = note.frontmatter
-    if inbox:
-        rel = note.path.parts
-        return "00-Inbox" in rel
-    if project:
-        return str(fm.get("project", "")).lower() == project.lower()
-    if area:
-        return str(fm.get("area", "")).lower() == area.lower()
-    return True
-
-
 def _note_line(vault_path: Path, note: NoteData, extra: str = "") -> str:
     """Genera una línea de referencia a una nota con link obsidian://.
 

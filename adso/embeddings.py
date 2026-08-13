@@ -71,13 +71,6 @@ def _serialize_metadata(metadata: dict) -> dict:
     return result
 
 
-def _deserialize_tags(tags_str: str) -> list[str]:
-    """Convierte tags serializados a lista."""
-    if not tags_str:
-        return []
-    return [t.strip() for t in tags_str.split(",") if t.strip()]
-
-
 # ---------------------------------------------------------------------------
 # Conversión similitud ↔ distancia
 # ---------------------------------------------------------------------------

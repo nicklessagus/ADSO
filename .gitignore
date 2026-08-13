@@ -48,6 +48,10 @@ credentials/
 data/chroma/
 *.index
 
+# Vault local de desarrollo — nunca se commitea (el repo es público y el vault
+# tiene notas personales). El vault real vive fuera del repo (VAULT_PATH).
+vault/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -10,7 +10,6 @@ from adso.embeddings import (
     EmbeddingsClient,
     SimilarNote,
     _serialize_metadata,
-    _deserialize_tags,
     similarity_to_distance,
     distance_to_similarity,
 )
@@ -64,18 +63,6 @@ class TestSerializeMetadata:
             "project": "",
             "status": "active",
         }
-
-
-class TestDeserializeTags:
-
-    def test_normal_tags(self) -> None:
-        assert _deserialize_tags("ml,cnn,paper") == ["ml", "cnn", "paper"]
-
-    def test_empty_string(self) -> None:
-        assert _deserialize_tags("") == []
-
-    def test_with_spaces(self) -> None:
-        assert _deserialize_tags("ml, cnn , paper") == ["ml", "cnn", "paper"]
 
 
 class TestConversions:

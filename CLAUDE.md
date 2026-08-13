@@ -359,6 +359,17 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 - Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
 - Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica).
 
+### Test-first — obligatorio
+
+Ninguna funcionalidad nueva ni fix entra sin test que lo cubra, y **el test se escribe antes que el código**. El orden no es negociable:
+
+1. **Planificar** la modificación: qué cambia, en qué módulo, qué invariante preserva.
+2. **Escribir el test** de unidad que la especifique (y el de cobertura del path nuevo). Correrlo para verlo fallar.
+3. **Implementar** el cambio.
+4. **Correr el test** y verificar que pasa, junto con la suite completa.
+
+Escribir el test después produce tests que confirman lo implementado en vez de especificar el comportamiento buscado. Un cambio que llega sin test se devuelve al paso 2.
+
 ### Harness de regresión de modelo
 
 Antes de tocar `GEMINI_MODEL` hay que correr `scripts/llm_regression.py`, que verifica contra la API real que el modelo respete el **contrato estructural** que el resto del bot asume. No mide calidad de redacción ni de resumen: eso lo valida el usuario en el preview antes de confirmar cada nota. Mide lo que el usuario no ve — sobre todo que `validate_llm_response` no lance (si lanza, *toda* captura cae a modo degradado) y que el modelo no obedezca prompt injection.
