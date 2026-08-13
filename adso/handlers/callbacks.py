@@ -432,8 +432,16 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     except Exception as e:
+        # Sin limpiar el estado, `_has_pending_keyboard` sigue en True y todo
+        # input posterior recibe "Hay una acción pendiente" cuando ya no hay
+        # botones: el bot queda muerto hasta `/reset`, que además borra el
+        # temporal (hay que reenviar la imagen). E3 de docs/audit-2026-07-31.md.
         logger.error("Error en OCR: %s", e)
-        await query.edit_message_text(f"Error en OCR: {e}")
+        context.user_data.pop("pending_fallback_pdf", None)
+        tmp_path.unlink(missing_ok=True)
+        await query.edit_message_text(
+            f"Error en OCR: {e}\n\nReenviar la imagen para reintentar."
+        )
         return
 
     context.user_data.pop("pending_fallback_pdf", None)
@@ -508,8 +516,13 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
 
     except Exception as e:
+        # Mismo dead-end que en OCR — ver E3 de docs/audit-2026-07-31.md.
         logger.error("Error en Gemini Vision: %s", e)
-        await query.edit_message_text(f"Error consultando Gemini Vision: {e}")
+        context.user_data.pop("pending_fallback_pdf", None)
+        tmp_path.unlink(missing_ok=True)
+        await query.edit_message_text(
+            f"Error consultando Gemini Vision: {e}\n\nReenviar la imagen para reintentar."
+        )
         return
 
     # Limpiar el estado previo solo tras éxito

@@ -27,6 +27,7 @@ from adso.bot_utils import (
 from adso.config import Settings
 from adso.embeddings import EmbeddingsClient
 from adso.keyboards import (
+    _esc,
     build_capture_keyboard,
     build_destination_keyboard,
     build_preview,
@@ -38,7 +39,7 @@ from adso.llm_client import (
     extract_original_from_degraded,
     make_degraded_result,
 )
-from adso.llm_schema import LLMResponseError, _validate_capture_payload
+from adso.llm_schema import LLMResponseError, _to_kebab, _validate_capture_payload
 from adso.vault_search import find_by_property
 from adso.tasks_client import TasksClient, build_task_notes
 from adso.vault_writer import GitBackup, create_note, read_note, save_resource
@@ -424,6 +425,75 @@ def _parse_date_from_text(text: str, now: Optional[datetime] = None) -> Optional
     return target.strftime("%Y-%m-%d")
 
 
+def _add_tag(fm: dict, raw: str) -> bool:
+    """Agrega un tag al frontmatter normalizándolo a kebab-case.
+
+    Los tags que propone el LLM pasan por `_to_kebab` en la sanitización, pero
+    los que escribe el usuario en modo corrección entraban crudos: con `<`
+    rompían el parse HTML del preview de Telegram y dejaban al usuario con un
+    preview sin teclado, irrecuperable salvo `/reset` (E4 de
+    docs/audit-2026-07-31.md).
+
+    Args:
+        fm: Frontmatter a mutar.
+        raw: Tag tal como lo escribió el usuario.
+
+    Returns:
+        True si el tag se agregó; False si quedó vacío tras normalizar o si ya
+        estaba presente.
+    """
+    tag = _to_kebab(raw)
+    if not tag:
+        return False
+    tags = fm.setdefault("tags", [])
+    if tag in tags:
+        return False
+    tags.append(tag)
+    return True
+
+
+def _apply_note_corrections(fm: dict, text: str, text_lower: str) -> bool:
+    """Aplica correcciones a un frontmatter de nota (no tarea) desde texto libre.
+
+    Contraparte de `_apply_task_corrections` para `reference`/`idea`. A
+    diferencia de aquella, cada prefijo es excluyente (el primero que matchea
+    gana) y requiere un espacio tras la palabra clave.
+
+    Args:
+        fm: Frontmatter a mutar.
+        text: Texto original del usuario (conserva capitalización).
+        text_lower: El mismo texto en minúsculas y stripeado.
+
+    Returns:
+        True si se reconoció y aplicó alguna corrección.
+    """
+    if text_lower.startswith("titulo ") or text_lower.startswith("título "):
+        fm["title"] = text.split(" ", 1)[1].strip()
+        return True
+    if text_lower.startswith("prioridad "):
+        prio = text_lower.split(" ", 1)[1].strip()
+        if prio in ("alta", "high"):
+            fm["priority"] = "high"
+        elif prio in ("media", "medium"):
+            fm["priority"] = "medium"
+        elif prio in ("baja", "low"):
+            fm["priority"] = "low"
+        return True
+    if text_lower.startswith("tag ") or text_lower.startswith("agregar tag "):
+        _add_tag(fm, text_lower.split("tag ", 1)[1].strip())
+        return True
+    if text_lower.startswith("tipo ") or text_lower.startswith("type "):
+        new_type = text_lower.split(" ", 1)[1].strip()
+        if new_type in ("reference", "referencia", "note", "nota"):
+            fm["type"] = "reference"
+        elif new_type in ("task", "tarea"):
+            fm["type"] = "task"
+        elif new_type in ("idea",):
+            fm["type"] = "idea"
+        return True
+    return False
+
+
 def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
     """Aplica correcciones a un frontmatter de tarea desde texto libre.
 
@@ -455,17 +525,17 @@ def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
     # Tag
     tag_m = re.search(r'\bagregar\s+tag\s+(\S+)', text_lower) or \
             re.search(r'\btag\s+(\S+)', text_lower)
-    if tag_m:
-        tag = tag_m.group(1).replace(" ", "-")
-        if not fm.get("tags"):
-            fm["tags"] = []
-        fm["tags"].append(tag)
+    if tag_m and _add_tag(fm, tag_m.group(1)):
         changed = True
 
-    # Título explícito
-    title_m = re.match(r'^t[ií]tulo\s+(.+)$', text_lower)
+    # Título explícito. Se re-matchea sobre `text` (no `text_lower`) para
+    # conservar la capitalización, y se usa el grupo del match en vez de
+    # re-splitear por espacio: `\s+` acepta el salto de línea, así que
+    # "titulo\nMitítulo" matcheaba y después `text.split(" ", 1)[1]` tiraba
+    # IndexError por no haber ningún espacio. E5 de docs/audit-2026-07-31.md.
+    title_m = re.match(r'^t[ií]tulo\s+(.+)$', text.strip(), re.IGNORECASE)
     if title_m:
-        fm["title"] = text.split(" ", 1)[1].strip()
+        fm["title"] = title_m.group(1).strip()
         changed = True
 
     # Sin fallback de título acá: el caller decide qué hacer cuando no cambió
@@ -491,34 +561,10 @@ async def _handle_text_correction(
     fm = payload["frontmatter"]
     text_lower = text.lower().strip()
 
-    handled = True
     if fm.get("type") == "task":
         handled = _apply_task_corrections(fm, text, text_lower)
-    elif text_lower.startswith("titulo ") or text_lower.startswith("título "):
-        fm["title"] = text.split(" ", 1)[1].strip()
-    elif text_lower.startswith("prioridad "):
-        prio = text_lower.split(" ", 1)[1].strip()
-        if prio in ("alta", "high"):
-            fm["priority"] = "high"
-        elif prio in ("media", "medium"):
-            fm["priority"] = "medium"
-        elif prio in ("baja", "low"):
-            fm["priority"] = "low"
-    elif text_lower.startswith("tag ") or text_lower.startswith("agregar tag "):
-        tag = text_lower.split("tag ", 1)[1].strip().replace(" ", "-")
-        if not fm.get("tags"):
-            fm["tags"] = []
-        fm["tags"].append(tag)
-    elif text_lower.startswith("tipo ") or text_lower.startswith("type "):
-        new_type = text_lower.split(" ", 1)[1].strip()
-        if new_type in ("reference", "referencia", "note", "nota"):
-            fm["type"] = "reference"
-        elif new_type in ("task", "tarea"):
-            fm["type"] = "task"
-        elif new_type in ("idea",):
-            fm["type"] = "idea"
     else:
-        handled = False
+        handled = _apply_note_corrections(fm, text, text_lower)
 
     if not handled:
         # Ningún prefijo/campo reconocido. Solo usar como título si es texto corto
@@ -757,6 +803,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 
     resource_file = pending.get("_resource_file")
     resource_temp: Optional[Path] = None
+    resource_error: Optional[str] = None
     if resource_file:
         try:
             res_path = await save_resource(
@@ -771,7 +818,14 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             # hash, así que no duplica el archivo en 03-Resources/).
             resource_temp = Path(resource_file["temp_path"])
         except Exception as e:
+            # Se avisa en el mensaje final: el usuario veía "Nota guardada" sin
+            # enterarse de que el adjunto no se copió, y el temporal quedaba sin
+            # borrar (el unlink estaba solo en el camino feliz). La regla del
+            # proyecto pide notificar la pérdida. E11 de
+            # docs/audit-2026-07-31.md.
             logger.warning("Error guardando recurso: %s", e)
+            resource_error = str(e)
+            resource_temp = Path(resource_file["temp_path"])
 
     # Si viene de /clasificar y el LLM dejó pending-classification, la nota
     # fue revisada y confirmada por el usuario — ya no está pendiente.
@@ -837,10 +891,14 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             logger.warning("No se pudo borrar nota de inbox: %s", e)
 
     rel_path = path.relative_to(vault_path)
-    await query.edit_message_text(
-        f"Nota guardada en: <code>{rel_path}</code>",
-        parse_mode="HTML",
-    )
+    mensaje = f"Nota guardada en: <code>{rel_path}</code>"
+    if resource_error:
+        mensaje += (
+            f"\n\n⚠️ El adjunto <b>{_esc(resource_file['filename'])}</b> no se "
+            f"pudo copiar al vault: {_esc(resource_error)}\n"
+            "La nota quedó guardada sin él."
+        )
+    await query.edit_message_text(mensaje, parse_mode="HTML")
     context.user_data.pop("original_content", None)
 
     if inbox_path_str:

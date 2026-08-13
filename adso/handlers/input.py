@@ -354,7 +354,13 @@ async def handle_audio(
         context.user_data["pending_transcript"]["msg_id"] = sent.message_id
 
     except Exception as e:
+        # `pending_transcript` se setea antes del reply que muestra la
+        # transcripción; si ese reply falla, el estado quedaba apuntando a un
+        # temporal que este mismo except borra — todo bloqueado hasta `/reset`,
+        # y un `[Confirmar]` de un teclado fantasma leería un path inexistente.
+        # E9 de docs/audit-2026-07-31.md.
         logger.error("Error transcribiendo audio: %s", e)
+        context.user_data.pop("pending_transcript", None)
         await msg.reply_text(f"Error al transcribir: {e}")
         if "tmp_path" in dir():
             tmp_path.unlink(missing_ok=True)
@@ -560,6 +566,11 @@ async def _process_pdf_after_read_status(
                 "media_type": "document",
                 "read_status": read_status,
                 "pdf_metadata": pdf_meta,
+                # El caption que el usuario escribió junto al PDF. Sin esta
+                # línea nunca llegaba al LLM: se guardaba en
+                # `pending_read_status` y moría ahí. E1 de
+                # docs/audit-2026-07-31.md.
+                "user_context": pending.get("user_context"),
             }
             await query.edit_message_text(
                 "No se pudo extraer texto del PDF (puede ser escaneado).",
@@ -592,6 +603,7 @@ async def _process_pdf_after_read_status(
             "media_type": "document",
             "read_status": read_status,
             "metadata": pdf_meta,
+            "user_context": pending.get("user_context"),
         }
 
         if is_paper:

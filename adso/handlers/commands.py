@@ -194,21 +194,28 @@ async def handle_clasificar(
     preview para confirmación del usuario (mismo flujo que captura normal).
     Si hay más notas pendientes, avisa al usuario para que vuelva a invocar el comando.
     """
-    if _is_awaiting_text_input(context):
-        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
-        return
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
+    # `reply` se resuelve ANTES de los dos guards: invocado via
+    # CB_CLASIFICAR_INBOX, `update.message` es None y ambos guards lo usaban
+    # directamente → AttributeError → error handler global con mensaje
+    # genérico, justo al apretar un botón del propio bot. E7 de
+    # docs/audit-2026-07-31.md.
     if update.callback_query:
         await update.callback_query.answer()
         reply = update.callback_query.message.reply_text
     else:
         reply = update.message.reply_text
 
+    if _is_awaiting_text_input(context):
+        await reply("Hay una corrección pendiente. Escribir el texto primero.")
+        return
+
     if _has_pending_keyboard(context):
         ids = context.user_data.setdefault("block_msg_ids", [])
-        ids.append(update.message.message_id)
+        if update.effective_message:
+            ids.append(update.effective_message.message_id)
         sent = await reply("Hay una acción pendiente. Resolver los botones antes de continuar.")
         ids.append(sent.message_id)
         return
@@ -232,12 +239,27 @@ async def handle_clasificar(
         await reply("No hay notas pendientes de clasificar.")
         return
 
-    ref, note = caso_b[0]
+    # Se busca la primera nota CON contenido. Antes se tomaba `caso_b[0]` y, si
+    # estaba vacía, se hacía `return` — el mensaje decía "saltando" pero no
+    # saltaba: la misma nota vacía se elegía en cada invocación y el resto de la
+    # cola quedaba inalcanzable para siempre. E8 de docs/audit-2026-07-31.md
+    # (`_reclassify_inbox_impl` ya usaba `continue`).
+    vacias: list[str] = []
+    for ref, note in caso_b:
+        if note.body and note.body.strip():
+            break
+        vacias.append(ref.path.name)
+    else:
+        await reply(
+            "Las notas pendientes no tienen contenido: "
+            f"{', '.join(vacias)}. Revisar en el vault."
+        )
+        return
+
     orig_fm = note.frontmatter
 
-    if not note.body or not note.body.strip():
-        await reply(f"Nota {ref.path.name} sin contenido, saltando. Reintentar más tarde.")
-        return
+    if vacias:
+        await reply(f"Saltando {len(vacias)} nota(s) sin contenido: {', '.join(vacias)}.")
 
     projects, areas = await _get_existing_items(vault_path)
     existing_tags = await _get_existing_tags(vault_path)

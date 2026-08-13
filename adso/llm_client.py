@@ -387,6 +387,26 @@ def build_user_message(content: str, user_context: Optional[str] = None) -> str:
     return user_message
 
 
+async def _safe_on_retry(on_retry: Any, attempt: int) -> None:
+    """Notifica el reintento sin dejar que su fallo aborte la clasificación.
+
+    El `on_retry` de captura hace `edit_message_text`, que puede lanzar por red
+    caída — plausible justo cuando Gemini tampoco responde. Esa excepción subía
+    desde el `except` del retry loop y abortaba `classify()` **sin pasar por el
+    modo degradado**; como los `_cb_intent_*` ya habían popeado
+    `pending_raw_content`, el texto del usuario se perdía. E12 de
+    docs/audit-2026-07-31.md.
+
+    Args:
+        on_retry: Callback async(attempt, max).
+        attempt: Número de intento a informar.
+    """
+    try:
+        await on_retry(attempt, MAX_RETRIES)
+    except Exception as e:
+        logger.warning("on_retry falló (no bloqueante): %s", e)
+
+
 async def classify(
     content: str,
     media_type: str,
@@ -460,7 +480,7 @@ async def classify(
                     attempt, MAX_RETRIES, wait,
                 )
                 if on_retry and attempt < MAX_RETRIES:
-                    await on_retry(attempt + 1, MAX_RETRIES)
+                    await _safe_on_retry(on_retry, attempt + 1)
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(wait)
             else:
@@ -468,7 +488,7 @@ async def classify(
                     "Attempt %d/%d failed: %s", attempt, MAX_RETRIES, e
                 )
                 if on_retry and attempt < MAX_RETRIES:
-                    await on_retry(attempt + 1, MAX_RETRIES)
+                    await _safe_on_retry(on_retry, attempt + 1)
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(RETRY_DELAYS[attempt - 1])
 

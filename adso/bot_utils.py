@@ -120,6 +120,13 @@ def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     if ud.get("pending_note", {}).get("awaiting_correction"):
         return True
+    # `pending_description` espera texto (la descripción de un archivo sin
+    # caption), así que `_has_pending_keyboard` lo excluye a propósito. Pero sin
+    # incluirlo acá, mandar un segundo binario pasaba todos los guards y
+    # sobreescribía el estado: el temporal del primer archivo quedaba huérfano
+    # y el archivo se perdía sin aviso. E6 de docs/audit-2026-07-31.md.
+    if ud.get("pending_description"):
+        return True
     return False
 
 
