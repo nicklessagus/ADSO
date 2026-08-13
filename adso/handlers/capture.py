@@ -52,6 +52,64 @@ _INJECTION_PREVIEW_WARNING = (
 )
 
 
+async def _suggest_links(
+    context: ContextTypes.DEFAULT_TYPE,
+    query_text: str,
+    embedding: Optional[list[float]] = None,
+) -> tuple[list[dict], Optional[list[float]]]:
+    """Busca wikilinks sugeridos por similitud y devuelve el vector usado.
+
+    Punto único del invariante que CLAUDE.md marca como delicado: **qué texto se
+    embebe y qué vector se puede reutilizar después**. La secuencia
+    "computar/reusar embedding → `query_similar` → mapear a links" vivía copiada
+    en tres flujos de captura con variaciones sutiles entre copias; el caller
+    decide ahora una sola cosa (si tiene un vector previo válido) y el resto es
+    idéntico para todos. I5 de docs/audit-2026-07-31.md.
+
+    El vector devuelto corresponde a `query_text`. **Solo puede guardarse como
+    `_body_embedding` si `query_text` es el body de la nota** — el flujo de arXiv
+    busca por el abstract, que no es el body, y guardarlo indexaría la nota con
+    un embedding ajeno a su texto.
+
+    Nunca lanza: la sugerencia de links es best-effort y un fallo de la API no
+    puede tumbar la captura (perder el preview es perder la nota).
+
+    Args:
+        context: Bot context (de ahí salen `settings` y el cliente de embeddings).
+        query_text: Texto por el que se buscan notas similares.
+        embedding: Vector ya calculado de `query_text`, si el caller lo tiene.
+
+    Returns:
+        Tupla `(links_sugeridos, embedding_usado)`. `([], embedding)` si no hay
+        cliente de embeddings, si `query_text` está vacío o si la API falla.
+    """
+    if not query_text:
+        return [], embedding
+
+    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
+    if not embeddings:
+        return [], embedding
+
+    settings: Settings = context.bot_data["settings"]
+    try:
+        if embedding is None:
+            embedding = await embeddings.compute_embedding(query_text)
+        similar = await embeddings.query_similar(
+            query_text=query_text,
+            n_results=settings.links.max_suggestions,
+            threshold=settings.links.similarity_threshold,
+            query_embedding=embedding,
+        )
+    except Exception as e:
+        logger.warning("Error buscando links similares: %s", e)
+        return [], embedding
+
+    links = [
+        {"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar
+    ]
+    return links, embedding
+
+
 def _redirect_unimplemented_mode(result: dict, content: str) -> str:
     """Redirige los modos no implementados (query, edit) a capture, re-validando.
 
@@ -269,23 +327,9 @@ async def _classify_and_preview(
         if local_date:
             fm["due_date"] = local_date
 
-    body_embedding: Optional[list] = None
-    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
-    if embeddings and body:
-        try:
-            # Embeder el body una sola vez: se reutiliza al indexar en _cb_confirm
-            # si el body no cambió (evita una segunda llamada a la API por captura).
-            body_embedding = await embeddings.compute_embedding(body)
-            similar = await embeddings.query_similar(
-                query_text=body,
-                n_results=settings.links.max_suggestions,
-                threshold=settings.links.similarity_threshold,
-                query_embedding=body_embedding,
-            )
-            if similar:
-                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
-        except Exception as e:
-            logger.warning("Error buscando links similares: %s", e)
+    # El body se embebe una sola vez: el vector viaja en el payload y `_cb_confirm`
+    # lo reutiliza al indexar si el body no cambió (sin "Ver también" ni adjunto).
+    suggested_links, body_embedding = await _suggest_links(context, body)
 
     context.user_data["pending_note"] = result
     result["payload"]["suggested_links"] = suggested_links
@@ -659,22 +703,13 @@ async def _handle_capture_from_callback(
     fm.setdefault("media_type", "text")
 
     if not suggested_links and body:
-        settings: Settings = context.bot_data["settings"]
-        embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
-        if embeddings:
-            try:
-                body_embedding = payload.get("_body_embedding") or await embeddings.compute_embedding(body)
-                payload["_body_embedding"] = body_embedding
-                similar = await embeddings.query_similar(
-                    query_text=body,
-                    n_results=settings.links.max_suggestions,
-                    threshold=settings.links.similarity_threshold,
-                    query_embedding=body_embedding,
-                )
-                if similar:
-                    suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
-            except Exception as e:
-                logger.warning("Error buscando links similares en callback: %s", e)
+        # `query_text` es el body, así que el vector devuelto SÍ puede guardarse
+        # como `_body_embedding` para que `_cb_confirm` lo reutilice.
+        suggested_links, body_embedding = await _suggest_links(
+            context, body, embedding=payload.get("_body_embedding")
+        )
+        if body_embedding is not None:
+            payload["_body_embedding"] = body_embedding
         payload["suggested_links"] = suggested_links
 
     context.user_data["pending_note"] = result
@@ -1234,19 +1269,11 @@ async def _classify_and_preview_arxiv(
     fm["date_modified"] = now
     fm["source"] = "telegram"
 
-    suggested_links: list[dict] = []
-    embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
-    if embeddings and metadata.get("abstract"):
-        try:
-            similar = await embeddings.query_similar(
-                query_text=metadata["abstract"],
-                n_results=settings.links.max_suggestions,
-                threshold=settings.links.similarity_threshold,
-            )
-            if similar:
-                suggested_links = [{"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar]
-        except Exception as e:
-            logger.warning("Error buscando links similares: %s", e)
+    # Los links se buscan por el ABSTRACT, no por el body (que es callout +
+    # abstract + Personal Notes). El vector devuelto se descarta a propósito:
+    # guardarlo como `_body_embedding` haría que `_cb_confirm` indexe la nota
+    # con el embedding del abstract en vez del de su texto real.
+    suggested_links, _ = await _suggest_links(context, metadata.get("abstract", ""))
 
     result["payload"]["suggested_links"] = suggested_links
     context.user_data["pending_note"] = result
