@@ -87,11 +87,6 @@ class WhisperConfig:
 
 
 @dataclass
-class ContentExtractionConfig:
-    engine: str = "gemini"
-
-
-@dataclass
 class ReindexConfig:
     enabled: bool = True
     time: str = "03:00"
@@ -172,9 +167,6 @@ class Settings:
     vault_seed: VaultSeedConfig = field(default_factory=VaultSeedConfig)
     vault: VaultConfig = field(default_factory=VaultConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
-    content_extraction: ContentExtractionConfig = field(
-        default_factory=ContentExtractionConfig
-    )
     reindex: ReindexConfig = field(default_factory=ReindexConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
@@ -376,12 +368,6 @@ def _validate_types(settings: Settings) -> None:
     if settings.whisper.model not in valid_whisper:
         raise ConfigError(f"whisper.model: '{settings.whisper.model}' no es válido (tiny | base)")
 
-    valid_engines = {"gemini", "trafilatura"}
-    if settings.content_extraction.engine not in valid_engines:
-        raise ConfigError(
-            f"content_extraction.engine: '{settings.content_extraction.engine}' "
-            f"no es válido (gemini | trafilatura)"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -444,12 +430,6 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         vault_seed=_build_vault_seed(raw.get("vault_seed")),
         vault=_build_section(VaultConfig, raw.get("vault"), "vault", unknown),
         whisper=_build_section(WhisperConfig, raw.get("whisper"), "whisper", unknown),
-        content_extraction=_build_section(
-            ContentExtractionConfig,
-            raw.get("content_extraction"),
-            "content_extraction",
-            unknown,
-        ),
         reindex=_build_section(ReindexConfig, raw.get("reindex"), "reindex", unknown),
         sync=_build_section(SyncConfig, raw.get("sync"), "sync", unknown),
         backup=_build_section(BackupConfig, raw.get("backup"), "backup", unknown),

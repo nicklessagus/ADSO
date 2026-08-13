@@ -51,9 +51,6 @@ whisper:
   model_dir: /app/data/whisper     # directorio de descarga/caché del modelo (debe ser escribible)
   language: es                     # idioma fijo (evita detección automática, más rápido)
 
-# ─── Extracción de contenido web ────────────────────────────────────────────
-content_extraction:
-  engine: gemini                   # gemini (único valor funcional)
 
 # ─── Documentos ─────────────────────────────────────────────────────────────
 documents:

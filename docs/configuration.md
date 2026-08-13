@@ -67,12 +67,6 @@ whisper:
   language: es                     # idioma fijo para transcripción (evita detección automática, mejora velocidad)
                                    # null para auto-detect (útil si se mezclan idiomas)
 
-# ─── Extracción de contenido web ───────────────────────────────────────────
-content_extraction:
-  engine: gemini                 # gemini (único valor funcional — Gemini lee la URL directamente)
-                                 # la opción trafilatura está reservada pero NO implementada:
-                                 # ningún código la consume y la dependencia no está instalada
-
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:
   enabled: true
@@ -158,7 +152,13 @@ Se cargan y se validan, pero **ningún módulo los lee todavía** (I1 de
 | `sync.interval_minutes` | cron de reconciliación con Google Tasks (§5.2) |
 | `llm.max_web_tokens`, `llm.max_paper_tokens` | truncado por tokens; hoy `document_extractor.py` trunca por caracteres con constantes hardcodeadas |
 | `rag.max_expansion_depth` | expansión desde nodo (Fase 7 completa) |
-| `content_extraction.engine` | motor alternativo de extracción; `trafilatura` se valida pero no es dependencia del proyecto |
+
+La sección `content_extraction` **se eliminó** (2026-08-13, I1 de
+`docs/audit-2026-07-31.md`): era la única sin fase asociada y su validación
+podía abortar el arranque comparando contra `trafilatura`, que ni siquiera es
+dependencia del proyecto. Gemini lee las URLs directamente y no hay motor
+alternativo previsto. Si aparece en un `config.yaml` viejo se ignora con el
+WARNING de clave desconocida.
 
 ## Notas
 

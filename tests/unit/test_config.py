@@ -42,8 +42,6 @@ vault:
     - ".obsidian"
 whisper:
   model: tiny
-content_extraction:
-  engine: trafilatura
 reindex:
   enabled: false
   time: "04:00"
@@ -71,7 +69,6 @@ weekly_report:
         assert s.links.similarity_threshold == 0.9
         assert s.links.max_suggestions == 3
         assert s.whisper.model == "tiny"
-        assert s.content_extraction.engine == "trafilatura"
         assert s.reindex.enabled is False
         assert s.sync.interval_minutes == 15
         assert s.backup.debounce_seconds == 60
@@ -164,11 +161,6 @@ class TestInvalidConfig:
     def test_invalid_whisper_model(self, config_dir: Path) -> None:
         path = _write_config(config_dir, "whisper:\n  model: large\n")
         with pytest.raises(ConfigError, match="whisper.model"):
-            load_settings(path)
-
-    def test_invalid_engine(self, config_dir: Path) -> None:
-        path = _write_config(config_dir, "content_extraction:\n  engine: beautifulsoup\n")
-        with pytest.raises(ConfigError, match="content_extraction.engine"):
             load_settings(path)
 
     def test_invalid_day(self, config_dir: Path) -> None:
@@ -331,3 +323,31 @@ llm:
 """)
         with pytest.raises(ConfigError, match="llm"):
             load_settings(path)
+
+
+class TestContentExtractionRemovida:
+    """I1 de docs/audit-2026-07-31.md — decisión 2026-08-13.
+
+    `content_extraction` se borró: era la única sección sin fase asociada, y
+    su validación (`engine` contra `{gemini, trafilatura}`) podía **abortar el
+    arranque** por un campo que ningún módulo lee — con `trafilatura` que ni
+    siquiera es dependencia del proyecto. El resto de la config sin consumir se
+    mantiene como contrato de fases con diseño escrito.
+    """
+
+    def test_engine_invalido_ya_no_aborta_el_arranque(self, config_dir: Path) -> None:
+        path = _write_config(config_dir, """
+content_extraction:
+  engine: loquesea
+""")
+        # No debe lanzar: la sección ya no existe, así que tampoco se valida.
+        load_settings(path)
+
+    def test_se_reporta_como_clave_desconocida(self, config_dir: Path) -> None:
+        """Si alguien la deja en su config.yaml, el loader avisa (I2)."""
+        path = _write_config(config_dir, "content_extraction:\n  engine: gemini\n")
+        assert "content_extraction" in load_settings(path).unknown_keys
+
+    def test_settings_no_expone_el_campo(self, config_dir: Path) -> None:
+        settings = load_settings(_write_config(config_dir, "---\n"))
+        assert not hasattr(settings, "content_extraction")
