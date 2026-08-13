@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +194,29 @@ class Settings:
 # Builders
 # ---------------------------------------------------------------------------
 
+def _primary_user_id(raw: str) -> int:
+    """ID principal de `TELEGRAM_ALLOWED_USER_ID` (el primero de la lista).
+
+    `security.py` acepta varios IDs separados por comas, pero acá se hacía
+    `int(...)` directo sobre el valor crudo: con `"123,456"` el bot moría al
+    arrancar con un `ValueError` sin mensaje de configuración. Este campo se usa
+    para *mandar* notificaciones (destinatario único), así que se toma el
+    primero; la autorización sigue usando el set completo de `security.py`.
+    G7 de docs/audit-2026-07-31.md.
+
+    Args:
+        raw: Valor crudo de la variable de entorno.
+
+    Returns:
+        Primer ID numérico, o 0 si no hay ninguno.
+    """
+    for parte in raw.split(","):
+        parte = parte.strip()
+        if parte.isdigit():
+            return int(parte)
+    return 0
+
+
 def _build_section(
     cls: type,
     data: dict[str, Any] | None,
@@ -329,6 +353,21 @@ def _validate_types(settings: Settings) -> None:
     if not 0.0 <= settings.llm.disambiguation_threshold <= 1.0:
         raise ConfigError("llm.disambiguation_threshold debe estar entre 0.0 y 1.0")
 
+    # Las horas se validan acá y no al programar el job: `bot.py` hacía
+    # `datetime.strptime(settings.reindex.time, "%H:%M")` y un "3am" en el YAML
+    # mataba el arranque con traceback crudo, mientras el resto de la config da
+    # ConfigError con mensaje claro. G9 de docs/audit-2026-07-31.md.
+    for campo, valor in (
+        ("reindex.time", settings.reindex.time),
+        ("weekly_report.time", settings.weekly_report.time),
+    ):
+        try:
+            datetime.strptime(str(valor), "%H:%M")
+        except (ValueError, TypeError):
+            raise ConfigError(
+                f"{campo}: '{valor}' no es una hora válida (formato HH:MM, ej: 03:00)"
+            ) from None
+
     valid_days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
     if settings.weekly_report.day not in valid_days:
         raise ConfigError(f"weekly_report.day: '{settings.weekly_report.day}' no es válido")
@@ -388,7 +427,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
     settings = Settings(
         # Variables de entorno (con defaults para desarrollo)
         telegram_token=os.environ.get("TELEGRAM_TOKEN", ""),
-        telegram_allowed_user_id=int(os.environ.get("TELEGRAM_ALLOWED_USER_ID", "0")),
+        telegram_allowed_user_id=_primary_user_id(
+            os.environ.get("TELEGRAM_ALLOWED_USER_ID", "0")
+        ),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         groq_api_key=os.environ.get("GROQ_API_KEY", ""),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),

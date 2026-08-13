@@ -17,6 +17,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from adso.bot_utils import _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import Settings
 from adso.constants import CB_QUERY_REPORT
 from adso.embeddings import EmbeddingsClient
@@ -34,6 +35,20 @@ _INLINE_MAX = 3
 @authorized
 async def handle_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /buscar <consulta>: retrieval semántico sobre el vault."""
+    # Mismo guard que /status, /clasificar y /reporte: durante el lock de
+    # corrección o con un teclado pendiente, los comandos quedan bloqueados
+    # (CLAUDE.md). G8 de docs/audit-2026-07-31.md.
+    if _is_awaiting_text_input(context):
+        await update.message.reply_text(
+            "Hay una corrección pendiente. Escribir el texto primero."
+        )
+        return
+    if _has_pending_keyboard(context):
+        await update.message.reply_text(
+            "Hay una acción pendiente. Resolver los botones antes de continuar."
+        )
+        return
+
     query_text = " ".join(context.args).strip() if context.args else ""
     if not query_text:
         await update.message.reply_text(

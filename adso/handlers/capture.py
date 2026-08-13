@@ -707,7 +707,7 @@ async def _index_note_safe(
 
     try:
         rel = note_path.relative_to(vault_path)
-        note_id = str(rel).replace(".md", "")
+        note_id = str(rel.with_suffix(""))
         metadata = {
             "path": str(rel),
             "type": fm.get("type", ""),
@@ -779,6 +779,24 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
 
     if not pending:
         await query.edit_message_text("No hay nota pendiente.")
+        return
+
+    # El callback tiene que venir del preview vigente. Sin esta verificación, un
+    # [Confirmar] de un preview anterior (scrolleando hacia arriba) escribía la
+    # nota NUEVA editando el mensaje VIEJO, y el preview vigente quedaba con
+    # botones sin estado detrás. G14 de docs/audit-2026-07-31.md.
+    # `msg_id` puede faltar si el estado viene de una versión anterior del bot:
+    # en ese caso se acepta, para no bloquear una captura ya hecha.
+    esperado = pending.get("msg_id")
+    actual = getattr(getattr(query, "message", None), "message_id", None)
+    if esperado is not None and actual is not None and esperado != actual:
+        logger.info(
+            "Confirmar desde un preview viejo (msg %s, vigente %s) — ignorado.",
+            actual, esperado,
+        )
+        await query.edit_message_text(
+            "Este preview ya no está vigente. Usar los botones del último mensaje."
+        )
         return
 
     payload = pending["payload"]

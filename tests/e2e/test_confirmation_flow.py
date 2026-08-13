@@ -212,15 +212,29 @@ class TestManageFlow:
         await handle_callback(cb_create, mock_context)
         assert "pending_operation" in mock_context.user_data
 
-        # Paso 3: confirmar
+        # Paso 3: confirmar. El camino por botón resuelve el nombre por regex y
+        # deja la descripción vacía, así que el bot la pide en vez de crear el
+        # índice con `description: ""` — CLAUDE.md la marca obligatoria y
+        # `_cb_manage_confirm` la re-valida (G10 de docs/audit-2026-07-31.md).
         cb_update = make_callback_query(data=CB_MANAGE_CONFIRM)
         await handle_callback(cb_update, mock_context)
 
-        # Verificar proyecto creado
         project_dir = vault_path / "01-Projects" / "nuevo-proyecto"
+        assert not project_dir.exists(), "no debe crearse sin descripción"
+        assert "descripción" in cb_update.callback_query.edit_message_text.await_args[0][0].lower()
+
+        # Paso 4: el usuario escribe la descripción → vuelve el preview de gestión
+        update_desc = make_update(text="Un proyecto nuevo de prueba.")
+        await handle_text(update_desc, mock_context)
+
+        # Paso 5: confirmar de nuevo → ahora sí se crea
+        cb_final = make_callback_query(data=CB_MANAGE_CONFIRM)
+        await handle_callback(cb_final, mock_context)
+
         assert project_dir.exists()
         index_path = project_dir / "_index.md"
         assert index_path.exists()
+        assert "Un proyecto nuevo de prueba." in index_path.read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     @patch("adso.handlers.capture.classify")

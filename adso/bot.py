@@ -83,7 +83,7 @@ async def _post_init(app: Application) -> None:
         """Elimina de ChromaDB el embedding de una nota borrada externamente y limpia wikilinks rotos."""
         try:
             rel = path.relative_to(vault_path)
-            note_id = str(rel).replace(".md", "")
+            note_id = str(rel.with_suffix(""))
             await embeddings.remove_note(note_id)
             _bot_logger.info("Embedding eliminado por borrado externo: %s", note_id)
         except Exception as exc:

@@ -16,10 +16,53 @@ from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
-_raw = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "")
-if not _raw.strip():
-    raise RuntimeError("TELEGRAM_ALLOWED_USER_ID is not set — bot refuses to start")
-ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip().isdigit()}
+def _parse_allowed_ids(raw: str) -> set[int]:
+    """Parsea `TELEGRAM_ALLOWED_USER_ID` (uno o varios IDs separados por comas).
+
+    El filtro `isdigit()` descartaba los valores no numéricos **sin error**: con
+    `"12a"` el set quedaba vacío y el bot arrancaba con lockout total en
+    silencio — nadie podía usarlo y no había nada en los logs que lo explicara.
+    G7 de docs/audit-2026-07-31.md.
+
+    Args:
+        raw: Valor crudo de la variable de entorno.
+
+    Returns:
+        Set de IDs numéricos.
+
+    Raises:
+        RuntimeError: Si está vacío o no queda ningún ID válido.
+    """
+    if not raw.strip():
+        raise RuntimeError("TELEGRAM_ALLOWED_USER_ID is not set — bot refuses to start")
+
+    ids: set[int] = set()
+    invalidos: list[str] = []
+    for parte in raw.split(","):
+        parte = parte.strip()
+        if not parte:
+            continue
+        if parte.isdigit():
+            ids.add(int(parte))
+        else:
+            invalidos.append(parte)
+
+    if not ids:
+        raise RuntimeError(
+            "TELEGRAM_ALLOWED_USER_ID no contiene ningún ID numérico válido "
+            f"(recibido: {raw!r}) — el bot quedaría inaccesible para todos"
+        )
+    if invalidos:
+        logger.warning(
+            "TELEGRAM_ALLOWED_USER_ID: se ignoran valores no numéricos: %s",
+            ", ".join(invalidos),
+        )
+    return ids
+
+
+ALLOWED_USER_IDS: set[int] = _parse_allowed_ids(
+    os.environ.get("TELEGRAM_ALLOWED_USER_ID", "")
+)
 
 
 def is_authorized(update: Update) -> bool:

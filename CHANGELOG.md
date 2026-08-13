@@ -18,6 +18,21 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 - Fixtures muertas: `tests/fixtures/sample_notes/` entero (7 archivos, cero referencias en la suite) y `llm_responses/empty_response.json` (el test homónimo construye `{}` inline)
 
 ### Fixed
+- **Bloque G de la auditoría 2026-07-31 — completo (14/14)**:
+  - **G1** — ventana TOCTOU entre elegir el nombre del archivo y escribirlo: una captura y `reclassify_inbox` creando notas con el mismo título el mismo día elegían el mismo candidato y la segunda **sobrescribía a la primera en silencio**. La reserva del nombre pasa a hacerse con `O_EXCL` (atómico a nivel kernel) en el mismo thread que la escritura
+  - **G7** — `TELEGRAM_ALLOWED_USER_ID` con un valor no numérico (`"12a"`) dejaba el set de IDs vacío **sin error**: lockout total y silencioso, sin nada en los logs. Ahora falla al arrancar con mensaje explícito. Y `"123,456"` mataba el arranque con `ValueError` crudo desde `config.py`, que hacía `int()` sobre el valor completo mientras `security.py` sí parseaba la lista
+  - **G10** — `[Confirmar]` por botón creaba proyecto/área con `description: ""`, violando la regla de CLAUDE.md. `_cb_manage_confirm` la re-valida y la pide. Al arreglarlo apareció que `_handle_manage_missing_fields` asumía que faltaban **ambos** campos: con solo la descripción faltante, tomaba el texto como nombre y pisaba el resuelto por regex
+  - **G14** — un `[Confirmar]` de un preview viejo (scrolleando hacia arriba) escribía la nota **nueva** editando el mensaje **viejo**, dejando el preview vigente con botones sin estado. El callback ahora se valida contra el `msg_id` del preview
+  - **G2** — el caché del vault devolvía copia *shallow*: las listas (`tags`, `authors`) eran las mismas del caché, así que un `append` de cualquier caller lo envenenaba para todos los scans siguientes. El miss path tenía el mismo problema que el hit
+  - **G8** — `/buscar` no respetaba el lock de corrección ni el teclado pendiente, a diferencia del resto de los comandos
+  - **G9** — `reindex.time: "3am"` mataba el arranque con traceback crudo; ahora es `ConfigError` con mensaje (también para `weekly_report.time`)
+  - **G4** — toda nota escrita por el bot quedaba `0600` (herencia de `mkstemp`) en vez de `0644`; si el archivo ya existía se preserva su modo
+  - **G3** — `GitBackup` nunca cerraba el `Repo`: GitPython retiene mmaps y procesos `git cat-file` que solo libera `close()`, y en la RPi hay un backup por captura
+  - **G5** — `.replace(".md", "")` sobre el path relativo corrompía `note_id` y los links `obsidian://` si algún directorio contenía ".md" en el nombre (4 sitios)
+  - **G6** — `authors` como string en una nota editada a mano hacía que `authors[:2]` devolviera dos **caracteres**: el reporte imprimía "S, m"
+  - **G12** — los `_index.md` de gestión no registraban `mark_bot_written` ni notificaban al backup: dependían de que el watcher tratara la escritura propia como cambio externo
+  - **G13** — gestión volcaba la excepción cruda (con paths internos) al chat
+  - **G11** — el prompt de `create_section` decía "Para crear el **área** hacen falta: nombre de la sección…"
 - **Bloque F de la auditoría 2026-07-31 — completo (10/10 pendientes; F9 ya estaba)**:
   - **F2** — el dedup de 2s del watcher **descartaba el último evento** en vez de debouncear: Obsidian autosalva dos veces en <2s y después dejás de editar, así que el re-embed corría con el contenido **intermedio** y el save final se perdía hasta el reindex nocturno — lo contrario del objetivo del watcher. Ahora una ráfaga colapsa a dos llamadas (una inmediata, una al final de la ventana) y `stop()` dispara los pendientes en vez de cancelarlos
   - **F3/F4** — el `callback_data` llevaba el nombre del proyecto/área: sin truncar en los selectores de destino (un directorio de ~27 chars acentuados supera los 64 **bytes** de Telegram → `BadRequest` al abrir `[Elegir área]`) y truncado a 32 chars en reportes (`scope_report` armaba un path inexistente → reporte vacío engañoso, sin error). Ahora viaja un token hash de 10 chars que se resuelve contra el vault; un teclado con el formato viejo sigue funcionando

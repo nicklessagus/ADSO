@@ -15,6 +15,8 @@ que varios threads del pool pueden tocar el caché en paralelo.
 
 from __future__ import annotations
 
+import copy
+
 import logging
 import threading
 from collections import OrderedDict
@@ -70,7 +72,13 @@ def parse_cached(path: Path) -> Optional[NoteData]:
         if entry is not None and entry[0] == mtime and entry[1] == size:
             _cache.move_to_end(key)
             _hits += 1
-            return NoteData(path=path, frontmatter=dict(entry[2]), body=entry[3])
+            # deepcopy y no dict(): la copia shallow compartía las listas
+            # (tags/authors/keywords) con el caché, así que un append en
+            # cualquier caller lo envenenaba para todos los scans siguientes,
+            # cross-thread. G2 de docs/audit-2026-07-31.md.
+            return NoteData(
+                path=path, frontmatter=copy.deepcopy(entry[2]), body=entry[3]
+            )
 
     # Miss: leer y parsear fuera del lock (la I/O es lenta y no debe
     # serializar a los demás threads).
@@ -101,7 +109,11 @@ def parse_cached(path: Path) -> Optional[NoteData]:
             _cache.popitem(last=False)
         _misses += 1
 
-    return NoteData(path=path, frontmatter=dict(meta), body=content)
+    # También deepcopy en el miss: `meta` es exactamente el dict que quedó
+    # guardado en `_cache`, así que devolverlo con copia shallow comparte las
+    # listas con la entrada recién cacheada — el mismo envenenamiento que en el
+    # hit, pero en la primera lectura. G2 de docs/audit-2026-07-31.md.
+    return NoteData(path=path, frontmatter=copy.deepcopy(meta), body=content)
 
 
 def invalidate(path: Path) -> None:

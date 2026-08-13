@@ -98,6 +98,28 @@ def _parse_fm_date(val) -> Optional[datetime]:
     return None
 
 
+def _normalize_authors(authors) -> list[str]:
+    """Normaliza el campo `authors` del frontmatter a lista de strings.
+
+    `authors[:2]` sobre un string devuelve dos **caracteres**, así que una nota
+    con `authors: "Smith, J."` —editada a mano o creada por otro cliente—
+    imprimía "S, m" en el reporte. El coercer de `llm_schema` solo cubre el
+    payload del LLM, no las notas releídas del vault. G6 de
+    docs/audit-2026-07-31.md.
+
+    Args:
+        authors: Valor crudo del frontmatter (lista, string, None u otro).
+
+    Returns:
+        Lista de strings, vacía si no había nada.
+    """
+    if isinstance(authors, list):
+        return [str(a) for a in authors]
+    if authors:
+        return [str(authors)]
+    return []
+
+
 def _obsidian_link(vault_path: Path, note_path: Path) -> str:
     """Genera un link obsidian:// para abrir una nota directamente.
 
@@ -109,7 +131,7 @@ def _obsidian_link(vault_path: Path, note_path: Path) -> str:
         String con el link obsidian://.
     """
     vault_name = urllib.parse.quote(vault_path.name)
-    rel = str(note_path.relative_to(vault_path)).replace(".md", "")
+    rel = str(note_path.relative_to(vault_path).with_suffix(""))
     file_encoded = urllib.parse.quote(rel, safe="/")
     return f"obsidian://open?vault={vault_name}&file={file_encoded}"
 
@@ -362,7 +384,7 @@ async def scope_report(
     lines.append(f"## Papers sin leer ({len(papers_unread)})\n")
     if papers_unread:
         for n in sorted(papers_unread, key=_priority_key):
-            authors = n.frontmatter.get("authors") or []
+            authors = _normalize_authors(n.frontmatter.get("authors"))
             year = n.frontmatter.get("year") or ""
             extra = ", ".join(str(a) for a in authors[:2])
             if year:
@@ -748,7 +770,7 @@ async def reading_queue(
         for n in group_sorted:
             fm = n.frontmatter
             priority = fm.get("priority") or ""
-            authors = fm.get("authors") or []
+            authors = _normalize_authors(fm.get("authors"))
             year = fm.get("year") or ""
             author_str = ", ".join(str(a) for a in authors[:2])
             if year:

@@ -11,13 +11,41 @@ from typing import Any, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _extract_name_from_command, _get_existing_items
+from adso.bot_utils import (
+    _extract_name_from_command,
+    _get_existing_items,
+    mark_bot_written,
+)
 from adso.config import Settings
 from adso.keyboards import _esc, build_manage_keyboard
 from adso.llm_client import classify
 from adso.vault_writer import _safe_component, create_note
 
 logger = logging.getLogger(__name__)
+
+
+_OPERATION_LABELS = {
+    "create_project": "proyecto",
+    "create_area": "área",
+    "create_section": "sección",
+}
+
+
+def _operation_label(operation: str) -> str:
+    """Etiqueta en español de una operación de gestión.
+
+    Antes era `"proyecto" if "project" in operation else "área"`: como
+    "project" no está en "create_section", el prompt decía "Para crear el
+    **área** hacen falta: nombre de la sección…". G11 de
+    docs/audit-2026-07-31.md.
+
+    Args:
+        operation: Nombre de la operación (`create_project`, etc.).
+
+    Returns:
+        Etiqueta legible; "elemento" si la operación no se reconoce.
+    """
+    return _OPERATION_LABELS.get(operation, "elemento")
 
 
 def pop_manage_state(context: ContextTypes.DEFAULT_TYPE) -> Optional[dict]:
@@ -49,18 +77,26 @@ async def _handle_manage_missing_fields(
     """
     pending = context.user_data["pending_operation"]
     params = pending["payload"]["params"]
+    missing = context.user_data.get("manage_missing_fields") or []
 
-    _SEP = re.compile(r"\s+[—–\-]\s+")
-    m = _SEP.search(text)
-    if m:
-        name = text[:m.start()].strip()
-        description = text[m.end():].strip()
-    elif ": " in text and not params.get("name"):
-        parts = text.split(": ", 1)
-        name, description = parts[0].strip(), parts[1].strip()
+    # Si lo único que falta es la descripción (típico del camino por botón, que
+    # resuelve el nombre por regex), el texto entero ES la descripción. Sin este
+    # caso, el `else` de abajo lo tomaba como nombre y pisaba el que ya estaba.
+    if missing == ["descripción"] and params.get("name"):
+        name = ""
+        description = text.strip()
     else:
-        name = text.strip()
-        description = ""
+        _SEP = re.compile(r"\s+[—–\-]\s+")
+        m = _SEP.search(text)
+        if m:
+            name = text[:m.start()].strip()
+            description = text[m.end():].strip()
+        elif ": " in text and not params.get("name"):
+            parts = text.split(": ", 1)
+            name, description = parts[0].strip(), parts[1].strip()
+        else:
+            name = text.strip()
+            description = ""
 
     if name:
         params["name"] = name
@@ -99,7 +135,7 @@ async def _handle_manage(
     if missing:
         context.user_data["pending_operation"] = result
         context.user_data["manage_missing_fields"] = missing
-        op_label = "proyecto" if "project" in operation else "área"
+        op_label = _operation_label(operation)
         await update.message.reply_text(
             f"Para crear el {op_label} hacen falta: <b>{', '.join(missing)}</b>.\n"
             f"Enviar el nombre y la descripción (ej: <i>Docencia — gestión de clases y materiales</i>)",
@@ -125,6 +161,28 @@ async def _handle_manage(
         reply_markup=build_manage_keyboard(),
         parse_mode="HTML",
     )
+
+
+async def _notify_index_written(
+    context: ContextTypes.DEFAULT_TYPE, path: Path, title: str
+) -> None:
+    """Registra un `_index.md` recién escrito y lo encola para el backup.
+
+    Mismo patrón que `_cb_confirm` y `reclassify_inbox`. Sin esto, el commit de
+    backup y el no-doble-embed dependían de que el `VaultWatcher` tratara la
+    escritura propia del bot como un cambio externo: notificación espuria en
+    modo debug, y nada en absoluto si el watcher está caído.
+    G12 de docs/audit-2026-07-31.md.
+
+    Args:
+        context: Bot context (para `bot_data`).
+        path: Path del `_index.md` escrito.
+        title: Título de la nota, para el mensaje de commit.
+    """
+    mark_bot_written(context.bot_data, path)
+    git_backup = context.bot_data.get("git_backup")
+    if git_backup:
+        await git_backup.notify(title)
 
 
 async def _cb_manage_confirm(
@@ -161,6 +219,25 @@ async def _cb_manage_confirm(
     if safe_name:
         params["name"] = safe_name
 
+    # `description` obligatoria: el flujo por botón dejaba `description=""` y
+    # ofrecía confirmar directo, así que se creaba el índice con descripción
+    # vacía — viola la regla "el bot la pide y no permite omitirla" (CLAUDE.md).
+    # G10 de docs/audit-2026-07-31.md.
+    if operation in ("create_project", "create_area"):
+        descripcion = (params.get("description") or "").strip()
+        if not descripcion or descripcion == "None":
+            # `pop_manage_state` ya popeó el estado: hay que reponerlo para que
+            # `_handle_manage_missing_fields` pueda retomar con el texto que
+            # escriba el usuario.
+            context.user_data["pending_operation"] = pending
+            context.user_data["manage_missing_fields"] = ["descripción"]
+            await query.edit_message_text(
+                f"Falta la descripción para crear el {_operation_label(operation)} "
+                f"'{params.get('name')}'. Escribirla a continuación:"
+            )
+            return
+        params["description"] = descripcion
+
     try:
         if operation == "create_project":
             project_dir = vault_path / "01-Projects" / params["name"]
@@ -184,7 +261,8 @@ async def _cb_manage_confirm(
                 f"## Descripción\n{params['description']}\n\n"
                 f"## Secciones\n\n## Estado\n- Creado: {datetime.now().strftime('%Y-%m-%d')}\n"
             )
-            await create_note(fm, body, vault_path)
+            index_path = await create_note(fm, body, vault_path)
+            await _notify_index_written(context, index_path, fm["title"])
             await query.edit_message_text(f"Proyecto '{params['name']}' creado.")
 
         elif operation == "create_area":
@@ -206,7 +284,8 @@ async def _cb_manage_confirm(
                 f"# {fm['title']}\n\n"
                 f"## Descripción\n{params['description']}\n"
             )
-            await create_note(fm, body, vault_path)
+            index_path = await create_note(fm, body, vault_path)
+            await _notify_index_written(context, index_path, fm["title"])
             await query.edit_message_text(f"Área '{params['name']}' creada.")
 
         elif operation == "create_section":
@@ -221,9 +300,14 @@ async def _cb_manage_confirm(
                 f"Operación '{operation}' todavía no está disponible."
             )
 
-    except Exception as e:
-        logger.error("Error en operación %s: %s", operation, e)
-        await query.edit_message_text(f"Error: {e}")
+    except Exception:
+        # Mensaje genérico al chat y traceback al log: el `f"Error: {e}"` volcaba
+        # la excepción cruda (paths internos incluidos) al usuario.
+        # G13 de docs/audit-2026-07-31.md.
+        logger.exception("Error en operación de gestión %s", operation)
+        await query.edit_message_text(
+            "No se pudo completar la operación. Ver los logs para el detalle."
+        )
 
 
 def _pop_pending_content(context: ContextTypes.DEFAULT_TYPE) -> tuple[str | None, dict]:

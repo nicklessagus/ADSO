@@ -10,6 +10,7 @@ import asyncio
 import html
 import logging
 import os
+import stat
 import re
 import tempfile
 from dataclasses import dataclass
@@ -108,6 +109,16 @@ def _atomic_write_sync(path: Path, content: str) -> None:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
+        # `mkstemp` crea el temporal con 0600 y `os.replace` los conserva: toda
+        # nota escrita por el bot quedaba 0600, distinta de una creada a mano y
+        # sin acceso por grupo. Se preserva el modo del destino si ya existía
+        # (el usuario pudo ajustarlo a propósito) y si no, 0644.
+        # G4 de docs/audit-2026-07-31.md.
+        try:
+            modo = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            modo = 0o644
+        os.chmod(tmp, modo)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -274,6 +285,49 @@ def _unique_path(dest_dir: Path, filename: str) -> Path:
         counter += 1
 
 
+def _reserve_and_write_sync(dest_dir: Path, filename: str, content: str) -> Path:
+    """Reserva un nombre libre y escribe el contenido, sin ventana TOCTOU.
+
+    `_unique_path` elegía el nombre y recién varios `await` después el
+    `os.replace` escribía. Dos escrituras concurrentes con el mismo título el
+    mismo día —una captura del usuario y `reclassify_inbox`, por ejemplo—
+    elegían el mismo candidato y la segunda **sobrescribía a la primera en
+    silencio**. Acá la reserva se hace con `O_EXCL`, que es atómico a nivel
+    kernel: dos procesos no pueden ganar el mismo nombre.
+    G1 de docs/audit-2026-07-31.md.
+
+    Corre entero en un thread (I/O bloqueante).
+
+    Args:
+        dest_dir: Directorio destino (se crea si no existe).
+        filename: Nombre deseado; si está tomado se prueba `stem-2`, `stem-3`…
+        content: Contenido completo del archivo.
+
+    Returns:
+        Path efectivamente escrito.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    base = Path(filename)
+    stem, suffix = base.stem, base.suffix
+    counter = 1
+    while True:
+        candidate = dest_dir / (filename if counter == 1 else f"{stem}-{counter}{suffix}")
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            counter += 1
+            continue
+        os.close(fd)
+        break
+
+    # El contenido se escribe con el mismo write atómico de siempre: el
+    # placeholder vacío que dejó la reserva se reemplaza de una. Un crash entre
+    # medio deja una nota vacía, nunca una nota pisada.
+    _atomic_write_sync(candidate, content)
+    return candidate
+
+
 def _clean_frontmatter(fm: dict) -> dict:
     """Limpia el frontmatter: remueve None y convierte fechas a objetos nativos.
 
@@ -404,22 +458,22 @@ async def create_note(
     else:
         filename = _make_filename(fm["title"], fm.get("date_created"))
 
-    # Path único
-    file_path = _unique_path(dest_dir, filename)
-
     if dry_run:
-        return file_path
-
-    # Crear directorios intermedios
-    await asyncio.to_thread(dest_dir.mkdir, parents=True, exist_ok=True)
+        # Solo para el preview: acá sí alcanza con mirar qué nombre quedaría
+        # libre, porque no se escribe nada.
+        return _unique_path(dest_dir, filename)
 
     # Construir contenido con python-frontmatter
     clean_fm = _clean_frontmatter(fm)
     post = _build_post(body, clean_fm)
     content = frontmatter.dumps(post)
 
-    # Escribir archivo (atómico: temp + fsync + replace)
-    await asyncio.to_thread(_atomic_write_sync, file_path, content)
+    # mkdir + reserva del nombre + escritura atómica, todo en un solo thread:
+    # entre elegir el nombre y escribirlo no puede haber ningún `await` o dos
+    # escrituras concurrentes se pisan (G1 de docs/audit-2026-07-31.md).
+    file_path = await asyncio.to_thread(
+        _reserve_and_write_sync, dest_dir, filename, content
+    )
 
     logger.info("Nota creada: %s", file_path)
     return file_path
@@ -1044,18 +1098,23 @@ class GitBackup:
         except git.InvalidGitRepositoryError:
             return ("not_repo", "")
 
-        repo.git.add(A=True)
-        if not repo.is_dirty(untracked_files=True):
-            return ("clean", "")
+        # `with`: GitPython retiene mmaps, file handles y procesos
+        # `git cat-file` persistentes que solo libera `close()`. Con uptime de
+        # semanas en la RPi y un backup por captura, se acumulan.
+        # G3 de docs/audit-2026-07-31.md.
+        with repo:
+            repo.git.add(A=True)
+            if not repo.is_dirty(untracked_files=True):
+                return ("clean", "")
 
-        author = git.Actor("ADSO", "adso@localhost")
-        repo.index.commit(message, author=author, committer=author)
-        try:
-            origin = repo.remote("origin")
-            origin.push()
-        except Exception as e:  # noqa: BLE001 — cualquier fallo de push se reporta
-            return ("push_failed", str(e))
-        return ("pushed", "")
+            author = git.Actor("ADSO", "adso@localhost")
+            repo.index.commit(message, author=author, committer=author)
+            try:
+                origin = repo.remote("origin")
+                origin.push()
+            except Exception as e:  # noqa: BLE001 — cualquier fallo de push se reporta
+                return ("push_failed", str(e))
+            return ("pushed", "")
 
     async def _do_backup(self) -> None:
         """Ejecuta git add + commit + push (parte bloqueante en un thread).

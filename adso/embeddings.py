@@ -406,7 +406,7 @@ class EmbeddingsClient:
                 continue
 
             # ID: ruta relativa sin extensión (ej: "01-Projects/tesis/nota")
-            note_id = str(rel).replace(".md", "")
+            note_id = str(rel.with_suffix(""))
 
             # Skip _index.md
             if md_path.stem == "_index":
