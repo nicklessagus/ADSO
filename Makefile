@@ -1,7 +1,7 @@
 COMPOSE := docker compose -f ~/docker/ADSO/docker-compose.yml
 DEPLOY_DIR := ~/docker/ADSO
 
-.PHONY: deploy stop restart logs status shell prune
+.PHONY: deploy stop restart logs status shell prune llm-baseline llm-check
 
 deploy:
 	cp config.yaml $(DEPLOY_DIR)/config.yaml
@@ -24,3 +24,13 @@ shell:
 
 prune:
 	docker image prune -f
+
+# Harness de regresión de modelo — pega contra la API real, ver
+# tests/llm_regression/README.md. Correr llm-baseline ANTES de evaluar candidatos.
+llm-baseline:
+	python scripts/llm_regression.py --save
+
+# make llm-check MODEL=gemini-3.7-flash BASE=gemini-3.5-flash-lite
+llm-check:
+	python scripts/llm_regression.py --model $(MODEL) \
+		--compare tests/llm_regression/baselines/$(BASE).json

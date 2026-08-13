@@ -351,6 +351,42 @@ The top-level keys "mode", "confidence", and "payload" are mandatory in every re
 # ---------------------------------------------------------------------------
 
 
+def build_user_message(content: str, user_context: Optional[str] = None) -> str:
+    """Construye el mensaje de usuario con el contenido envuelto en `<input>`.
+
+    Neutraliza cualquier tag de control (`<input>`, `</input>`, `<system>`,
+    `<user_context>`) que el contenido externo (PDF, OCR, abstract) pudiera
+    incluir para escaparse del wrapper: se inserta un espacio tras el ``<`` solo
+    cuando forma uno de nuestros tags, preservando el ``<`` legítimo (código,
+    matemática) del resto del texto.
+
+    Args:
+        content: Texto a clasificar (potencialmente no confiable).
+        user_context: Mensaje opcional del usuario que acompaña al contenido. Se
+            descarta si dispara ``check_injection_risk``.
+
+    Returns:
+        Mensaje listo para mandar al LLM.
+    """
+    safe_content = re.sub(
+        r"</?\s*(input|system|user_context)\b",
+        lambda m: m.group(0).replace("<", "< "),
+        content,
+        flags=re.IGNORECASE,
+    )
+    user_message = f"<input>\n{safe_content}\n</input>"
+    if user_context:
+        # Sanitize user_context to prevent tag-breaking injection.
+        # Remove angle brackets that could escape the <user_context> wrapper.
+        safe_context = re.sub(r"[<>]", "", user_context)
+        if check_injection_risk(safe_context):
+            logger.warning("Patrón de inyección detectado en user_context — descartado")
+            safe_context = None
+        if safe_context:
+            user_message += f"\n\n<user_context>{safe_context}</user_context>"
+    return user_message
+
+
 async def classify(
     content: str,
     media_type: str,
@@ -382,26 +418,7 @@ async def classify(
         if all retries are exhausted.
     """
     system_prompt = build_system_prompt(existing_projects, existing_areas, existing_tags)
-    # Neutralizar cualquier tag de control (<input>, </input>, <system>, etc.) que
-    # el contenido externo (PDF, OCR, abstract) pudiera incluir para escaparse del
-    # wrapper. Se inserta un espacio tras el "<" solo cuando forma uno de nuestros
-    # tags, preservando el "<" legítimo (código, matemática) del resto del texto.
-    safe_content = re.sub(
-        r"</?\s*(input|system|user_context)\b",
-        lambda m: m.group(0).replace("<", "< "),
-        content,
-        flags=re.IGNORECASE,
-    )
-    user_message = f"<input>\n{safe_content}\n</input>"
-    if user_context:
-        # Sanitize user_context to prevent tag-breaking injection.
-        # Remove angle brackets that could escape the <user_context> wrapper.
-        safe_context = re.sub(r"[<>]", "", user_context)
-        if check_injection_risk(safe_context):
-            logger.warning("Patrón de inyección detectado en user_context — descartado")
-            safe_context = None
-        if safe_context:
-            user_message += f"\n\n<user_context>{safe_context}</user_context>"
+    user_message = build_user_message(content, user_context)
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:

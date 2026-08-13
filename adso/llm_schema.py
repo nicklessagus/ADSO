@@ -148,7 +148,26 @@ _GEMINI_RESPONSE_SCHEMA = {
                 "summary": {"type": "STRING", "nullable": True},
                 # Manage mode
                 "operation": {"type": "STRING", "nullable": True},
-                "params": {"type": "OBJECT", "nullable": True},
+                # `params` DEBE declarar sus properties: el constrained decoding
+                # de Gemini solo puede emitir claves presentes en el schema, así
+                # que un OBJECT vacío devolvía siempre `{}` — con el nombre del
+                # proyecto visible en el input — y `_validate_manage_payload`
+                # tiraba LLMResponseError, mandando todo el modo manage por texto
+                # libre a modo degradado. Detectado por scripts/llm_regression.py.
+                "params": {
+                    "type": "OBJECT",
+                    "nullable": True,
+                    "properties": {
+                        "name": {"type": "STRING", "nullable": True},
+                        "description": {"type": "STRING", "nullable": True},
+                        "project": {"type": "STRING", "nullable": True},
+                        "old_name": {"type": "STRING", "nullable": True},
+                        "new_name": {"type": "STRING", "nullable": True},
+                        # convert_idea_to_project
+                        "note": {"type": "STRING", "nullable": True},
+                        "project_name": {"type": "STRING", "nullable": True},
+                    },
+                },
             },
         },
     },

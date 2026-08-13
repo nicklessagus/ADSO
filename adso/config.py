@@ -23,7 +23,11 @@ class ConfigError(Exception):
 # sola línea. Línea flash-lite estable; free tier jul-2026 ~1.000-1.500 RPD /
 # 15 RPM / 250k TPM (verificar cap real por proyecto en AI Studio — Google ya no
 # publica los números del free tier en la doc, solo en el dashboard de AI Studio).
-GEMINI_MODEL = "gemini-3.5-flash-lite"
+#
+# `ADSO_GEMINI_MODEL` overridea el default sin tocar código. Existe para que el
+# harness de regresión (`scripts/llm_regression.py`) pueda apuntar a un modelo
+# candidato sin editar este archivo; en producción se deja sin setear.
+GEMINI_MODEL = os.environ.get("ADSO_GEMINI_MODEL") or "gemini-3.5-flash-lite"
 
 
 # ---------------------------------------------------------------------------

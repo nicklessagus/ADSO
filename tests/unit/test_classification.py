@@ -466,3 +466,18 @@ class TestFrontmatterKeyWhitelist:
         assert "title" in ALLOWED_FRONTMATTER_KEYS
         assert "handler" not in ALLOWED_FRONTMATTER_KEYS
         assert "content" not in ALLOWED_FRONTMATTER_KEYS
+
+    def test_manage_params_declares_properties(self) -> None:
+        """El constrained decoding de Gemini solo emite claves declaradas.
+
+        Un ``params`` sin ``properties`` devolvía siempre ``{}`` y mandaba todo
+        el modo manage por texto libre a modo degradado. Guard de regresión: si
+        alguien vacía el schema, esto falla en CI en vez de en producción.
+        """
+        from adso.llm_schema import _GEMINI_RESPONSE_SCHEMA
+
+        params = _GEMINI_RESPONSE_SCHEMA["properties"]["payload"]["properties"]["params"]
+        declared = set(params.get("properties", {}))
+        # Cada campo que _validate_manage_payload exige debe ser declarable.
+        for required in ("name", "description", "project", "old_name", "new_name"):
+            assert required in declared, required

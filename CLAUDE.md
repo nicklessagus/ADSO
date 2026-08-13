@@ -358,6 +358,21 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 - Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
 - Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica).
 
+### Harness de regresión de modelo
+
+Antes de tocar `GEMINI_MODEL` hay que correr `scripts/llm_regression.py`, que verifica contra la API real que el modelo respete el **contrato estructural** que el resto del bot asume. No mide calidad de redacción ni de resumen: eso lo valida el usuario en el preview antes de confirmar cada nota. Mide lo que el usuario no ve — sobre todo que `validate_llm_response` no lance (si lanza, *toda* captura cae a modo degradado) y que el modelo no obedezca prompt injection.
+
+**No es un test de pytest a propósito:** pega contra la API y quema quota, así que vive en `scripts/` para que un `pytest` local o un cambio en CI no lo dispare por accidente. Los datos (`cases.yaml`) y las baselines viven en `tests/llm_regression/`. Reglas completas en `tests/llm_regression/README.md`.
+
+```bash
+make llm-baseline                                        # baseline del modelo actual
+make llm-check MODEL=gemini-3.7-flash BASE=gemini-3.5-flash-lite
+```
+
+`ADSO_GEMINI_MODEL` overridea `GEMINI_MODEL` sin tocar código — existe para que el harness apunte a un candidato; en producción se deja sin setear. Con `--compare` el exit code refleja **regresiones contra la baseline**, no fallas absolutas: lo que decide una actualización no es que el candidato sea perfecto, sino que no empeore nada. Baseline de `gemini-3.5-flash-lite` (ago-2026): 34/34, p50 1.5s.
+
+Dos detalles de diseño que costaron falsos positivos: R12 (injection) escanea frontmatter/`operation`/`params`/`summary` pero **nunca el `body`**, porque el body es transcripción legítima del input y cualquier marcador embebido aparece ahí sin que el modelo obedezca nada; y R5 (`type`) solo es regla dura cuando `media_type` no es `text`/`audio`, porque en texto y audio el type lo eligen los botones `[Tarea]`/`[Nota]` y el del LLM se descarta.
+
 ---
 
 ## Variables de entorno
@@ -372,6 +387,8 @@ GROQ_API_KEY               # fallback LLM cuando Gemini no responde; sin esta ke
 # Opcionales
 ANTHROPIC_API_KEY          # LLM secundario alternativo
 LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
+ADSO_GEMINI_MODEL          # overridea GEMINI_MODEL sin tocar código. Para el harness de
+                           # regresión (scripts/llm_regression.py); en producción sin setear.
 ADSO_TIMEZONE              # zona horaria IANA para parsear fechas relativas ("el viernes",
                            # "mañana"). Ej: America/Argentina/Buenos_Aires. Override explícito;
                            # si falta, se usa TZ (que docker-compose ya define) y luego UTC.
@@ -398,6 +415,7 @@ ADSO_GID                   # GID del usuario del host — default: 1000
 - **Routing de destino (`_resolve_dest_dir`):** todos los tipos (`reference`, `task`, `idea`) siguen el mismo orden: project > area > Inbox/None. `task` con project va a `01-Projects/{project}/` aunque tenga area seteada.
 - **Creación de proyecto/área desde bot:** `_extract_name_from_command()` parsea el nombre directamente con regex para patrones simples (`crear proyecto "X"`, `nuevo proyecto X`). Solo llama al LLM cuando el patrón no es reconocible (ej: "quiero un proyecto para mi tesis"). El intent ya viene confirmado por el botón, solo hace falta el nombre.
 - **Limpieza del estado de gestión (`pop_manage_state` en `manage.py`):** confirmar o cancelar una operación de gestión popea `pending_operation` **y** `manage_missing_fields` juntas. Ambas están en `_PENDING_FLOW_KEYS`; dejar la segunda colgada hacía que `reclassify_inbox` pospusiera cada pasada indefinidamente (el inbox nunca se drenaba) hasta un `/reset`. El helper cubre también las salidas tempranas de `_cb_manage_confirm` (nombre o proyecto inválido, elemento ya existente).
+- **`params` del modo manage con `properties` declaradas (`_GEMINI_RESPONSE_SCHEMA`):** el constrained decoding de Gemini solo puede emitir claves presentes en el schema, así que el `params: {"type": "OBJECT"}` sin `properties` devolvía siempre `{}` — incluso con el nombre del proyecto visible en el input. `_validate_manage_payload` entonces lanzaba `LLMResponseError` y **todo el modo manage por texto libre caía a modo degradado**: el fallback de `_cb_manage_create` (`manage.py`, cuando `_extract_name_from_command` no reconoce el patrón) proponía el texto crudo del usuario como nombre del proyecto tras gastar 3 reintentos. Detectado por `scripts/llm_regression.py` contra el modelo en producción. Guard de regresión en `test_manage_params_declares_properties`.
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve. El cron (`reclassify_inbox`) se salta la pasada si hay cualquier flujo interactivo en curso — `_PENDING_FLOW_KEYS` cubre todas las keys de flujo (nota/operación/audio/PDF extraído/PDF escaneado/read_status/arXiv/reporte), alineado con `_has_pending_keyboard`, para no notificar en medio de una interacción.
 - **Dedup de recursos (`save_resource`):** al copiar a `03-Resources/`, la reutilización de un archivo existente se decide por hash SHA-256 del contenido (con short-circuit por tamaño), no solo por tamaño. Dos archivos distintos del mismo tamaño ya no se confunden — el nuevo se guarda con sufijo numérico en vez de descartarse. Escritura vía `shutil.copy2`; hashing por chunks (memory-safe en RPi4).
 - **Google Tasks (estado real):** hoy solo hay **push unidireccional** — al confirmar una task se crea en la lista `ADSO` de Google Tasks (`create_task`); el `task_id` devuelto no se persiste todavía. El sync bidireccional descrito abajo es **diseño, no implementado** (ver `docs/improvements-2026-07.md` §5). Diseño previsto: sync cada 30 min (`sync.interval_minutes`), Calendar y Tasks reconciliados en el mismo cron; fuentes de verdad → contenido/estructura de la nota al vault; `scheduled`, `due_date`, `status: done` y título → bidireccional (gana el último cambio); borrar una task en Google Tasks movería la nota a `00-Inbox/` con `status: pending-classification`. Requiere primero persistir `gtask_id` en el frontmatter (§5.1) y el job de reconciliación (§5.2).
