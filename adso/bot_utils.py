@@ -202,11 +202,17 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
         data = context.user_data.pop(key, None)
         if not isinstance(data, dict):
             continue
-        # temp_path puede estar en la raíz (pending_fallback_pdf) o
-        # anidado en resource_file (pending_transcript)
-        temp_path = data.get("temp_path") or (
-            data.get("resource_file") or {}
-        ).get("temp_path")
+        # temp_path puede estar en la raíz (pending_fallback_pdf), anidado en
+        # `resource_file` (pending_transcript) o en `_resource_file` — el
+        # payload de `pending_note` usa el nombre con underscore, y sin
+        # contemplarlo `/reset` y [Cancelar] popeaban el estado sin borrar el
+        # temporal. En la RPi4 /tmp es tmpfs: RAM filtrada hasta el reinicio.
+        # F6 de docs/audit-2026-07-31.md.
+        temp_path = (
+            data.get("temp_path")
+            or (data.get("resource_file") or {}).get("temp_path")
+            or (data.get("_resource_file") or {}).get("temp_path")
+        )
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
 

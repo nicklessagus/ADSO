@@ -45,6 +45,7 @@ from adso.keyboards import (
     build_report_category_keyboard,
     build_report_items_keyboard,
     build_report_type_keyboard,
+    resolve_item_token,
 )
 from adso.reporters import health_report, ideas_report, reading_queue, scope_report
 from adso.security import authorized
@@ -189,7 +190,7 @@ async def handle_report_callback(
     # --- Scope final: generar reporte de proyecto/área/inbox ---
     if data.startswith(CB_REPORT_SCOPE_PREFIX):
         suffix = data[len(CB_REPORT_SCOPE_PREFIX):]
-        project, area, inbox = _parse_scope_suffix(suffix)
+        project, area, inbox = await _parse_scope_suffix(suffix, vault_path)
         await query.edit_message_text("Generando reporte...")
         await _send_report(
             query, context,
@@ -201,7 +202,7 @@ async def handle_report_callback(
     # --- Scope final: generar reporte de ideas ---
     if data.startswith(CB_REPORT_IDEAS_PREFIX):
         suffix = data[len(CB_REPORT_IDEAS_PREFIX):]
-        project, area, _ = _parse_scope_suffix(suffix)
+        project, area, _ = await _parse_scope_suffix(suffix, vault_path)
         await query.edit_message_text("Generando reporte de ideas...")
         await _send_report(
             query, context,
@@ -213,7 +214,7 @@ async def handle_report_callback(
     # --- Scope final: generar cola de lectura ---
     if data.startswith(CB_REPORT_READING_PREFIX):
         suffix = data[len(CB_REPORT_READING_PREFIX):]
-        project, area, _ = _parse_scope_suffix(suffix)
+        project, area, _ = await _parse_scope_suffix(suffix, vault_path)
         await query.edit_message_text("Generando cola de lectura...")
         await _send_report(
             query, context,
@@ -273,7 +274,9 @@ async def _show_items_keyboard(
     )
 
 
-def _parse_scope_suffix(suffix: str) -> tuple[Optional[str], Optional[str], bool]:
+async def _parse_scope_suffix(
+    suffix: str, vault_path: Path
+) -> tuple[Optional[str], Optional[str], bool]:
     """Parsea el sufijo del callback_data de scope.
 
     Formatos:
@@ -292,10 +295,14 @@ def _parse_scope_suffix(suffix: str) -> tuple[Optional[str], Optional[str], bool
         return None, None, True
     if suffix == "all":
         return None, None, False
+    # El sufijo lleva un token, no el nombre: antes viajaba el nombre truncado
+    # a 32 chars y `scope_report` armaba `01-Projects/{truncado}`, un path
+    # inexistente → "No se encontraron notas", reporte vacío y sin error.
+    # F3 de docs/audit-2026-07-31.md.
     if suffix.startswith("p:"):
-        return suffix[2:], None, False
+        return await resolve_item_token(suffix[2:], vault_path, True), None, False
     if suffix.startswith("a:"):
-        return None, suffix[2:], False
+        return None, await resolve_item_token(suffix[2:], vault_path, False), False
     return None, None, False
 
 

@@ -730,7 +730,11 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
     )
 
     modified = 0
-    for md_path in vault_path.rglob("*.md"):
+    # El generator de rglob hace un readdir bloqueante en cada paso, y esta
+    # función corre en el callback de delete del watcher — se materializa la
+    # lista en un hilo. F11 de docs/audit-2026-07-31.md.
+    md_files = await asyncio.to_thread(lambda: list(vault_path.rglob("*.md")))
+    for md_path in md_files:
         if md_path == deleted_path or md_path.stem == "_index":
             continue
         try:
@@ -744,10 +748,17 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
 
         new_content = _strip_broken_links_in_ver_tambien(raw, link_re)
         new_content = _remove_empty_ver_tambien(new_content)
-        new_content = new_content.rstrip("\n") + "\n"
 
+        # La comparación va ANTES de normalizar el newline final: aplicando el
+        # rstrip siempre, una nota que menciona el link fuera de "## Ver
+        # también" y cuyo newline final difiere se reescribía sin cambio real →
+        # mtime bump → evento del watcher → re-embed espurio (llamada a Gemini)
+        # + churn del backup, por cada delete externo. F11 de
+        # docs/audit-2026-07-31.md.
         if new_content == raw:
             continue
+
+        new_content = new_content.rstrip("\n") + "\n"
 
         try:
             await asyncio.to_thread(_atomic_write_sync, md_path, new_content)

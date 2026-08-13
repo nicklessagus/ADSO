@@ -89,6 +89,7 @@ from adso.keyboards import (
     build_area_selector,
     build_capture_keyboard,
     build_project_selector,
+    resolve_item_token,
 )
 from adso.handlers.reports import handle_report_callback
 from adso.security import authorized
@@ -149,12 +150,28 @@ async def handle_callback(
         await _cb_dest(query, context, dest_type="inbox")
 
     elif data.startswith(CB_DEST_AREA_PREFIX):
-        area = data[len(CB_DEST_AREA_PREFIX):]
-        await _cb_dest(query, context, dest_type="area", dest_name=area)
+        # El callback_data lleva un token, no el nombre — ver F3/F4 en
+        # docs/audit-2026-07-31.md.
+        area = await resolve_item_token(
+            data[len(CB_DEST_AREA_PREFIX):], vault_path, is_project=False
+        )
+        if area is None:
+            await query.edit_message_text(
+                "Esa área ya no existe. Elegir otro destino."
+            )
+        else:
+            await _cb_dest(query, context, dest_type="area", dest_name=area)
 
     elif data.startswith(CB_DEST_PROJECT_PREFIX):
-        project = data[len(CB_DEST_PROJECT_PREFIX):]
-        await _cb_dest(query, context, dest_type="project", dest_name=project)
+        project = await resolve_item_token(
+            data[len(CB_DEST_PROJECT_PREFIX):], vault_path, is_project=True
+        )
+        if project is None:
+            await query.edit_message_text(
+                "Ese proyecto ya no existe. Elegir otro destino."
+            )
+        else:
+            await _cb_dest(query, context, dest_type="project", dest_name=project)
 
     elif data == CB_CHOOSE_AREA:
         keyboard = await build_area_selector(vault_path)

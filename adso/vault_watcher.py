@@ -188,6 +188,8 @@ class VaultWatcher:
         # (inotify dispara CREATE + MODIFY al escribir un archivo nuevo)
         self._recent_events: Dict[Path, datetime] = {}
         self._dedup_window = timedelta(seconds=2)
+        # Cambios deduplicados esperando el trailing edge de su ventana (F2).
+        self._trailing_tasks: Dict[Path, asyncio.Task] = {}
 
     @property
     def stats(self) -> WatcherStats:
@@ -224,6 +226,17 @@ class VaultWatcher:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        # Cambios esperando el trailing edge: se disparan YA en vez de
+        # cancelarse. Si no, un shutdown dentro de la ventana pierde el último
+        # save igual que antes del fix de F2 — con el agravante de que el
+        # usuario cree que el bot se apagó limpio.
+        if self._trailing_tasks:
+            pendientes = list(self._trailing_tasks.items())
+            self._trailing_tasks.clear()
+            for path, task in pendientes:
+                task.cancel()
+                if self._on_external_change:
+                    self._spawn(self._on_external_change(path))
         # Drenar tareas de callback en vuelo (re-embed/delete) antes de salir.
         if self._bg_tasks:
             await asyncio.gather(*self._bg_tasks, return_exceptions=True)
@@ -255,6 +268,46 @@ class VaultWatcher:
         self._recent_events = {p: t for p, t in self._recent_events.items() if t > cutoff}
         return False
 
+    def _schedule_trailing_change(self, path: Path) -> None:
+        """Re-agenda un cambio deduplicado para el final de la ventana.
+
+        El dedup solo descartaba el evento, y eso perdía el **último** save:
+        Obsidian autosalva dos veces en menos de la ventana y después el
+        usuario deja de editar, así que el re-embed corría con el contenido
+        intermedio y el estado final no se indexaba hasta el reindex nocturno.
+        Con trailing edge, una ráfaga colapsa a dos llamadas —una inmediata y
+        una al final— en vez de a una sola con contenido viejo. F2 de
+        docs/audit-2026-07-31.md.
+
+        Args:
+            path: Path del archivo cuyo evento se dedupeó.
+        """
+        previa = self._trailing_tasks.get(path)
+        if previa and not previa.done():
+            # Ráfaga larga: la ventana se corre hacia adelante, no se acumulan
+            # tareas por evento.
+            previa.cancel()
+        self._trailing_tasks[path] = asyncio.create_task(self._fire_trailing_change(path))
+
+    async def _fire_trailing_change(self, path: Path) -> None:
+        """Espera a que venza la ventana y despacha el cambio pendiente."""
+        try:
+            await asyncio.sleep(self._dedup_window.total_seconds())
+        except asyncio.CancelledError:
+            return
+        self._trailing_tasks.pop(path, None)
+        self._recent_events[path] = datetime.now()
+        self._stats.changes_detected += 1
+        if self._on_external_change:
+            self._spawn(self._on_external_change(path))
+        if self._debug:
+            try:
+                await self._notify_change(path)
+            except Exception as exc:
+                logger.error(
+                    "VaultWatcher: error notificando cambio %s: %s", path, exc
+                )
+
     async def _dispatch_loop(self) -> None:
         """Lee la queue y despacha a la notificación correspondiente."""
         while True:
@@ -263,6 +316,9 @@ class VaultWatcher:
             self._stats.last_event_at = now
 
             if not event.is_conflict and not event.is_delete and self._is_duplicate(event.path):
+                # No se descarta: se re-agenda para el final de la ventana, si
+                # no se pierde el último save de la ráfaga (F2).
+                self._schedule_trailing_change(event.path)
                 continue
 
             if event.is_conflict:

@@ -389,7 +389,10 @@ class EmbeddingsClient:
 
         # Escanear vault
         vault_note_ids: set[str] = set()
-        md_files = sorted(vault_path.rglob("*.md"))
+        # En un hilo: es la única operación de filesystem del método fuera de
+        # to_thread, y con SD lenta y cientos de notas congelaba el bot al
+        # inicio de cada reindex nocturno. F10 de docs/audit-2026-07-31.md.
+        md_files = await asyncio.to_thread(lambda: sorted(vault_path.rglob("*.md")))
 
         for md_path in md_files:
             rel = md_path.relative_to(vault_path)

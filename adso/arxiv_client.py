@@ -37,7 +37,11 @@ _MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB
 #   https://arxiv.org/pdf/2301.12345.pdf
 #   https://arxiv.org/abs/hep-ph/0001234  (formato antiguo)
 _ARXIV_URL_RE = re.compile(
-    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/([a-z\-]+/\d+|\d{4}\.\d{4,5}(?:v\d+)?)",
+    # El formato viejo admite subclase con punto (`math.GT/0309136`,
+    # `cond-mat.str-el/0509127`); sin ella esos links caían en silencio al
+    # flujo de link genérico. F8 de docs/audit-2026-07-31.md.
+    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/"
+    r"([a-z\-]+(?:\.[a-z\-]+)?/\d+|\d{4}\.\d{4,5}(?:v\d+)?)",
     re.IGNORECASE,
 )
 
@@ -129,6 +133,49 @@ def _parse_atom_entry(entry: ET.Element) -> dict:
     }
 
 
+def _parse_feed_xml(raw: "str | bytes", arxiv_id: str = "") -> dict:
+    """Parsea el feed Atom de arXiv y valida que describa un paper real.
+
+    Separado de `_fetch_metadata_sync` para poder testear el parseo sin red.
+
+    Args:
+        raw: Cuerpo XML de la respuesta.
+        arxiv_id: ID solicitado, solo para el mensaje de error.
+
+    Returns:
+        Metadata parseada del paper.
+
+    Raises:
+        ValueError: Si el feed no trae entries, si el entry es el de **error**
+            de la API, o si no tiene ni título ni abstract.
+    """
+    root = ET.fromstring(raw)
+    entries = root.findall("atom:entry", _NS)
+    if not entries:
+        raise ValueError(f"arXiv no devolvió resultados para ID: {arxiv_id}")
+
+    entry = entries[0]
+
+    # Ante un ID bien formado pero inexistente, la API responde con un feed que
+    # SÍ trae un entry: título "Error" y un <id> que apunta a `.../api/errors`.
+    # El chequeo `if not entries` no lo atrapaba, así que `_parse_atom_entry`
+    # producía `arxiv_id=""` y un `source_url` literal roto
+    # ("https://arxiv.org/abs/") — truthy, con lo cual la detección de
+    # duplicados comparaba contra basura y el usuario veía el preview de una
+    # "nota" titulada Error. F7 de docs/audit-2026-07-31.md.
+    entry_id = (entry.findtext("atom:id", "", _NS) or "").strip()
+    if "api/errors" in entry_id:
+        detalle = (entry.findtext("atom:summary", "", _NS) or "").strip()
+        raise ValueError(
+            f"arXiv devolvió un error para el ID {arxiv_id or '(desconocido)'}: {detalle}"
+        )
+
+    metadata = _parse_atom_entry(entry)
+    if not metadata.get("title") and not metadata.get("abstract"):
+        raise ValueError(f"El entry de arXiv no tiene título ni abstract: {arxiv_id}")
+    return metadata
+
+
 def _fetch_metadata_sync(arxiv_id: str) -> dict:
     """Llama a la API de arXiv (síncrono, para ejecutar en hilo).
 
@@ -151,12 +198,7 @@ def _fetch_metadata_sync(arxiv_id: str) -> dict:
             f"Respuesta de arXiv excede el tope de {_MAX_RESPONSE_BYTES} bytes"
         )
 
-    root = ET.fromstring(raw)
-    entries = root.findall("atom:entry", _NS)
-    if not entries:
-        raise ValueError(f"arXiv no devolvió resultados para ID: {arxiv_id}")
-
-    return _parse_atom_entry(entries[0])
+    return _parse_feed_xml(raw, arxiv_id)
 
 
 async def fetch_arxiv_metadata(arxiv_id: str) -> dict:

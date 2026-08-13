@@ -5,7 +5,10 @@ Módulo de UI puro: sin lógica de negocio, sin escritura al vault.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
+from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -46,7 +49,6 @@ from adso.constants import (
     CB_VISION,
 )
 from adso.llm_client import extract_original_from_degraded
-from adso.vault_search import find_by_property
 
 
 def _esc(text: str) -> str:
@@ -221,13 +223,79 @@ def build_extraction_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+_TOKEN_RE = re.compile(r"[0-9a-f]{10}")
+
+
+def item_token(name: str) -> str:
+    """Token corto, ASCII y estable para meter un nombre en `callback_data`.
+
+    Telegram corta el `callback_data` en **64 bytes**, y los nombres de
+    proyecto/área van sin truncar (`dest:area:{nombre}`) o truncados a 32
+    *chars* (reportes). Ambas cosas rompían: un directorio de ~27 chars
+    acentuados supera el límite de bytes → `BadRequest` al abrir el selector; y
+    un nombre truncado producía un path inexistente → reporte vacío sin error.
+    F3 y F4 de docs/audit-2026-07-31.md.
+
+    Se usa un hash y no un índice para que el token sea estable entre
+    reinicios: un teclado viejo sigue resolviendo después de reiniciar el bot.
+
+    Args:
+        name: Nombre del proyecto o área.
+
+    Returns:
+        10 chars hexadecimales.
+    """
+    return hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
+
+
+async def resolve_item_token(
+    token: str, vault_path: Path, is_project: bool
+) -> Optional[str]:
+    """Resuelve un token de `callback_data` al nombre real del proyecto/área.
+
+    Args:
+        token: Token emitido por `item_token`, o un nombre literal (los
+            teclados emitidos antes de este cambio mandaban el nombre crudo).
+        vault_path: Raíz del vault.
+        is_project: True para buscar en proyectos, False para áreas.
+
+    Returns:
+        Nombre completo, o None si el token no corresponde a nada existente.
+    """
+    from adso.bot_utils import _get_existing_items
+
+    projects, areas = await _get_existing_items(vault_path)
+    items = projects if is_project else areas
+    for item in items:
+        if item_token(item["name"]) == token:
+            return item["name"]
+    # Compatibilidad: teclado viejo con el nombre literal en el callback_data.
+    for item in items:
+        if item["name"] == token:
+            return item["name"]
+    # Nada matcheó. Si tiene forma de token, el proyecto/área se borró entre que
+    # se dibujó el teclado y se apretó el botón: devolver None para avisar. Si
+    # no, es un nombre literal de un teclado viejo y se respeta tal cual — si no,
+    # el hash terminaría usándose como nombre de carpeta.
+    if _TOKEN_RE.fullmatch(token):
+        return None
+    return token
+
+
 async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
     """Construye teclado con áreas existentes. Si no hay áreas, solo muestra Volver."""
-    areas = await find_by_property("type", "area-index", vault_path)
+    # `_get_existing_items` (subdirectorios) y no `find_by_property` por
+    # `area-index`: CLAUDE.md garantiza que toda área con notas aparece en los
+    # teclados aunque no tenga `_index.md`. Los reportes ya lo cumplían; estos
+    # selectores no, así que un área sin índice era invisible al reubicar.
+    # F5 de docs/audit-2026-07-31.md.
+    from adso.bot_utils import _get_existing_items
+
+    _, areas = await _get_existing_items(vault_path)
     buttons = [
         InlineKeyboardButton(
-            area.path.parent.name,
-            callback_data=f"{CB_DEST_AREA_PREFIX}{area.path.parent.name}",
+            area["name"],
+            callback_data=f"{CB_DEST_AREA_PREFIX}{item_token(area['name'])}",
         )
         for area in areas
     ]
@@ -241,11 +309,14 @@ async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
 
 async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
     """Construye teclado con proyectos existentes. Si no hay proyectos, solo muestra Volver."""
-    projects = await find_by_property("type", "project-index", vault_path)
+    # Ver F5 en `build_area_selector`.
+    from adso.bot_utils import _get_existing_items
+
+    projects, _ = await _get_existing_items(vault_path)
     buttons = [
         InlineKeyboardButton(
-            proj.path.parent.name,
-            callback_data=f"{CB_DEST_PROJECT_PREFIX}{proj.path.parent.name}",
+            proj["name"],
+            callback_data=f"{CB_DEST_PROJECT_PREFIX}{item_token(proj['name'])}",
         )
         for proj in projects
     ]
@@ -392,13 +463,17 @@ def build_report_items_keyboard(
     Returns:
         InlineKeyboardMarkup.
     """
-    _MAX_NAME = 32
+    # La etiqueta se trunca (es cosmética); el `callback_data` lleva el token,
+    # nunca el nombre truncado — antes el truncado a 32 chars viajaba en el
+    # callback y `scope_report` armaba un path inexistente. F3 de
+    # docs/audit-2026-07-31.md.
+    _MAX_LABEL = 32
     item_type = "p" if is_project else "a"
 
     buttons = [
         InlineKeyboardButton(
-            item["name"][:_MAX_NAME],
-            callback_data=f"{prefix}{item_type}:{item['name'][:_MAX_NAME]}",
+            item["name"][:_MAX_LABEL],
+            callback_data=f"{prefix}{item_type}:{item_token(item['name'])}",
         )
         for item in items
     ]

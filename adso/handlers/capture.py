@@ -865,9 +865,16 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
                 name="push_task",
             )
 
+    # `mark_bot_written` va FUERA del `if git_backup`: es el registro
+    # anti-doble-embed, no tiene nada que ver con el backup. Adentro, con
+    # `backup.enabled: false` cada nota confirmada se indexaba inline y además
+    # el watcher la trataba como cambio externo y la re-embebía (llamada
+    # redundante a Gemini + notificación espuria en modo debug). F1 de
+    # docs/audit-2026-07-31.md.
+    mark_bot_written(context.bot_data, path)
+
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     if git_backup:
-        mark_bot_written(context.bot_data, path)
         await git_backup.notify(fm.get("title", "Sin título"))
 
     # Indexar el embedding inline (mismo patrón que jobs.reclassify_inbox). El path

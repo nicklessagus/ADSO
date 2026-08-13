@@ -155,9 +155,11 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
             new_path = await create_note(new_fm, body, vault_path)
             await delete_note(ref.path)
 
+            # Fuera del `if git_backup` — ver F1 en docs/audit-2026-07-31.md.
+            mark_bot_written(context.bot_data, new_path)
+
             git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
             if git_backup:
-                mark_bot_written(context.bot_data, new_path)
                 await git_backup.notify(new_fm.get("title", "Sin título"))
 
             embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
