@@ -7,11 +7,38 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] — 2026-08-13
+
+Auditoría 2026-07-31 (bloques A-D, `docs/audit-2026-07-31.md`), harness de regresión de modelo y mantenimiento de CI.
+
+### Added
+- **Harness de regresión de modelo LLM** (`scripts/llm_regression.py` + `tests/llm_regression/`): golden set que verifica contra la API real el contrato estructural que el bot asume del LLM, para decidir si actualizar `GEMINI_MODEL` rompe algo. 14 reglas estructurales, no de calidad — la calidad la valida el usuario en el preview antes de confirmar cada nota; el harness mide lo que el usuario *no* ve, sobre todo `validate_llm_response` lanzando (manda toda captura a modo degradado) y la resistencia a prompt injection. Deliberadamente fuera de pytest: pega contra la API y quema quota, así que ni un `pytest` local ni un cambio en CI lo disparan. `make llm-baseline` / `make llm-check MODEL=... BASE=...`. Con `--compare` el exit code refleja regresiones contra la baseline, no fallas absolutas. Baseline de `gemini-3.5-flash-lite`: 34/34, p50 1.5s
+- `ADSO_GEMINI_MODEL` overridea `GEMINI_MODEL` sin tocar código (para apuntar el harness a un candidato; en producción sin setear)
+- `build_user_message()` extraído de `classify()`, para que el harness construya el mensaje con la misma neutralización de tags que el bot
+
 ### Fixed
+- **Modo manage por texto libre caía siempre a modo degradado:** el constrained decoding de Gemini solo emite claves declaradas en el schema, y `params` estaba como `OBJECT` sin `properties` → volvía siempre `{}`, incluso con el nombre del proyecto visible en el input. `_validate_manage_payload` lanzaba `LLMResponseError` y el fallback de `_cb_manage_create` proponía el texto crudo del usuario como nombre del proyecto tras gastar 3 reintentos. Detectado por el harness contra el modelo en producción; guard de regresión en `test_manage_params_declares_properties`
 - CI / Lint roto por drift de ruff: el job instalaba `ruff` sin pinear y la 0.16.0 (liberada ~2026-07-26) cambió las reglas default (isort etc.) → 312 hallazgos nuevos en un push que no tocó Python. Se pinea `ruff~=0.15.10` en el CI y en las dev deps de `pyproject.toml` (local y CI corren lo mismo). Adoptar la 0.16 con sus fixes queda como tarea aparte
 
-### Changed
+### Data safety
+- `frontmatter.Post(body, **fm)` interpretaba una clave `handler` del frontmatter como handler de serialización: `dumps()` escribía ese string como contenido total del archivo (body y frontmatter perdidos en silencio), y una clave `content` lanzaba `TypeError`. Los 4 sitios de escritura usan `_build_post`, que asigna `post.metadata`. Se agrega `load_post()` porque `frontmatter.loads()` tiene el mismo choque de kwargs al *leer* una nota editada externamente (rompía `read_note` y los scans de `vault_cache`). Además `_validate_capture_payload` whitelistea las claves contra `docs/frontmatter-schema.md` (`ALLOWED_FRONTMATTER_KEYS`), cerrando el vector en origen para el fallback de Groq y para prompt injection en PDF/OCR
+- `_cb_confirm` popeaba `pending_note`/`clasificar_inbox_path` antes de `create_note`: un fallo de I/O perdía la captura para siempre (crítico para audio, OCR y Vision, cuyo texto no vive en ningún otro lado). Ahora se descartan recién tras la escritura, y el temporal del recurso adjunto también
+- `reclassify_inbox` borraba la nota del Inbox antes de crear la nueva; si `create_note` fallaba, el contenido solo vivía en memoria. Orden invertido
+- `GitBackup`: se guarda la task del backup en vuelo (`_running`). `_do_backup` la espera antes de correr (nunca dos git en paralelo → sin colisión de `index.lock`) y `flush()` la espera antes de mirar `_pending_titles`, que el backup en vuelo ya drenó — sin esto el shutdown seguía con el push a medio hacer. `notify()` no espera: bloquearía la confirmación del usuario
+- El except genérico de `_do_backup` re-encola los títulos drenados al frente de la cola y notifica por Telegram — un fallo de `add`/`commit` dejaba el vault sin backup indefinidamente y en silencio
+
+### Security
+- El redirect de `mode=query`/`edit` a `capture` no re-validaba el payload (`validate_llm_response` saltea `_validate_capture_payload` para esos modos), así que un frontmatter crudo de Groq llegaba al vault sin sanitizar y un `frontmatter: null` (legal en el schema de Gemini) mataba el flujo arXiv con `TypeError`. Nuevo `_redirect_unimplemented_mode()` en `capture.py`, que valida y cae a degradado si no se puede sanear
+- `@authorized` en `handle_status` — era el único handler registrado sin la segunda barrera de autenticación
 - CodeQL bloquea en serio: se removió el `continue-on-error: true` del job `codeql` en `security.yml`. Estaba puesto porque el repo privado no tenía GitHub Advanced Security para subir SARIF; el repo es público desde 2026-07-25 y code scanning es gratis
+
+### Changed
+- Confirmar o cancelar una operación de gestión dejaba `manage_missing_fields` residual en `user_data` — como está en `_PENDING_FLOW_KEYS`, cada pasada de `reclassify_inbox` se posponía para siempre y el inbox nunca se drenaba. Nuevo `pop_manage_state()` que popea ambas keys, también en las salidas tempranas de `_cb_manage_confirm`
+- Healthcheck de docker-compose: `find` sale 0 aunque no matchee nada, así que un heartbeat congelado nunca marcaba unhealthy. Ahora `CMD-SHELL test -n "$(find /tmp/adso_heartbeat -mmin -2)"`
+- Normalización defensiva del frontmatter del LLM: `body: null` → `""` (antes el preview reventaba con `AttributeError` y la captura se perdía); `tags` como string se parte por comas; nuevos `_clean_title()` (regex en bucle: `"## Tarea: X"` → `"X"`) y `_norm_enum()` (`type`/`status`/`priority` a minúsculas antes de validar, así una respuesta correcta de Groq no cae entera a degradado por capitalización)
+- Valores no-string del frontmatter (nota editada a mano) ya no tiran abajo la búsqueda ni los reportes: filtros de `vault_search`, `_note_ref_from_data`, `_extract_tags_from_note`, keys de agrupamiento de `reporters` y `_priority_key` coaccionan con `str(... or "")`. Nuevo `_to_naive()` en reporters (`scope_report` mezclaba datetimes aware y naive) y `_parse_date_value` envuelve `fromisoformat` en `try/except` (`2026-02-30` pasa el regex y reventaba la escritura *después* de la confirmación)
 - Bump de GitHub Actions por deprecaciones: `actions/checkout` v4→v5 y `actions/setup-python` v5→v6 (Node 20 deprecado en los runners), `github/codeql-action` v3→v4 (v3 se deprecaba en diciembre 2026). `codecov-action@v4` y trufflehog (pineado a SHA) quedan como estaban
 
 ---
