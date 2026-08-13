@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any, Callable, Coroutine, Optional
 
-from adso.config import GEMINI_MODEL
+from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -624,12 +624,15 @@ _VISION_PROMPT_PDF = (
 async def describe_image_with_vision(
     images: list[tuple[bytes, str]],
     prompt: str = _VISION_PROMPT_IMAGE,
+    model: Optional[str] = None,
 ) -> str:
     """Describe una o más imágenes usando Gemini Vision.
 
     Args:
         images: Lista de (bytes, mime_type). Para PDFs, una entrada por página.
         prompt: Instrucción para el modelo.
+        model: Modelo a usar. Default ``GEMINI_VISION_MODEL``, distinto del de
+            clasificación para no compartir la quota de free tier (ver config.py).
 
     Returns:
         Texto extraído o descripción generada.
@@ -649,7 +652,7 @@ async def describe_image_with_vision(
 
     response = await asyncio.to_thread(
         client.models.generate_content,
-        model=GEMINI_MODEL,
+        model=model or GEMINI_VISION_MODEL,
         contents=contents,
     )
 

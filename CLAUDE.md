@@ -65,7 +65,8 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Componente | Tecnología |
 |---|---|
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
-| LLM primario | Gemini API — modelo `gemini-3.5-flash-lite` (línea flash-lite estable; free tier jul-2026: ~1.000-1.500 RPD, 15 RPM, 250k TPM — Google ya no publica el cap del free tier en la doc, verificarlo por proyecto en AI Studio) |
+| LLM primario | Gemini API — modelo `gemini-3.5-flash-lite` (línea flash-lite estable; free tier jul-2026: ~1.000-1.500 RPD, 15 RPM, 250k TPM — Google ya no publica el cap del free tier en la doc, verificarlo por proyecto en AI Studio). Clasificación y síntesis de reportes |
+| LLM de Vision | `gemini-3.6-flash` (`GEMINI_VISION_MODEL`) — solo OCR/descripción de imágenes y PDFs escaneados. Constante separada porque la quota del free tier es **por modelo**: rasterizar un PDF de 20 páginas no debe consumir RPD del bucket de la captura diaria |
 | LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). `ANTHROPIC_API_KEY` se lee en config pero no hay código que la use aún |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
@@ -367,6 +368,7 @@ Antes de tocar `GEMINI_MODEL` hay que correr `scripts/llm_regression.py`, que ve
 ```bash
 make llm-baseline                                        # baseline del modelo actual
 make llm-check MODEL=gemini-3.7-flash BASE=gemini-3.5-flash-lite
+# --vision-model evalúa un candidato de Vision por separado
 ```
 
 `ADSO_GEMINI_MODEL` overridea `GEMINI_MODEL` sin tocar código — existe para que el harness apunte a un candidato; en producción se deja sin setear. Con `--compare` el exit code refleja **regresiones contra la baseline**, no fallas absolutas: lo que decide una actualización no es que el candidato sea perfecto, sino que no empeore nada. Baseline de `gemini-3.5-flash-lite` (ago-2026): 34/34, p50 1.5s.
@@ -389,6 +391,7 @@ ANTHROPIC_API_KEY          # LLM secundario alternativo
 LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
 ADSO_GEMINI_MODEL          # overridea GEMINI_MODEL sin tocar código. Para el harness de
                            # regresión (scripts/llm_regression.py); en producción sin setear.
+ADSO_GEMINI_VISION_MODEL   # ídem para GEMINI_VISION_MODEL.
 ADSO_TIMEZONE              # zona horaria IANA para parsear fechas relativas ("el viernes",
                            # "mañana"). Ej: America/Argentina/Buenos_Aires. Override explícito;
                            # si falta, se usa TZ (que docker-compose ya define) y luego UTC.

@@ -361,7 +361,7 @@ async def run_vision() -> RunResult:
 
 
 async def main_async(args: argparse.Namespace) -> int:
-    from adso.config import GEMINI_MODEL
+    from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL
 
     data = yaml.safe_load(CASES_FILE.read_text(encoding="utf-8"))
     ctx = data["context"]
@@ -377,6 +377,8 @@ async def main_async(args: argparse.Namespace) -> int:
     model_label = "llama-3.1-8b-instant" if args.provider == "groq" else GEMINI_MODEL
     total_reqs = len(cases) * args.repeat + (0 if args.no_vision else 1)
     print(f"\nModelo: {model_label}   proveedor: {args.provider}")
+    if not args.no_vision and args.provider == "gemini":
+        print(f"Modelo Vision: {GEMINI_VISION_MODEL}")
     print(f"Casos: {len(cases)} × {args.repeat} repeticiones ≈ {total_reqs} requests\n")
 
     results: dict[str, list[RunResult]] = {}
@@ -396,7 +398,7 @@ async def main_async(args: argparse.Namespace) -> int:
         results["vision-smoke"] = [vision]
         _print_case_line("vision-smoke", [vision], 1)
 
-    report = _build_report(model_label, args, results)
+    report = _build_report(model_label, args, results, GEMINI_VISION_MODEL)
     _print_summary(report)
 
     regressions: list[str] = []
@@ -429,7 +431,9 @@ def _print_case_line(case_id: str, runs: list[RunResult], repeat: int) -> None:
     print(f"  [{mark}] {case_id:<28} {passed}/{len(runs)}{detail}")
 
 
-def _build_report(model: str, args: argparse.Namespace, results: dict) -> dict:
+def _build_report(
+    model: str, args: argparse.Namespace, results: dict, vision_model: str
+) -> dict:
     cases_out = {}
     hard_total = 0
     soft_total = 0
@@ -450,6 +454,7 @@ def _build_report(model: str, args: argparse.Namespace, results: dict) -> dict:
         }
     return {
         "model": model,
+        "vision_model": vision_model if not args.no_vision else None,
         "provider": args.provider,
         "repeat": args.repeat,
         "cases": cases_out,
@@ -496,6 +501,8 @@ def _print_comparison(new: dict, base: dict) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", help="Modelo candidato (setea ADSO_GEMINI_MODEL)")
+    parser.add_argument("--vision-model",
+                        help="Modelo candidato para Vision (setea ADSO_GEMINI_VISION_MODEL)")
     parser.add_argument("--provider", choices=["gemini", "groq"], default="gemini")
     parser.add_argument("--repeat", type=int, default=3,
                         help="Corridas por caso (default 3 — la salida no es determinística)")
@@ -511,6 +518,8 @@ def main() -> int:
     # resuelve GEMINI_MODEL en import time.
     if args.model:
         os.environ["ADSO_GEMINI_MODEL"] = args.model
+    if args.vision_model:
+        os.environ["ADSO_GEMINI_VISION_MODEL"] = args.vision_model
     if not os.environ.get("GEMINI_API_KEY") and args.provider == "gemini":
         print("GEMINI_API_KEY no configurada", file=sys.stderr)
         return 2

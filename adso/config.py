@@ -29,6 +29,15 @@ class ConfigError(Exception):
 # candidato sin editar este archivo; en producción se deja sin setear.
 GEMINI_MODEL = os.environ.get("ADSO_GEMINI_MODEL") or "gemini-3.5-flash-lite"
 
+# Modelo separado para Gemini Vision (OCR de imágenes y PDFs escaneados). El
+# free tier de Google acota la quota POR MODELO, así que rasterizar un PDF de 20
+# páginas ya no consume RPD del mismo bucket que la clasificación de notas — que
+# es el flujo de todos los días. La calidad no motiva el split: el resultado de
+# Vision se muestra en el preview y lo valida el usuario antes de confirmar.
+GEMINI_VISION_MODEL = (
+    os.environ.get("ADSO_GEMINI_VISION_MODEL") or "gemini-3.6-flash"
+)
+
 
 # ---------------------------------------------------------------------------
 # Sub-dataclasses para secciones de config.yaml

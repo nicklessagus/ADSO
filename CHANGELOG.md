@@ -7,6 +7,9 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+### Changed
+- **Gemini Vision usa su propio modelo** (`GEMINI_VISION_MODEL = "gemini-3.6-flash"`, overridable con `ADSO_GEMINI_VISION_MODEL`): la quota del free tier de Google es **por modelo**, así que rasterizar un PDF escaneado de 20 páginas ya no consume RPD del mismo bucket que la clasificación de notas, que es el flujo de todos los días. El split no lo motiva la calidad — el resultado de Vision se muestra en el preview y lo valida el usuario antes de confirmar. `/status` muestra ambos modelos y el harness acepta `--vision-model` para evaluar candidatos por separado
+
 ---
 
 ## [1.3.0] — 2026-08-13
