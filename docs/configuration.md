@@ -128,6 +128,38 @@ watcher:
 
 ---
 
+## Claves desconocidas
+
+Una clave que el loader no reconoce **no aborta el arranque**: se ignora y se
+loguea a `WARNING` con su ruta exacta (`weekly_report.include`,
+`llm.typo_que_no_existe`). El bot es el path de captura del usuario, así que un
+typo en el YAML no puede dejarlo sin arrancar — pero tampoco puede pasar
+inadvertido.
+
+Existe porque pasó: el `config.yaml` desplegado declaraba
+`weekly_report.include:` mientras el loader lee `weekly_report.sections:`, y la
+clave se descartaba en silencio (I2 de `docs/audit-2026-07-31.md`). Los tests
+`TestClavesDesconocidas` en `tests/unit/test_config.py` cargan tanto
+`config.yaml` como `config.yaml.example` y fallan si alguno vuelve a driftear.
+
+Para inspeccionarlo desde código: `load_settings(...).unknown_keys`.
+
+Una sección que no sea un mapa de claves (ej: una lista) sí es `ConfigError` —
+ahí no hay ambigüedad sobre la intención.
+
+## Campos declarados pero aún sin consumir
+
+Se cargan y se validan, pero **ningún módulo los lee todavía** (I1 de
+`docs/audit-2026-07-31.md`). Ajustarlos no cambia el comportamiento del bot:
+
+| Campo | Espera a |
+|---|---|
+| `weekly_report.*` (sección entera, incl. `stale_idea_days`) | job del reporte semanal (`improvements-2026-07.md` §2.2) |
+| `sync.interval_minutes` | cron de reconciliación con Google Tasks (§5.2) |
+| `llm.max_web_tokens`, `llm.max_paper_tokens` | truncado por tokens; hoy `document_extractor.py` trunca por caracteres con constantes hardcodeadas |
+| `rag.max_expansion_depth` | expansión desde nodo (Fase 7 completa) |
+| `content_extraction.engine` | motor alternativo de extracción; `trafilatura` se valida pero no es dependencia del proyecto |
+
 ## Notas
 
 - `config.yaml` debe existir. Si falta, el bot falla con error claro al arrancar.

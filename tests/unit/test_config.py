@@ -237,3 +237,88 @@ vault_seed:
         s = load_settings(path)
         assert s.vault_seed.projects == []
         assert s.vault_seed.areas == []
+
+
+# ---------------------------------------------------------------------------
+# Claves desconocidas — I2 de docs/audit-2026-07-31.md
+# ---------------------------------------------------------------------------
+#
+# El config.yaml desplegado declaraba `weekly_report.include:` mientras el
+# loader lee `weekly_report.sections:`. La clave se descartaba en silencio:
+# `_build_section` filtra lo desconocido sin decir nada. Nadie se enteró porque
+# nada consume weekly_report todavía. Estos tests cierran el modo de falla —
+# que una clave mal escrita no haga ruido— y anclan los dos YAML del repo.
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+class TestClavesDesconocidas:
+
+    def test_config_yaml_del_repo_esta_alineado_con_el_loader(self) -> None:
+        """El config.yaml que `make deploy` copia a producción no debe drift."""
+        settings = load_settings(REPO_ROOT / "config.yaml")
+        assert settings.unknown_keys == [], (
+            f"config.yaml tiene claves que el loader ignora: {settings.unknown_keys}"
+        )
+
+    def test_config_yaml_example_esta_alineado_con_el_loader(self) -> None:
+        """El example es lo que copia un usuario nuevo — no puede mentir."""
+        settings = load_settings(REPO_ROOT / "config.yaml.example")
+        assert settings.unknown_keys == [], (
+            f"config.yaml.example tiene claves que el loader ignora: "
+            f"{settings.unknown_keys}"
+        )
+
+    def test_clave_desconocida_en_seccion_se_reporta(self, config_dir: Path) -> None:
+        path = _write_config(config_dir, """
+weekly_report:
+  enabled: true
+  include:
+    - notes_created
+""")
+        settings = load_settings(path)
+        assert "weekly_report.include" in settings.unknown_keys
+
+    def test_seccion_desconocida_se_reporta(self, config_dir: Path) -> None:
+        path = _write_config(config_dir, """
+telemetria:
+  enabled: true
+""")
+        settings = load_settings(path)
+        assert "telemetria" in settings.unknown_keys
+
+    def test_clave_desconocida_loguea_warning(
+        self, config_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Sin log, el drift es invisible: el bot corre headless en la RPi."""
+        path = _write_config(config_dir, """
+llm:
+  max_tokens_typo: 99
+""")
+        with caplog.at_level("WARNING"):
+            load_settings(path)
+        assert "llm.max_tokens_typo" in caplog.text
+
+    def test_clave_desconocida_no_aborta_el_arranque(self, config_dir: Path) -> None:
+        """Warning, no ConfigError.
+
+        El bot es el path de captura del usuario: un typo en config.yaml no
+        puede dejarlo sin arrancar y perder capturas. Se avisa y se sigue con
+        los defaults.
+        """
+        path = _write_config(config_dir, """
+llm:
+  degraded_retry_minutes: 15
+  typo_que_no_existe: 1
+""")
+        settings = load_settings(path)
+        assert settings.llm.degraded_retry_minutes == 15
+
+    def test_seccion_con_tipo_invalido_da_config_error(self, config_dir: Path) -> None:
+        """Una sección como lista en vez de dict: ConfigError, no AttributeError."""
+        path = _write_config(config_dir, """
+llm:
+  - degraded_retry_minutes
+""")
+        with pytest.raises(ConfigError, match="llm"):
+            load_settings(path)

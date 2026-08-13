@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -177,6 +180,11 @@ class Settings:
     documents: DocumentsConfig = field(default_factory=DocumentsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     weekly_report: WeeklyReportConfig = field(default_factory=WeeklyReportConfig)
+
+    # Claves del YAML que el loader no reconoce (`sección.clave`, o `sección`
+    # suelta si la sección entera es desconocida). No aborta el arranque —
+    # se loguea a WARNING. Ver I2 en docs/audit-2026-07-31.md.
+    unknown_keys: list[str] = field(default_factory=list)
     tasks: TasksConfig = field(default_factory=TasksConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
 
@@ -185,11 +193,36 @@ class Settings:
 # Builders
 # ---------------------------------------------------------------------------
 
-def _build_section(cls: type, data: dict[str, Any] | None) -> Any:
-    """Construye una sub-dataclass desde un dict, ignorando claves desconocidas."""
+def _build_section(
+    cls: type,
+    data: dict[str, Any] | None,
+    path: str | None = None,
+    unknown: list[str] | None = None,
+) -> Any:
+    """Construye una sub-dataclass desde un dict, registrando claves desconocidas.
+
+    Args:
+        cls: Dataclass de la sección.
+        data: Dict crudo del YAML, o None si la sección no está.
+        path: Nombre de la sección, para reportar claves desconocidas.
+        unknown: Lista donde acumular las claves ignoradas (`sección.clave`).
+
+    Returns:
+        Instancia de `cls` con los valores conocidos; el resto, defaults.
+
+    Raises:
+        ConfigError: Si la sección no es un mapa de claves (ej: una lista).
+    """
     if data is None:
         return cls()
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"{path or cls.__name__}: se esperaba un mapa de claves, "
+            f"se obtuvo {type(data).__name__}"
+        )
     known = {f.name for f in cls.__dataclass_fields__.values()}
+    if unknown is not None and path:
+        unknown.extend(f"{path}.{k}" for k in data if k not in known)
     filtered = {k: v for k, v in data.items() if k in known}
     return cls(**filtered)
 
@@ -222,15 +255,39 @@ def _build_vault_seed(data: dict[str, Any] | None) -> VaultSeedConfig:
     return VaultSeedConfig(projects=projects, areas=areas)
 
 
-def _build_weekly_report(data: dict[str, Any] | None) -> WeeklyReportConfig:
-    """Construye WeeklyReportConfig con soporte para ambos formatos de sections."""
+def _build_weekly_report(
+    data: dict[str, Any] | None, unknown: list[str] | None = None
+) -> WeeklyReportConfig:
+    """Construye WeeklyReportConfig aceptando `sections` como dict o como lista.
+
+    Args:
+        data: Dict crudo de la sección `weekly_report`, o None.
+        unknown: Lista donde acumular las claves ignoradas.
+
+    Returns:
+        WeeklyReportConfig con los valores del YAML y defaults para el resto.
+
+    Raises:
+        ConfigError: Si la sección no es un mapa de claves.
+    """
     if data is None:
         return WeeklyReportConfig()
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"weekly_report: se esperaba un mapa de claves, "
+            f"se obtuvo {type(data).__name__}"
+        )
+
+    if unknown is not None:
+        known = {f.name for f in WeeklyReportConfig.__dataclass_fields__.values()}
+        unknown.extend(f"weekly_report.{k}" for k in data if k not in known)
 
     sections = data.get("sections", None)
-    # config.yaml.example usa formato lista 'include:', configuration.md usa dict
+    # `sections` acepta dict {nombre: bool} o lista [nombre, ...]. La lista se
+    # normaliza a dict. OJO: la clave es `sections`, no `include` — el
+    # config.yaml desplegado usaba `include` y se descartaba en silencio (I2 de
+    # docs/audit-2026-07-31.md). Por eso ahora las claves ajenas se reportan.
     if isinstance(sections, list):
-        # Convertir lista a dict booleano
         sections = {s: True for s in sections}
 
     result = WeeklyReportConfig(
@@ -318,6 +375,16 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
     if not isinstance(raw, dict):
         raise ConfigError("config.yaml debe ser un documento YAML con claves")
 
+    # Las secciones válidas son exactamente los campos de Settings que son
+    # dataclasses. Derivarlo del propio Settings evita que esta lista se
+    # desincronice al agregar una sección nueva.
+    unknown: list[str] = []
+    _probe = Settings()
+    known_sections = {
+        f.name for f in fields(_probe) if is_dataclass(getattr(_probe, f.name))
+    }
+    unknown.extend(k for k in raw if k not in known_sections)
+
     settings = Settings(
         # Variables de entorno (con defaults para desarrollo)
         telegram_token=os.environ.get("TELEGRAM_TOKEN", ""),
@@ -331,24 +398,38 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         vault_path=Path(os.environ.get("VAULT_PATH", "/vault")),
         chroma_data_dir=Path(os.environ.get("CHROMA_DATA_DIR", "/app/data/chroma")),
         # Secciones de config.yaml
-        rag=_build_section(RagConfig, raw.get("rag")),
-        links=_build_section(LinksConfig, raw.get("links")),
+        rag=_build_section(RagConfig, raw.get("rag"), "rag", unknown),
+        links=_build_section(LinksConfig, raw.get("links"), "links", unknown),
         vault_seed=_build_vault_seed(raw.get("vault_seed")),
-        vault=_build_section(VaultConfig, raw.get("vault")),
-        whisper=_build_section(WhisperConfig, raw.get("whisper")),
+        vault=_build_section(VaultConfig, raw.get("vault"), "vault", unknown),
+        whisper=_build_section(WhisperConfig, raw.get("whisper"), "whisper", unknown),
         content_extraction=_build_section(
-            ContentExtractionConfig, raw.get("content_extraction")
+            ContentExtractionConfig,
+            raw.get("content_extraction"),
+            "content_extraction",
+            unknown,
         ),
-        reindex=_build_section(ReindexConfig, raw.get("reindex")),
-        sync=_build_section(SyncConfig, raw.get("sync")),
-        backup=_build_section(BackupConfig, raw.get("backup")),
-        documents=_build_section(DocumentsConfig, raw.get("documents")),
-        llm=_build_section(LlmConfig, raw.get("llm")),
-        weekly_report=_build_weekly_report(raw.get("weekly_report")),
-        tasks=_build_section(TasksConfig, raw.get("tasks")),
-        watcher=_build_section(WatcherConfig, raw.get("watcher")),
+        reindex=_build_section(ReindexConfig, raw.get("reindex"), "reindex", unknown),
+        sync=_build_section(SyncConfig, raw.get("sync"), "sync", unknown),
+        backup=_build_section(BackupConfig, raw.get("backup"), "backup", unknown),
+        documents=_build_section(
+            DocumentsConfig, raw.get("documents"), "documents", unknown
+        ),
+        llm=_build_section(LlmConfig, raw.get("llm"), "llm", unknown),
+        weekly_report=_build_weekly_report(raw.get("weekly_report"), unknown),
+        tasks=_build_section(TasksConfig, raw.get("tasks"), "tasks", unknown),
+        watcher=_build_section(WatcherConfig, raw.get("watcher"), "watcher", unknown),
+        unknown_keys=sorted(unknown),
     )
 
     _validate_types(settings)
+
+    if settings.unknown_keys:
+        logger.warning(
+            "config.yaml: %d clave(s) ignorada(s) por el loader (revisar tipeo o "
+            "docs/configuration.md): %s",
+            len(settings.unknown_keys),
+            ", ".join(settings.unknown_keys),
+        )
 
     return settings
