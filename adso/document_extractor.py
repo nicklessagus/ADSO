@@ -455,23 +455,29 @@ async def extract_pdf(file_path: Path) -> tuple[str, dict]:
         except Exception as e:
             raise RuntimeError(f"No se pudo abrir el PDF: {e}") from e
 
-        # Extraer metadata
-        meta = doc.metadata or {}
-        metadata = {
-            "title": meta.get("title", "") or "",
-            "author": meta.get("author", "") or "",
-            "subject": meta.get("subject", "") or "",
-            "pages": doc.page_count,
-        }
+        # `open()` acepta un PDF cifrado sin chistar: lo que explota es el
+        # primer `get_text()`. Sin este try/finally el `Document` quedaba
+        # abierto (un leak por cada PDF cifrado que entra al bot) y la
+        # excepción cruda de pymupdf salía hacia el handler en vez del
+        # RuntimeError que documenta la firma. F9 de docs/audit-2026-07-31.md.
+        try:
+            meta = doc.metadata or {}
+            metadata = {
+                "title": meta.get("title", "") or "",
+                "author": meta.get("author", "") or "",
+                "subject": meta.get("subject", "") or "",
+                "pages": doc.page_count,
+            }
 
-        # Extraer texto de todas las páginas
-        text_parts = []
-        for page in doc:
-            page_text = page.get_text().strip()
-            if page_text:
-                text_parts.append(page_text)
-
-        doc.close()
+            text_parts = []
+            for page in doc:
+                page_text = page.get_text().strip()
+                if page_text:
+                    text_parts.append(page_text)
+        except Exception as e:
+            raise RuntimeError(f"No se pudo leer el PDF: {e}") from e
+        finally:
+            doc.close()
 
         full_text = "\n\n".join(text_parts)
         logger.info(

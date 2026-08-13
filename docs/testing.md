@@ -482,8 +482,9 @@ def make_callback_query():
 | `embeddings.py` | ≥ 80% | Errores no pierden datos (se puede re-indexar) pero degradan consultas. |
 | `tasks_client.py` | ≥ 80% | Escribe a Google Tasks externo. |
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
+| `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **74%** sobre 4634 statements.
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **76%** sobre 4655 statements.
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
