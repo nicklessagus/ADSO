@@ -269,6 +269,7 @@ async def handle_callback(
                 from adso.handlers.capture import _classify_and_preview
 
                 await query.edit_message_text("Clasificando...")
+                read_status = pdf_info.get("read_status")
                 await _classify_and_preview(
                     update, context, caption,
                     media_type=pdf_info.get("media_type", "image"),
@@ -276,6 +277,8 @@ async def handle_callback(
                         "temp_path": pdf_info["temp_path"],
                         "filename": pdf_info.get("original_filename", "imagen.jpg"),
                     },
+                    # Ver E2 — este camino también perdía el read_status.
+                    extra_fm={"read_status": read_status} if read_status else None,
                     preserve_body=True,
                 )
             else:
@@ -449,6 +452,11 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "text": text,
         "media_type": media_type,
         "user_context": pending.get("user_context"),
+        # El read_status que el usuario eligió con [Ya lo leí]/[Lo quiero leer]
+        # antes de que el PDF resultara escaneado. Sin propagarlo, el paper
+        # terminaba sin read_status pese a la elección explícita. E2 de
+        # docs/audit-2026-07-31.md.
+        "read_status": pending.get("read_status"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),
@@ -535,6 +543,8 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "text": text,
         "media_type": media_type,
         "user_context": pending.get("user_context"),
+        # Ver E2 en el bloque equivalente de `_cb_ocr`.
+        "read_status": pending.get("read_status"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),

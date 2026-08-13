@@ -898,7 +898,17 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             f"pudo copiar al vault: {_esc(resource_error)}\n"
             "La nota quedó guardada sin él."
         )
-    await query.edit_message_text(mensaje, parse_mode="HTML")
+    # A esta altura la nota ya está en disco, el push a Tasks y el indexado ya
+    # se lanzaron: un fallo de red en este edit NO es un fallo de guardado. Sin
+    # este try, la excepción subía al except de `handle_callback`, que le decía
+    # al usuario "Error al guardar" (falso) e intentaba otro edit por la misma
+    # red caída. E10 de docs/audit-2026-07-31.md.
+    try:
+        await query.edit_message_text(mensaje, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(
+            "La nota se guardó en %s pero falló el aviso al usuario: %s", path, e
+        )
     context.user_data.pop("original_content", None)
 
     if inbox_path_str:
@@ -1028,11 +1038,16 @@ async def _cb_transcript_ok(
             reply_markup=build_save_keyboard(),
         )
     else:
+        # `read_status` viene del PDF que resultó escaneado: el usuario lo
+        # eligió con [Ya lo leí]/[Lo quiero leer] antes de que se supiera que
+        # no tenía capa de texto. E2 de docs/audit-2026-07-31.md.
+        read_status = pt.get("read_status")
         await update.callback_query.edit_message_text("Clasificando...")
         await _classify_and_preview(
             update, context, text,
             media_type=media_type,
             resource_file=resource_file,
+            extra_fm={"read_status": read_status} if read_status else None,
             user_context=pt.get("user_context"),
             preserve_body=True,
         )

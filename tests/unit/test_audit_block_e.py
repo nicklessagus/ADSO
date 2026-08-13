@@ -452,3 +452,118 @@ class TestE11AdjuntoQueFalla:
             "el usuario debe enterarse de que el adjunto no se copió"
         )
         assert not temp.exists(), "el temporal quedó filtrado"
+
+
+# ---------------------------------------------------------------------------
+# E2 — el read_status elegido se perdía para PDFs escaneados
+# ---------------------------------------------------------------------------
+
+
+class TestE2ReadStatusDePdfEscaneado:
+    """`pending_fallback_pdf` lleva el `read_status` que el usuario eligió con
+    `[Ya lo leí]`/`[Lo quiero leer]`, pero `_cb_ocr`/`_cb_vision` armaban
+    `pending_transcript` sin copiarlo y `_cb_transcript_ok` no lo pasaba como
+    `extra_fm`. El paper escaneado terminaba sin `read_status` en el
+    frontmatter pese a la elección explícita."""
+
+    def _pending(self, tmp_path: Path) -> dict:
+        img = tmp_path / "scan.png"
+        img.write_bytes(b"fake")
+        return {
+            "temp_path": str(img),
+            "original_filename": "scan.png",
+            "media_type": "image",
+            "read_status": "unread",
+        }
+
+    @pytest.mark.asyncio
+    async def test_ocr_propaga_read_status(self, mock_context, tmp_path: Path) -> None:
+        from adso.handlers import callbacks
+
+        mock_context.user_data["pending_fallback_pdf"] = self._pending(tmp_path)
+        update = MagicMock()
+        update.callback_query.edit_message_text = AsyncMock(
+            return_value=MagicMock(message_id=1)
+        )
+
+        import asyncio as _asyncio
+        with patch.object(_asyncio, "to_thread", AsyncMock(return_value="texto ocr")):
+            await callbacks._cb_ocr(update, mock_context)
+
+        assert mock_context.user_data["pending_transcript"]["read_status"] == "unread"
+
+    @pytest.mark.asyncio
+    async def test_transcript_ok_lo_manda_como_extra_fm(
+        self, mock_context, tmp_path: Path
+    ) -> None:
+        from adso.handlers import capture
+
+        mock_context.user_data["pending_transcript"] = {
+            "text": "texto del scan",
+            "media_type": "image",
+            "read_status": "read",
+        }
+        update = MagicMock()
+        update.callback_query.edit_message_text = AsyncMock()
+
+        with patch.object(capture, "_classify_and_preview", AsyncMock()) as mock_cp:
+            await capture._cb_transcript_ok(update, mock_context)
+
+        assert mock_cp.await_args.kwargs["extra_fm"] == {"read_status": "read"}
+
+    @pytest.mark.asyncio
+    async def test_sin_read_status_no_inventa_extra_fm(
+        self, mock_context, tmp_path: Path
+    ) -> None:
+        """Una imagen común (sin flujo de PDF) no debe recibir read_status."""
+        from adso.handlers import capture
+
+        mock_context.user_data["pending_transcript"] = {
+            "text": "una foto cualquiera",
+            "media_type": "image",
+        }
+        update = MagicMock()
+        update.callback_query.edit_message_text = AsyncMock()
+
+        with patch.object(capture, "_classify_and_preview", AsyncMock()) as mock_cp:
+            await capture._cb_transcript_ok(update, mock_context)
+
+        assert mock_cp.await_args.kwargs.get("extra_fm") is None
+
+
+# ---------------------------------------------------------------------------
+# E10 — "Error al guardar" falso tras un guardado exitoso
+# ---------------------------------------------------------------------------
+
+
+class TestE10ErrorFalsoTrasGuardar:
+    """Si el edit final falla por red DESPUÉS de que `create_note` escribió, el
+    except de `handle_callback` reportaba "Error al guardar" —falso: la nota, el
+    push a Tasks y el indexado ya habían corrido— e intentaba otro edit por la
+    misma red caída."""
+
+    @pytest.mark.asyncio
+    async def test_fallo_del_edit_final_no_se_reporta_como_fallo_de_guardado(
+        self, mock_context, vault_path: Path
+    ) -> None:
+        from adso.handlers import capture
+
+        mock_context.user_data["pending_note"] = {
+            "payload": {
+                "frontmatter": {"title": "Nota que sí se guarda", "type": "reference"},
+                "body": "cuerpo",
+                "suggested_links": [],
+            },
+        }
+
+        query = MagicMock()
+        query.edit_message_text = AsyncMock(side_effect=RuntimeError("red caída"))
+
+        # No debe propagar: si propaga, handle_callback miente al usuario.
+        await capture._cb_confirm(query, mock_context, vault_path)
+
+        escritas = list(vault_path.rglob("*.md"))
+        assert escritas, "la nota debía quedar escrita"
+        assert "pending_note" not in mock_context.user_data, (
+            "el estado debe quedar limpio: la escritura fue exitosa"
+        )
