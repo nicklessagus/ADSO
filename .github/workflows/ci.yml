@@ -28,14 +28,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # Corre la suite COMPLETA (unit + integration + e2e). Ningún test toca la
+      # red: integration usa filesystem temporal y e2e simula updates de
+      # Telegram con mocks. Antes había un `-m "not integration and not e2e"`
+      # que no excluía nada porque los markers no estaban aplicados a ningún
+      # test; ahora que sí lo están (hook en tests/conftest.py), ese filtro
+      # sacaría 193 tests de CI. Ver G15 en docs/audit-2026-07-31.md.
       - name: Run tests
-        run: pytest --cov=adso --cov-report=xml --no-cov-on-fail -m "not integration and not e2e"
+        run: pytest --cov=adso --cov-report=xml --no-cov-on-fail
         env:
           TELEGRAM_TOKEN: dummy
           TELEGRAM_ALLOWED_USER_ID: "12345"
           GEMINI_API_KEY: dummy
           VAULT_PATH: /tmp/adso_test_vault
 
+      # El gate mide el código real, `adso/handlers/*` incluido (~40% del
+      # proyecto, antes omitido). Actual: 74%. El umbral queda en 70 para dar
+      # margen a variaciones menores; subirlo es la forma de fijar el terreno
+      # ganado a medida que la regla test-first suma cobertura.
       - name: Check coverage threshold (3.11 only)
         if: matrix.python-version == '3.11'
         run: python -m coverage report --fail-under=70

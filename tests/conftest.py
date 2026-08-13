@@ -10,7 +10,49 @@ from unittest.mock import AsyncMock, MagicMock
 from telegram import CallbackQuery, Chat, Message, Update, User
 
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+TESTS_ROOT = Path(__file__).parent
+FIXTURES_DIR = TESTS_ROOT / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# Markers automáticos por directorio
+# ---------------------------------------------------------------------------
+#
+# Los markers se asignan acá y no archivo por archivo a propósito: la versión
+# manual es la que se desincroniza. Antes de esto los markers estaban
+# declarados en pyproject.toml y documentados en docs/testing.md pero aplicados
+# en cero tests, así que el `-m "not integration and not e2e"` de CI no
+# excluía nada (ver G15 en docs/audit-2026-07-31.md). Un archivo nuevo en
+# tests/e2e/ queda marcado por existir, sin que nadie tenga que acordarse.
+
+_DIR_MARKERS = {"integration": "integration", "e2e": "e2e"}
+
+
+def marker_for_path(path: Path) -> str | None:
+    """Devuelve el marker que corresponde a un archivo de test por su ubicación.
+
+    Args:
+        path: Path del archivo de test.
+
+    Returns:
+        Nombre del marker ('integration' | 'e2e'), o None si el directorio no
+        lleva marker (tests/unit/) o el path cae fuera de tests/.
+    """
+    try:
+        rel = path.relative_to(TESTS_ROOT)
+    except ValueError:
+        return None
+    if not rel.parts:
+        return None
+    return _DIR_MARKERS.get(rel.parts[0])
+
+
+def pytest_collection_modifyitems(items: list) -> None:
+    """Aplica el marker de directorio a cada test colectado."""
+    for item in items:
+        marker = marker_for_path(Path(item.path))
+        if marker:
+            item.add_marker(getattr(pytest.mark, marker))
 
 
 @pytest.fixture

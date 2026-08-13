@@ -64,7 +64,12 @@ tests/
 │   ├── test_document_extractor.py # detección de papers, extracción de secciones
 │   ├── test_transcriber.py        # faster-whisper: modelo, idioma, fallback
 │   ├── test_jobs.py               # crons: reclassify_inbox, heartbeat, skip por flujo activo
-│   └── test_reporters.py          # formateo de reportes (reporte, reporte_full)
+│   ├── test_reporters.py          # formateo de reportes (reporte, reporte_full)
+│   ├── test_bot_errors.py         # error handler global de PTB
+│   ├── test_confirm_failure.py    # "crear antes de descartar": reintento tras fallo de escritura
+│   ├── test_audit_block_b.py      # guards de regresión del bloque B (auditoría 2026-07-31)
+│   ├── test_audit_block_cd.py     # guards de regresión de los bloques C y D
+│   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
 │   ├── test_degraded_mode.py      # LLM falla → nota en 00-Inbox/pending
@@ -478,11 +483,23 @@ def make_callback_query():
 | `tasks_client.py` | ≥ 80% | Escribe a Google Tasks externo. |
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 
-**Target global (CI): ≥ 70%** sobre módulos de lógica pura (excluye `bot.py` y `handlers/*`).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **74%** sobre 4634 statements.
+
+`adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
+`pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
+existen y lo ejercitan, así que lo único que lograba era dejar ~1900 statements
+(el 40% del código) fuera del número y publicar un 82% calculado sobre la mitad
+del proyecto. Con los handlers omitidos, **un test nuevo sobre un handler no
+movía el gate**, que es justo donde la regla test-first más hace falta. Detalle
+en I3 de `docs/audit-2026-07-31.md`.
+
+Cobertura actual de handlers (el terreno a ganar): `query.py` 88%, `callbacks.py`
+77%, `input.py` 67%, `jobs.py` 66%, `capture.py` 61%, `manage.py` 55%,
+`commands.py` 39%, `reports.py` 16%.
 
 ### Qué NO se mide en CI
 
-- `bot.py` y `adso/handlers/*` — requieren PTB Application/Update/Context; cubiertos por e2e tests
+- `bot.py` y `__main__.py` — bootstrap de PTB (registro de handlers y jobs), sin lógica propia
 - Código de terceros (`python-telegram-bot`, `chromadb`, `faster-whisper`)
 - Archivos de configuración y fixtures
 - `__init__.py` vacíos
@@ -500,17 +517,14 @@ export GEMINI_API_KEY=dummy
 ```
 
 ```bash
-# Todos los tests
+# Todos los tests (lo que corre CI)
 pytest tests/ -v
 
-# Solo unit tests (rápidos, < 5 segundos)
+# Por nivel — por ruta o por marker, equivalentes
 pytest tests/unit/ -v
-
-# Solo integration
-pytest tests/integration/ -v
-
-# Solo e2e
-pytest tests/e2e/ -v
+pytest -m "not integration and not e2e" -v    # solo unit
+pytest -m integration -v
+pytest -m e2e -v
 
 # Con cobertura
 pytest tests/ --cov=adso --cov-report=term-missing
@@ -518,6 +532,30 @@ pytest tests/ --cov=adso --cov-report=term-missing
 # Con cobertura y reporte HTML
 pytest tests/ --cov=adso --cov-report=html
 ```
+
+### Markers — se asignan solos, por directorio
+
+Los markers `integration` y `e2e` los aplica un hook en `tests/conftest.py`
+(`pytest_collection_modifyitems` + `marker_for_path`) según el directorio del
+archivo. **No hay que ponerlos a mano en ningún test**: un archivo nuevo en
+`tests/e2e/` queda marcado por existir.
+
+Está hecho así por el hallazgo G15 de `docs/audit-2026-07-31.md`. Los markers
+estaban declarados en `pyproject.toml` y documentados acá, pero aplicados en
+**cero** tests — nadie se acordaba de escribirlos. Consecuencias:
+
+1. El `-m "not integration and not e2e"` de CI no excluía nada; corría los 618.
+2. Peor: era una trampa armada. Aplicar los markers a mano —lo natural al leer
+   esta doc— habría sacado 193 tests de CI **en silencio**, sin fallar nada.
+
+Un directorio nuevo bajo `tests/` con tests adentro hace fallar
+`test_suite_hygiene.py` hasta que se le decida un marker en `_DIR_MARKERS`
+(`tests/conftest.py`) y en `_EXPECTED_DIRS` (el test). Es a propósito: obliga a
+decidir en vez de heredar un default silencioso.
+
+CI corre la suite completa en un solo step — ningún test toca la red, así que no
+hay razón para segmentar. Si alguna vez se agrega un nivel que sí requiera red,
+ese es el momento de excluirlo por marker (y de actualizar esta sección).
 
 ---
 
@@ -540,4 +578,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~55 segundos en desarrollo. Los unit tests solos corren en < 15 segundos en CI.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 623 tests: 430 unit, 48 integration, 145 e2e.
+- **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

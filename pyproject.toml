@@ -51,10 +51,14 @@ markers = [
 
 [tool.coverage.run]
 source = ["adso"]
+# `handlers/*` NO se omite: los e2e tests sí los ejercitan. Omitirlos dejaba
+# ~1900 statements (el 40% del código) fuera de la medición y reportaba 82%
+# sobre 2852 statements cuando el código real son 4794 — un test nuevo sobre un
+# handler no movía la aguja. Ver I3 en docs/audit-2026-07-31.md.
+# Solo queda afuera el bootstrap, que no tiene lógica propia.
 omit = [
     "adso/__main__.py",
-    "adso/bot.py",          # e2e territory — requires PTB Application setup
-    "adso/handlers/*",      # e2e territory — require Update/Context from PTB
+    "adso/bot.py",          # bootstrap de PTB: registro de handlers y jobs
 ]
 
 [tool.coverage.report]
