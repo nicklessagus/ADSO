@@ -614,3 +614,62 @@ class TestG10SoloFaltaLaDescripcion:
         params = mock_context.user_data["pending_operation"]["payload"]["params"]
         assert params["name"] == "Docencia"
         assert params["description"] == "gestión de clases"
+
+
+class TestG4PermisosDeLosAdjuntos:
+    """Hueco del fix original de G4, encontrado en el deploy del 2026-08-13.
+
+    `_atomic_write_sync` cubrió las notas `.md`, pero los adjuntos van por
+    `save_resource` → `shutil.copy2`, que **preserva el modo del origen** — y el
+    origen es el temporal de la descarga, que `tempfile` crea en 0600. Todos los
+    PDFs e imágenes de `03-Resources/` quedaban 0600, ilegibles para cualquier
+    otro usuario o proceso (Syncthing corriendo como otro UID, por ejemplo).
+    """
+
+    @pytest.mark.asyncio
+    async def test_adjunto_queda_0644(self, vault_path: Path, tmp_path: Path) -> None:
+        from adso.vault_writer import save_resource
+
+        origen = tmp_path / "descarga.pdf"
+        origen.write_bytes(b"%PDF-1.4 contenido")
+        origen.chmod(0o600)  # como lo deja tempfile
+
+        dest = await save_resource(origen, "paper.pdf", vault_path)
+
+        assert stat.S_IMODE(dest.stat().st_mode) == 0o644, (
+            f"quedó {oct(stat.S_IMODE(dest.stat().st_mode))}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_el_dedup_por_hash_sigue_andando(
+        self, vault_path: Path, tmp_path: Path
+    ) -> None:
+        """Guard del comportamiento verificado en producción: el mismo archivo
+        dos veces se reutiliza, no se duplica con sufijo."""
+        from adso.vault_writer import save_resource
+
+        origen = tmp_path / "descarga.pdf"
+        origen.write_bytes(b"%PDF-1.4 contenido")
+
+        primero = await save_resource(origen, "paper.pdf", vault_path)
+        segundo = await save_resource(origen, "paper.pdf", vault_path)
+
+        assert primero == segundo
+        assert len(list((vault_path / "03-Resources").glob("paper*.pdf"))) == 1
+
+    @pytest.mark.asyncio
+    async def test_archivo_distinto_del_mismo_tamano_no_se_confunde(
+        self, vault_path: Path, tmp_path: Path
+    ) -> None:
+        from adso.vault_writer import save_resource
+
+        a = tmp_path / "a.pdf"
+        b = tmp_path / "b.pdf"
+        a.write_bytes(b"AAAAAAAAAA")
+        b.write_bytes(b"BBBBBBBBBB")  # mismo tamaño, contenido distinto
+
+        p1 = await save_resource(a, "paper.pdf", vault_path)
+        p2 = await save_resource(b, "paper.pdf", vault_path)
+
+        assert p1 != p2
+        assert p2.read_bytes() == b"BBBBBBBBBB"

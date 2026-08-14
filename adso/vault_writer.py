@@ -955,6 +955,12 @@ async def save_resource(
 
     dest = candidate
     await asyncio.to_thread(shutil.copy2, str(source_path), str(dest))
+    # `copy2` preserva el modo del origen, y el origen es el temporal de la
+    # descarga que `tempfile` crea en 0600: sin este chmod todo PDF o imagen de
+    # 03-Resources/ quedaba ilegible para cualquier otro usuario o proceso.
+    # Mismo problema que G4 en las notas, por otro camino — el fix original
+    # solo cubrió `_atomic_write_sync`. Ver docs/audit-2026-07-31.md.
+    await asyncio.to_thread(os.chmod, str(dest), 0o644)
     logger.info("Recurso guardado: %s", dest.relative_to(vault_path))
     return dest
 
