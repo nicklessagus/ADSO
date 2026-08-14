@@ -124,12 +124,47 @@ El `config.yaml` copiado del ejemplo es válido para empezar. Ajustá a gusto (v
 Para separar el código fuente del despliegue (útil si desarrollás en la misma máquina donde corre el bot), se puede usar un directorio de deploy propio:
 
 ```bash
-mkdir -p ~/docker/ADSO
-cp docker-compose.yml .env config.yaml ~/docker/ADSO/
 mkdir -p ~/docker/ADSO/credentials
+cp .env config.yaml ~/docker/ADSO/
 ```
 
-En el compose del deploy, cambiar `build: .` por `build: { context: /ruta/al/repo/ADSO }`. El `Makefile` del repo asume esta variante: `make deploy` copia `config.yaml` a `~/docker/ADSO/` y levanta el compose de ahí. Si usás el flujo simple de un solo directorio, ignorá el Makefile y usá `docker compose` directo.
+**No copiar el `docker-compose.yml`.** El del repo queda como base y única fuente
+de verdad de todo lo compartido (healthcheck, hardening, logging, volúmenes); lo
+propio de la máquina va en un archivo aparte, `~/docker/ADSO/local.yml`:
+
+```yaml
+services:
+  adso-bot:
+    build:
+      context: /ruta/al/repo/ADSO     # el código vive en el repo
+    # + acá los volúmenes/variables propios de esta máquina (ver §4.3)
+```
+
+El `Makefile` los combina:
+
+```
+docker compose -p adso --project-directory ~/docker/ADSO \
+  -f docker-compose.yml -f ~/docker/ADSO/local.yml up --build -d
+```
+
+- `--project-directory` hace que `.env`, `./config.yaml` y `./credentials`
+  resuelvan contra el directorio de deploy. Importa si además tenés un `.env` en
+  el repo: sin esto se cargaría el equivocado.
+- `-p adso` fija el nombre de proyecto. **Sin esto, mover el compose de
+  directorio cambia el nombre del volumen** y Docker crea uno nuevo vacío —
+  perdés el índice de ChromaDB y el modelo de whisper descargado.
+- El archivo **no** se llama `docker-compose.override.yml` a propósito: ese
+  nombre lo carga compose automáticamente y se mezclaría por accidente en
+  cualquier comando suelto lanzado desde ese directorio.
+
+> **Por qué así y no copiando el compose.** La variante anterior (copiar y editar
+> a mano) deja dos archivos que nada mantiene sincronizados: los cambios al
+> compose del repo no llegan nunca a producción, y no hay nada que lo detecte. El
+> fix del healthcheck de la auditoría 2026-07-31 estuvo semanas commiteado y
+> documentado como implementado mientras producción corría el roto.
+
+Si usás el flujo simple de un solo directorio, ignorá el Makefile y usá
+`docker compose` directo.
 
 ---
 
@@ -189,7 +224,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/adso_vault -C "adso-vault-backup" -N ""
 ssh-keyscan github.com > ~/.ssh/adso_known_hosts
 ```
 
-Agregar en `docker-compose.yml` el volumen y la variable:
+Agregar el volumen y la variable — en `~/docker/ADSO/local.yml` si usás la
+variante de deploy separado, o en `docker-compose.yml` si tenés un solo
+directorio (en ese caso, ojo con no commitear paths locales):
 
 ```yaml
     volumes:
