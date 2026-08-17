@@ -1,0 +1,24 @@
+#!/bin/sh
+# Rechaza commits cuyo MENSAJE contenga patrones de secretos.
+#
+# Cubre el agujero que push protection de GitHub no cubre: push protection
+# escanea el contenido de los archivos pusheados, pero NO los mensajes de
+# commit. El commit 889c5ca (2026-08-13) filtró el .env resuelto justamente
+# por ese canal (salida de `docker compose config` pegada en el mensaje).
+#
+# Activar con: git config core.hooksPath hooks
+# Bypass consciente: git commit --no-verify (hooks/pre-push lo vuelve a atajar).
+
+MSG_FILE="$1"
+
+# Patrones de credenciales (mismos formatos que el incidente + comunes).
+# Son regex sobre el mensaje, no valores: este archivo no contiene secretos.
+PATTERNS='gsk_[0-9A-Za-z]{16,}|AIza[0-9A-Za-z_-]{30,}|[0-9]{8,10}:AA[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,}|ghp_[0-9A-Za-z]{30,}|github_pat_[0-9A-Za-z_]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+if grep -qE "$PATTERNS" "$MSG_FILE"; then
+    echo "commit-msg: RECHAZADO — el mensaje de commit contiene un patron de credencial." >&2
+    echo "Nunca pegar salida que resuelva secretos (docker compose config, .env) en un mensaje." >&2
+    echo "Comparar configs por hash: docker compose config | sha256sum" >&2
+    exit 1
+fi
+exit 0
