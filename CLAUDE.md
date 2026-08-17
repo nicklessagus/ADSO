@@ -135,6 +135,7 @@ No existe `calendar_client.py` — Google Calendar es Fase 6 diferida (solo Task
 - El LLM siempre responde en JSON estructurado con schema fijo.
 - Autenticación por `TELEGRAM_ALLOWED_USER_ID` en dos capas: (1) gate global en `bot.py` (`_global_auth_gate` registrado como `TypeHandler(Update, ...)` en `group=-1`) que descarta con `ApplicationHandlerStop` cualquier update de usuario no autorizado antes de llegar a los handlers; (2) el decorador `@authorized` por handler como segunda barrera. Ambos usan `is_authorized()` de `security.py`. Un handler nuevo sin decorar ya no es un bypass.
 - Credenciales solo en variables de entorno. Nunca hardcodeadas.
+- **Nunca pegar salida que resuelva secretos en algo que se commitea o pushea** (mensaje de commit, PR, issue, doc versionado). En particular `docker compose config` **imprime `.env` resuelto en texto plano** (`GEMINI_API_KEY`, `GROQ_API_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`). Para verificar que dos configs son equivalentes, comparar hashes (`docker compose config | sha256sum`) o `git diff`, nunca pegar el volcado. Post-mortem: el commit `889c5ca` (2026-08-13) filtró las tres keys en su mensaje; GitHub lo publicó en el feed público en segundos (Groq lo detectó 1s después del push), un `--amend` posterior no lo borra de GitHub ni del reflog, y 4 días después el `TELEGRAM_TOKEN` cosechado se usó para spam. Un force-push correctivo **no alcanza**: toda credencial que tocó un push público se considera comprometida y se rota. Ver [[decisions-log]] y la memoria del incidente.
 
 ---
 
