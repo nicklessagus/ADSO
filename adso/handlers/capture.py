@@ -18,6 +18,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from adso.bot_utils import (
+    Stopwatch,
     _cleanup_pending,
     _get_existing_items,
     _get_existing_tags,
@@ -193,8 +194,16 @@ async def _classify_and_preview(
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
-    projects, areas = await _get_existing_items(vault_path)
-    existing_tags = await _get_existing_tags(vault_path)
+    # Latencia por etapa: sin esto, una captura lenta no se puede diagnosticar
+    # a posteriori (ver Stopwatch en bot_utils.py).
+    sw = Stopwatch()
+
+    def _log_timing() -> None:
+        logger.info("Captura (%s): %s", media_type, sw.summary())
+
+    with sw.stage("scan"):
+        projects, areas = await _get_existing_items(vault_path)
+        existing_tags = await _get_existing_tags(vault_path)
 
     async def on_retry(attempt: int, max_attempts: int) -> None:
         if update.callback_query:
@@ -202,16 +211,17 @@ async def _classify_and_preview(
                 f"Servicio caído, reintento {attempt}/{max_attempts}..."
             )
 
-    result = await classify(
-        content=text,
-        media_type=media_type,
-        existing_projects=projects,
-        existing_areas=areas,
-        existing_tags=existing_tags,
-        disambiguation_threshold=settings.llm.disambiguation_threshold,
-        on_retry=on_retry,
-        user_context=user_context,
-    )
+    with sw.stage("classify"):
+        result = await classify(
+            content=text,
+            media_type=media_type,
+            existing_projects=projects,
+            existing_areas=areas,
+            existing_tags=existing_tags,
+            disambiguation_threshold=settings.llm.disambiguation_threshold,
+            on_retry=on_retry,
+            user_context=user_context,
+        )
 
     # Modos no implementados (query, edit) → tratar como captura, re-validando
     # el payload (validate_llm_response no lo sanitiza para esos modos).
@@ -253,6 +263,7 @@ async def _classify_and_preview(
             reply_markup=keyboard,
             parse_mode="HTML",
         )
+        _log_timing()
         return
 
     # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
@@ -280,6 +291,7 @@ async def _classify_and_preview(
     if mode != "capture":
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
+        _log_timing()
         return
 
     payload = result["payload"]
@@ -287,6 +299,7 @@ async def _classify_and_preview(
     if not isinstance(fm, dict):
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await reply_fn("Respuesta inesperada del LLM. Intentar de nuevo.")
+        _log_timing()
         return
     suggested_links: list[dict] = []
 
@@ -329,7 +342,8 @@ async def _classify_and_preview(
 
     # El body se embebe una sola vez: el vector viaja en el payload y `_cb_confirm`
     # lo reutiliza al indexar si el body no cambió (sin "Ver también" ni adjunto).
-    suggested_links, body_embedding = await _suggest_links(context, body)
+    with sw.stage("links"):
+        suggested_links, body_embedding = await _suggest_links(context, body)
 
     context.user_data["pending_note"] = result
     result["payload"]["suggested_links"] = suggested_links
@@ -351,6 +365,7 @@ async def _classify_and_preview(
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+    _log_timing()
 
 
 _WEEKDAYS_ES: dict[str, int] = {

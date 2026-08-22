@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Awaitable
+from typing import Awaitable, Callable, Iterator
 
 from telegram.ext import ContextTypes
 
@@ -24,6 +26,62 @@ logger = logging.getLogger(__name__)
 # recolectarlas a mitad de ejecución y cancelarlas silenciosamente (re-embed,
 # push a Tasks, etc. perdidos). Se descartan solas al terminar.
 _BG_TASKS: "set[asyncio.Task]" = set()
+
+
+
+class Stopwatch:
+    """Cronómetro por etapas para loguear la latencia de un flujo en una línea.
+
+    Existe porque una captura lenta no se podía diagnosticar: entre el inicio de
+    la llamada al LLM y el preview no había ninguna marca de tiempo, y las únicas
+    anclas del log eran la línea que emite el SDK de Gemini al abrir la request y
+    el "Nota creada" de `vault_writer` — que llega *después* de que el usuario
+    confirma, así que no mide nada del bot.
+
+    Una sola línea de resumen en vez de una por etapa: se lee de un vistazo y se
+    correlaciona sin tener que cruzar timestamps.
+
+    Args:
+        clock: Fuente de tiempo monótono. Inyectable para tests (misma convención
+            que el `now` de `_parse_date_from_text`).
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.perf_counter) -> None:
+        self._clock = clock
+        self._start = clock()
+        self.stages: dict[str, float] = {}
+
+    @contextmanager
+    def stage(self, name: str) -> Iterator[None]:
+        """Mide el bloque y lo acumula bajo `name`.
+
+        Acumula (no pisa) porque un mismo flujo puede entrar dos veces a la misma
+        etapa — la captura corre dos scans del vault seguidos. El registro va en
+        `finally`: una etapa que lanza es justo la que hay que medir.
+        """
+        inicio = self._clock()
+        try:
+            yield
+        finally:
+            self.stages[name] = self.stages.get(name, 0.0) + (self._clock() - inicio)
+
+    def total(self) -> float:
+        """Wall-clock desde la construcción, incluyendo lo no instrumentado.
+
+        Si `total` es mucho mayor que la suma de las etapas, lo lento está en un
+        tramo sin medir.
+        """
+        return self._clock() - self._start
+
+    def summary(self) -> str:
+        """Devuelve `"scan 0.13s | classify 6.11s | total 7.48s"`.
+
+        Las etapas salen en orden de ejecución (el dict preserva inserción), así
+        que la línea se lee como la secuencia real del pipeline.
+        """
+        partes = [f"{nombre} {dur:.2f}s" for nombre, dur in self.stages.items()]
+        partes.append(f"total {self.total():.2f}s")
+        return " | ".join(partes)
 
 
 def spawn_tracked(coro: Awaitable, *, name: str | None = None) -> "asyncio.Task":
