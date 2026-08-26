@@ -424,3 +424,47 @@ class TestRemoveBrokenWikilinksScoped:
         body = (await read_note(note)).body
         # El item del bloque Ver también se borró, pero la línea del usuario queda
         assert "dato importante del usuario" in body
+
+
+# ---------------------------------------------------------------------------
+# backup_label — commit messages for the vault backup
+# ---------------------------------------------------------------------------
+#
+# New code, written in English per the repo-wide decision of 2026-08-26.
+
+
+class TestBackupLabel:
+    """The vault backup labels a change by note stem, which is useless for indexes.
+
+    Every project and area index is named `_index.md`, so the watcher produced
+    commits reading `Add note: _index` — no way to tell which project changed,
+    and seven files share that stem.
+    """
+
+    def test_project_index_is_labelled_by_its_project(self) -> None:
+        from adso.vault_writer import backup_label
+
+        assert backup_label(Path("/vault/01-Projects/ADSO/_index.md")) == "ADSO (index)"
+
+    def test_area_index_is_labelled_by_its_area(self) -> None:
+        from adso.vault_writer import backup_label
+
+        assert backup_label(Path("/vault/02-Areas/ROCKY/_index.md")) == "ROCKY (index)"
+
+    def test_regular_note_keeps_its_stem(self) -> None:
+        """Counter-case: ordinary notes must be labelled exactly as before."""
+        from adso.vault_writer import backup_label
+
+        p = Path("/vault/00-Inbox/2026-08-26-comprar-filamento.md")
+        assert backup_label(p) == "2026-08-26-comprar-filamento"
+
+    def test_nested_index_uses_its_immediate_parent(self) -> None:
+        """A section index is labelled by the section, not the project.
+
+        The label answers "which folder changed", so the nearest parent is the
+        right one — the full path would make the commit subject unreadable.
+        """
+        from adso.vault_writer import backup_label
+
+        p = Path("/vault/01-Projects/Tesis/capitulo-5/_index.md")
+        assert backup_label(p) == "capitulo-5 (index)"

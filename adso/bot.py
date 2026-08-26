@@ -39,7 +39,7 @@ from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
 from adso.security import is_authorized
 from adso.vault_watcher import VaultWatcher
-from adso.vault_writer import GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
+from adso.vault_writer import backup_label, GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
 
 _bot_logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ async def _post_init(app: Application) -> None:
             _bot_logger.debug("Cambio externo fuera del índice, no se reindexa: %s", path)
         git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
         if git_backup:
-            await git_backup.notify(path.stem)
+            await git_backup.notify(backup_label(path))
 
     async def _remove_external_note(path: Path) -> None:
         """Elimina de ChromaDB el embedding de una nota borrada externamente y limpia wikilinks rotos."""
@@ -137,7 +137,7 @@ async def _post_init(app: Application) -> None:
             _bot_logger.warning("Error limpiando wikilinks rotos para %s: %s", path, exc)
         git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
         if git_backup:
-            await git_backup.notify(path.stem)
+            await git_backup.notify(backup_label(path))
 
     watcher = VaultWatcher(
         vault_path=vault_path,

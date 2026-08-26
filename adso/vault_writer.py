@@ -1058,9 +1058,27 @@ async def save_resource(
     return dest
 
 
-# ---------------------------------------------------------------------------
-# Git backup
-# ---------------------------------------------------------------------------
+def backup_label(note_path: Path) -> str:
+    """Human-readable label for a note in a vault backup commit message.
+
+    Every project and area index is named `_index.md`, so labelling by stem
+    produced commits reading `Add note: _index` — which of the seven indexes
+    changed was anyone's guess. Indexes are labelled by their project or area
+    instead.
+
+    Args:
+        note_path: Path of the note that changed.
+
+    Returns:
+        The parent directory name plus an `(index)` marker for `_index.md`;
+        the file stem for any other note.
+    """
+    if note_path.stem != "_index":
+        return note_path.stem
+    parent = note_path.parent.name
+    # Un `_index.md` suelto en la raíz del vault no tiene proyecto del que tomar
+    # el nombre: se cae al stem en vez de inventar una etiqueta.
+    return f"{parent} (index)" if parent else note_path.stem
 
 
 class GitBackup:
