@@ -171,8 +171,12 @@ class TestCallbackPaths:
     async def test_confirm_no_pending(self, make_callback_query, mock_context) -> None:
         update = make_callback_query(data=CB_CONFIRM)
         await handle_callback(update, mock_context)
-        update.callback_query.edit_message_text.assert_called_once_with(
-            "No hay nota pendiente."
+        # El aviso va como alerta efímera, no editando el mensaje: con doble tap
+        # ese mensaje ya es el preview vigente y editarlo le borra los botones.
+        # C8 de la auditoría 2026-08.
+        update.callback_query.edit_message_text.assert_not_called()
+        update.callback_query.answer.assert_called_with(
+            "No hay nota pendiente.", show_alert=True
         )
 
     @pytest.mark.asyncio
@@ -250,8 +254,10 @@ class TestCallbackPaths:
     async def test_dest_no_pending(self, make_callback_query, mock_context) -> None:
         update = make_callback_query(data=CB_DEST_INBOX)
         await handle_callback(update, mock_context)
-        update.callback_query.edit_message_text.assert_called_once_with(
-            "No hay nota pendiente."
+        # Ver C8: alerta efímera en vez de edición (no destruir el preview).
+        update.callback_query.edit_message_text.assert_not_called()
+        update.callback_query.answer.assert_called_with(
+            "No hay nota pendiente.", show_alert=True
         )
 
 

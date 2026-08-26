@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 from adso.bot_utils import _get_existing_items, _get_existing_tags, mark_bot_written, spawn_tracked
 from adso.config import Settings
 from adso.embeddings import EmbeddingsClient
-from adso.handlers.capture import _index_note_safe
+from adso.handlers.capture import _index_note_safe, _redirect_unimplemented_mode
 from adso.keyboards import _esc
 from adso.llm_client import classify, extract_original_from_degraded
 from adso.vault_search import find_by_property
@@ -96,8 +96,9 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.info("Reclasificación: saltando nota sin body: %s", ref.path)
                 continue
 
+            contenido = extract_original_from_degraded(note.body)
             result = await classify(
-                content=extract_original_from_degraded(note.body),
+                content=contenido,
                 media_type=orig_fm.get("media_type", "text"),
                 existing_projects=projects,
                 existing_areas=areas,
@@ -110,10 +111,16 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.info("Reclasificación: LLM no disponible, reintentará.")
                 return
 
-            if result.get("mode") != "capture":
+            # El LLM sigue devolviendo query/edit aunque el prompt ya no los
+            # ofrezca. Sin este redirect —el mismo que usa el flujo interactivo
+            # de captura— una nota degradada cuyo texto tiene forma de pregunta
+            # se salteaba en CADA pasada del cron: quemaba quota cada 30 minutos
+            # y no salía nunca del Inbox.
+            mode = _redirect_unimplemented_mode(result, contenido)
+            if mode != "capture":
                 logger.info(
                     "Reclasificación: %s clasificada como '%s', omitiendo.",
-                    ref.path, result.get("mode"),
+                    ref.path, mode,
                 )
                 continue
 
@@ -175,13 +182,31 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
                 if new_fm.get("project")
                 else f"02-Areas/{new_fm['area']}"
             )
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"✓ Nota clasificada: <b>{_esc(title)}</b> → <code>{dest}</code>",
-                parse_mode="HTML",
-            )
 
             logger.info("Reclasificación exitosa: %s → %s", ref.path, new_path)
+
+            # La notificación va DESPUÉS del punto de no retorno y su fallo no
+            # puede arrastrar la pasada: con el `return` detrás del send, un
+            # BadRequest caía al `except` por-nota y el `for` seguía con la nota
+            # siguiente, encadenando classify() contra un free tier de 15 RPM
+            # (R3b). El invariante "una nota por ciclo" no depende de que
+            # Telegram conteste.
+            try:
+                # `dest` sale de `new_fm['project']`/`['area']`, que pasaron por
+                # `_safe_component`: eso bloquea traversal, pero `<`, `>` y `&`
+                # son nombres de carpeta válidos y con parse_mode=HTML rompen el
+                # mensaje (R3a). Va escapado, igual que el título.
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"✓ Nota clasificada: <b>{_esc(title)}</b> → "
+                        f"<code>{_esc(dest)}</code>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.warning("No se pudo notificar la reclasificación: %s", e)
+
             return  # Procesar de a una por ciclo
 
         except Exception as e:

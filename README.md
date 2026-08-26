@@ -30,7 +30,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 - **Integra arXiv**: al recibir un link de arxiv.org recupera metadata completa via API oficial (sin scraping) y genera una nota con abstract, autores y summary en español
 - **Genera** archivos Markdown con Frontmatter YAML clasificados, con links automáticos por similitud semántica
 - **Escribe** las notas al vault de Obsidian directamente al filesystem via volumen Docker
-- **Busca** en el vault con dos motores complementarios: semántico via `/buscar` o el botón `[🔎 Buscar en el vault]` (ChromaDB + Gemini Embeddings) y estructural (backlinks, tags, frontmatter)
+- **Busca** en el vault con retrieval semántico: `/buscar` o el botón `[🔎 Buscar en el vault]` (ChromaDB + Gemini Embeddings). La búsqueda estructural (backlinks, tags, frontmatter) existe como librería (`vault_search.py`) y la usan flujos internos — `/clasificar`, dedup de papers, reportes, crons —, pero todavía no hay comando ni flujo de usuario que la exponga
 - **Reporta** el estado del vault a pedido: scope por proyecto/área/inbox, ideas, cola de lectura, salud del vault (`/reporte`, `/reporte_full`)
 
 ## Stack
@@ -39,7 +39,8 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 |---|---|
 | Bot | Python 3.11+, `python-telegram-bot` (async) |
 | LLM primario | Gemini API — `gemini-3.5-flash-lite` |
-| LLM fallback | Groq — `llama-3.1-8b-instant` (cuando Gemini no responde) |
+| LLM de Vision | Gemini API — `gemini-3.6-flash` (`GEMINI_VISION_MODEL`, constante separada de `GEMINI_MODEL`: la quota del free tier es **por modelo**, así que rasterizar un PDF escaneado no consume RPD del bucket de la captura diaria) |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (entra **solo** cuando Gemini agota la cuota diaria; ante un error genérico, tras 3 reintentos se cae a modo degradado sin pasar por Groq) |
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |
 | OCR / Visión | `pytesseract` (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | PDF | `pymupdf` — extracción de texto, metadata académica y detección de papers |
@@ -74,7 +75,7 @@ Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, im
 - Docker y docker-compose-v2 (`sudo apt install docker-compose-v2`)
 - Token de bot de Telegram (via @BotFather)
 - API key de Gemini (Google AI Studio — free tier, sin tarjeta de crédito)
-- API key de Groq (free tier — fallback LLM cuando Gemini no responde)
+- API key de Groq (free tier — fallback LLM que entra solo cuando Gemini agota la cuota diaria)
 - Google OAuth credentials (opcional — para la integración con Google Tasks)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
 

@@ -215,15 +215,24 @@ class TestScopeReport:
         assert "Paper sin leer" in content
         assert "Papers sin leer" in content
 
-    async def test_empty_scope_returns_header_only(self, tmp_path: Path) -> None:
-        """Scope vacío retorna bytes con solo el header (< 400 bytes)."""
+    async def test_empty_scope_reports_zero_items(self, tmp_path: Path) -> None:
+        """Scope vacío: el reporte declara `item_count == 0`.
+
+        La versión anterior de este test decía "(< 400 bytes)" en el docstring
+        pero solo asertaba `isinstance(result, bytes)`. El umbral por tamaño
+        nunca se cumplía —el header solo ya pesa ~650 bytes— así que la rama de
+        "reporte vacío" de `_send_report` era código muerto y el usuario recibía
+        igual un .md con secciones vacías (R1 de la auditoría 2026-08). Ahora el
+        conteo lo declara el reporter y esto lo verifica.
+        """
         vault = tmp_path / "vault"
         vault.mkdir(parents=True, exist_ok=True)
 
         result = await scope_report(vault, project="inexistente")
-        # El resultado debe ser pequeño (solo header + secciones vacías)
-        # El test valida que el reporte se genera sin errores
+
         assert isinstance(result, bytes)
+        assert result.item_count == 0
+        assert b"_Sin referencias activas._" in result
 
 
 # ---------------------------------------------------------------------------

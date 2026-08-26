@@ -38,6 +38,7 @@ from adso.llm_schema import (  # noqa: E402
     _validate_capture_payload,
     _validate_manage_payload,
     check_injection_risk,
+    coerce_discarded_type,
     validate_llm_response,
 )
 
@@ -407,6 +408,35 @@ async def _safe_on_retry(on_retry: Any, attempt: int) -> None:
         logger.warning("on_retry falló (no bloqueante): %s", e)
 
 
+def _fill_title_fallback(result: dict, content: str) -> dict:
+    """Rellena el título vacío que `_validate_capture_payload` deja a propósito.
+
+    Este relleno vivía dentro del `try` del loop de Gemini, así que ni el
+    fallback de Groq ni `_redirect_unimplemented_mode` (que corre después de
+    que `classify()` retornó) lo ejecutaban: la nota llegaba al vault con
+    `title: ""`, `create_note` la nombraba con lo que pudiera y el preview
+    mostraba un título en blanco. Ahora pasan por acá todos los caminos de
+    retorno.
+
+    Args:
+        result: Respuesta validada del LLM (se muta in-place).
+        content: Texto original, usado como título de fallback.
+
+    Returns:
+        El mismo dict, para poder usarlo en el `return`.
+    """
+    # `manage` no escribe notas: su payload no tiene frontmatter que rellenar.
+    if not isinstance(result, dict) or result.get("mode") == "manage":
+        return result
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        return result
+    fm = payload.get("frontmatter")
+    if isinstance(fm, dict) and not fm.get("title"):
+        fm["title"] = content[:80].strip() or "Sin título"
+    return result
+
+
 async def classify(
     content: str,
     media_type: str,
@@ -444,19 +474,16 @@ async def classify(
         try:
             response_text = await _call_gemini(system_prompt, user_message)
             response_json = _parse_json_response(response_text)
+            # En texto/audio el `type` lo eligen los botones: rescatar un valor
+            # inválido antes de validar evita degradar la respuesta entera.
+            coerce_discarded_type(response_json, media_type)
             validated = validate_llm_response(response_json)
 
             # Flag de desambiguación
             confidence = validated.get("confidence", 0.5)
             validated["needs_disambiguation"] = confidence < disambiguation_threshold
 
-            # Ensure title is populated (LLM may return empty or omit it)
-            if validated.get("mode") == "capture":
-                fm = validated.get("payload", {}).get("frontmatter", {})
-                if not fm.get("title"):
-                    fm["title"] = content[:80].strip() or "Sin título"
-
-            return validated
+            return _fill_title_fallback(validated, content)
 
         except Exception as e:
             error_str = str(e)
@@ -467,10 +494,11 @@ async def classify(
                 if is_daily:
                     logger.error("Gemini daily quota exhausted — trying Groq fallback")
                     groq_result = await _try_groq_fallback(
-                        system_prompt, user_message, disambiguation_threshold
+                        system_prompt, user_message, disambiguation_threshold,
+                        media_type,
                     )
                     if groq_result is not None:
-                        return groq_result
+                        return _fill_title_fallback(groq_result, content)
                     break  # Groq also failed or not configured
 
                 # RPM error: use the delay suggested by the API
@@ -501,6 +529,7 @@ async def _try_groq_fallback(
     system_prompt: str,
     user_message: str,
     disambiguation_threshold: float,
+    media_type: str = "text",
 ) -> Optional[dict]:
     """Attempt classification via Groq. Returns validated dict or None if unavailable."""
     import os
@@ -510,6 +539,9 @@ async def _try_groq_fallback(
     try:
         response_text = await _call_groq(system_prompt, user_message)
         response_json = _parse_json_response(response_text)
+        # Groq no tiene schema constrained: es justo donde más aparece un
+        # `type` fuera del enum.
+        coerce_discarded_type(response_json, media_type)
         validated = validate_llm_response(response_json)
         confidence = validated.get("confidence", 0.5)
         validated["needs_disambiguation"] = confidence < disambiguation_threshold

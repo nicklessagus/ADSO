@@ -108,6 +108,17 @@ GROQ_API_KEY=<tu API key de Groq>
 # ANTHROPIC_API_KEY=
 # LOG_LEVEL=INFO
 
+# Zona horaria IANA para parsear fechas relativas ("el viernes", "mañana").
+# Orden de resolución: ADSO_TIMEZONE → TZ (que docker-compose ya define) → UTC.
+# Sin la zona correcta, los días de semana cerca de medianoche pueden resolverse
+# con off-by-one respecto a la hora local.
+# ADSO_TIMEZONE=America/Argentina/Buenos_Aires
+
+# Overrides de modelo sin tocar código. Existen para que el harness de regresión
+# (scripts/llm_regression.py) apunte a un candidato; en producción se dejan sin setear.
+# ADSO_GEMINI_MODEL=
+# ADSO_GEMINI_VISION_MODEL=
+
 # ─── Paths ────────────────────────────────────────────────────────────────────
 VAULT_PATH=/ruta/al/vault
 
@@ -319,7 +330,7 @@ docker compose stop             # o make stop
 
 ## Notas de compatibilidad
 
-- **Gemini API:** ADSO usa `gemini-3.1-flash-lite` (estable desde mayo 2026; free tier: ~1000 requests/día, sin tarjeta de crédito). Los `gemini-2.0-flash*` fueron retirados el 1-jun-2026 — no usar.
+- **Gemini API:** ADSO usa dos modelos, definidos en `adso/config.py`: `GEMINI_MODEL = "gemini-3.5-flash-lite"` para clasificación y síntesis de reportes, y `GEMINI_VISION_MODEL = "gemini-3.6-flash"` para OCR/descripción de imágenes y PDFs escaneados. Son constantes separadas porque el free tier acota la quota **por modelo**: rasterizar un PDF no consume RPD del bucket de la captura diaria. Free tier (jul-2026): ~1.000-1.500 requests/día, sin tarjeta de crédito — Google ya no publica el cap en la doc, verificarlo por proyecto en AI Studio. Los `gemini-2.0-flash*` fueron retirados el 1-jun-2026 — no usar.
 - **python-telegram-bot v21+:** requiere el extra `[job-queue]` para el scheduler de trabajos periódicos. Ya incluido en `requirements.txt`.
 - **docker compose v2:** usar `docker compose` (sin guion). Instalar con `sudo apt install docker-compose-v2`.
 
@@ -339,4 +350,4 @@ docker compose stop             # o make stop
 | `adso-data` (Docker) | ChromaDB + modelos Whisper descargados |
 | `./config.yaml` (host) | Configuración del bot (montado read-only) |
 | directorio de credenciales Google (host) | `google-oauth.json` + `token_tasks.json` — montado en `/credentials/` |
-| `~/.ssh` (host) | SSH keys para git push del backup — montado en `/ssh-keys/` (read-only) |
+| key dedicada + `known_hosts` (host) | `adso_vault` (key SSH exclusiva del backup) y `adso_known_hosts` — montados individualmente en `/ssh-keys/` (read-only). Nunca `~/.ssh` entero — ver §4.3 |

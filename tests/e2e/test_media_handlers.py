@@ -354,8 +354,10 @@ class TestTranscriptCallbacks:
         update = make_callback_query(CB_TRANSCRIPT_OK)
         await handle_callback(update, mock_context)
 
-        update.callback_query.edit_message_text.assert_called_with(
-            "No hay transcripción pendiente."
+        # Ver C8: alerta efímera en vez de edición (no destruir el preview).
+        update.callback_query.edit_message_text.assert_not_called()
+        update.callback_query.answer.assert_called_with(
+            "No hay transcripción pendiente.", show_alert=True
         )
 
 
@@ -468,8 +470,10 @@ class TestExtractionCallbacks:
         update = make_callback_query(CB_EXTRACTION_OK)
         await handle_callback(update, mock_context)
 
-        update.callback_query.edit_message_text.assert_called_with(
-            "No hay extracción pendiente."
+        # Ver C8: alerta efímera en vez de edición (no destruir el preview).
+        update.callback_query.edit_message_text.assert_not_called()
+        update.callback_query.answer.assert_called_with(
+            "No hay extracción pendiente.", show_alert=True
         )
 
 

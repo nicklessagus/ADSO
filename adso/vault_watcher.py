@@ -207,6 +207,10 @@ class VaultWatcher:
             self._observer.start()
         except Exception as exc:
             logger.error("VaultWatcher: no se pudo iniciar observer: %s", exc)
+            # Sin esto el observer queda seteado y `stop()` hace join() sobre un
+            # thread nunca arrancado -> RuntimeError, que en el shutdown de PTB
+            # abortaba la corutina ANTES del flush del git backup.
+            self._observer = None
             return
 
         self._task = asyncio.create_task(self._dispatch_loop(), name="vault_watcher")

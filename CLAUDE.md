@@ -122,6 +122,7 @@ No existe `calendar_client.py` — Google Calendar es Fase 6 diferida (solo Task
 
 ## Convenciones de código
 
+- **Idioma — inglés para todo lo nuevo (desde 2026-08-26):** nombres de funciones y variables, docstrings, comentarios, documentos nuevos e issues se escriben en **inglés**. El código, los tests, este archivo y `docs/` existentes están en español y **no se traducen hacia atrás**. Al editar un archivo que ya está en español, la corrección se escribe en español — un archivo bilingüe es peor que uno consistente en el idioma equivocado. Excepción permanente: los mensajes que el bot manda al usuario por Telegram siguen en español con infinitivo impersonal (ver § Tono y estilo de mensajes).
 - **Asíncrono siempre:** usar `async/await`. Ninguna operación de I/O debe ser bloqueante.
 - **Manejo de excepciones explícito:** capturar errores de red, timeouts de API y errores de filesystem con mensajes claros al usuario.
 - **Sin pérdida de datos:** ante error al escribir al vault, loguear y notificar al usuario. No silenciar excepciones.
@@ -374,6 +375,12 @@ Ninguna funcionalidad nueva ni fix entra sin test que lo cubra, y **el test se e
 4. **Correr el test** y verificar que pasa, junto con la suite completa.
 
 Escribir el test después produce tests que confirman lo implementado en vez de especificar el comportamiento buscado. Un cambio que llega sin test se devuelve al paso 2.
+
+**Bugs conocidos sin arreglar todavía: reproductor con `xfail(strict=True)`.** Un bug que se detecta pero no se arregla en el momento se documenta con un test que **especifica el comportamiento correcto** y lleva `@pytest.mark.xfail(strict=True, reason="BUG <id>: <causa>")`. La suite queda verde, y el día que alguien arregla el bug el test pasa a XPASS — que con `strict` es un **fallo**, así que obliga a sacar la marca en el mismo commit del fix. Es lo que hace cumplir el ciclo test-first para bugs: el test existe y falla *antes* de que exista el fix.
+
+Dos reglas que hacen que el mecanismo sirva: (1) verificar con `--runxfail` que el test falla por el mecanismo descrito y no por un mock mal armado — un reproductor que "falla" por una fixture rota documenta un bug inexistente; (2) acompañarlo de **contra-casos sin marca** que fijen el comportamiento vecino correcto, porque casi todos estos fixes son guards de una línea fáciles de aplicar de más (no borrar *ningún* wikilink en vez de solo los válidos, degradar *todo* type inválido en vez de solo los que el usuario ya eligió).
+
+Los reproductores de la auditoría 2026-08-26 viven en `tests/unit/test_audit_2026_08_*.py`; el índice de qué cubre cada uno está en `docs/audit-2026-08-26.md`.
 
 ### Harness de regresión de modelo
 

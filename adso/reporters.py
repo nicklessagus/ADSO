@@ -45,6 +45,28 @@ _ASCII_HEADER = """\
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2, None: 3, "": 3}
 
 
+class ReportBytes(bytes):
+    """Bytes de un reporte .md, con el conteo de ítems que incluye.
+
+    `_send_report` (handlers/reports.py) necesita distinguir "reporte vacío" de
+    "reporte con contenido", y el tamaño en bytes no sirve: el header solo ya
+    pesa ~650 bytes (el logo ASCII son caracteres de bloque UTF-8 de 3 bytes),
+    así que el viejo umbral de 400 era código muerto y el usuario recibía
+    igual un .md que solo decía "_Sin referencias activas._" (R1).
+
+    Es una subclase de `bytes` y no una tupla a propósito: el contrato de los
+    reporters no cambia — todo lo que ya los consume sigue haciendo `.decode()`,
+    `len()` o `in`, y los tests existentes siguen viendo `isinstance(x, bytes)`.
+    """
+
+    item_count: int
+
+    def __new__(cls, data: bytes, item_count: int) -> "ReportBytes":
+        obj = super().__new__(cls, data)
+        obj.item_count = item_count
+        return obj
+
+
 # ---------------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------------
@@ -260,7 +282,7 @@ async def scope_report(
     area: Optional[str] = None,
     inbox: bool = False,
     full: bool = False,
-) -> bytes:
+) -> ReportBytes:
     """Genera un reporte de scope para un proyecto, área o el inbox.
 
     Incluye: referencias activas, tareas por estado, ideas por estado,
@@ -274,7 +296,9 @@ async def scope_report(
         full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
-        Bytes del .md generado.
+        `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
+        entraron). `item_count == 0` es lo que usa `_send_report` para avisar
+        "no hay nada" en vez de mandar un adjunto vacío.
     """
     exclude = ["05-Archive", ".obsidian", ".trash"]
 
@@ -399,7 +423,7 @@ async def scope_report(
         lines.append(f"## Última actividad\n\n{last_modified.strftime('%Y-%m-%d %H:%M')}\n")
 
     content = "\n".join(lines)
-    return content.encode("utf-8")
+    return ReportBytes(content.encode("utf-8"), len(all_notes))
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +436,7 @@ async def ideas_report(
     project: Optional[str] = None,
     area: Optional[str] = None,
     full: bool = False,
-) -> bytes:
+) -> ReportBytes:
     """Genera un reporte de todas las ideas, opcionalmente filtradas por proyecto/área.
 
     Agrupa por status: raw / implemented / discarded.
@@ -424,7 +448,9 @@ async def ideas_report(
         full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
-        Bytes del .md generado.
+        `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
+        entraron). `item_count == 0` es lo que usa `_send_report` para avisar
+        "no hay nada" en vez de mandar un adjunto vacío.
     """
     exclude = ["05-Archive", ".obsidian", ".trash"]
     all_notes = await scan_notes(vault_path, exclude_dirs=exclude, filters={"type": "idea"})
@@ -489,7 +515,7 @@ async def ideas_report(
         lines.append("")
 
     content = "\n".join(lines)
-    return content.encode("utf-8")
+    return ReportBytes(content.encode("utf-8"), len(all_notes))
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +523,7 @@ async def ideas_report(
 # ---------------------------------------------------------------------------
 
 
-async def health_report(vault_path: Path, stale_days: int = 30, full: bool = False) -> bytes:
+async def health_report(vault_path: Path, stale_days: int = 30, full: bool = False) -> ReportBytes:
     """Genera un reporte de salud del vault.
 
     Detecta:
@@ -512,7 +538,9 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
-        Bytes del .md generado.
+        `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
+        entraron). `item_count == 0` es lo que usa `_send_report` para avisar
+        "no hay nada" en vez de mandar un adjunto vacío.
     """
     exclude = ["05-Archive", ".obsidian", ".trash"]
     today = date.today()
@@ -681,7 +709,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         lines.append("_Sin ideas raw en el vault._\n")
 
     content = "\n".join(lines)
-    return content.encode("utf-8")
+    return ReportBytes(content.encode("utf-8"), len(all_notes))
 
 
 # ---------------------------------------------------------------------------
@@ -694,7 +722,7 @@ async def reading_queue(
     project: Optional[str] = None,
     area: Optional[str] = None,
     full: bool = False,
-) -> bytes:
+) -> ReportBytes:
     """Genera un reporte de la cola de lectura (papers con read_status: unread).
 
     Ordena por prioridad (high > medium > low > null) y agrupa por proyecto/área.
@@ -706,7 +734,9 @@ async def reading_queue(
         full: True para incluir el cuerpo completo de cada nota.
 
     Returns:
-        Bytes del .md generado.
+        `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
+        entraron). `item_count == 0` es lo que usa `_send_report` para avisar
+        "no hay nada" en vez de mandar un adjunto vacío.
     """
     exclude = ["05-Archive", ".obsidian", ".trash"]
     all_notes = await scan_notes(
@@ -751,7 +781,7 @@ async def reading_queue(
 
     if not all_notes:
         lines.append("_La cola de lectura está vacía._\n")
-        return "\n".join(lines).encode("utf-8")
+        return ReportBytes("\n".join(lines).encode("utf-8"), 0)
 
     # Agrupar por proyecto/área
     groups: dict[str, list[NoteData]] = {}
@@ -780,4 +810,4 @@ async def reading_queue(
         lines.append("")
 
     content = "\n".join(lines)
-    return content.encode("utf-8")
+    return ReportBytes(content.encode("utf-8"), len(all_notes))

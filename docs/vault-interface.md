@@ -86,6 +86,49 @@ Toda operación es `async` para no bloquear el event loop del bot.
 
 ---
 
+### Garantías de escritura
+
+Tres helpers privados que **toda** escritura de `.md` atraviesa. Las funciones públicas de abajo se apoyan en ellos; un camino de escritura nuevo que los saltee es un bug.
+
+#### Escritura atómica — `_atomic_write_sync(path, content)`
+
+Escribe a un temporal **en el mismo directorio**, hace `flush()` + `os.fsync()` y recién ahí `os.replace()` (rename atómico dentro del mismo filesystem). Si el proceso muere a mitad de camino — OOM en la RPi4, `docker stop` — el archivo destino queda **intacto**, nunca truncado ni vacío. Es la regla de oro del proyecto: sin pérdida de datos.
+
+Detalles que importan:
+
+- El temporal se llama `.adso-tmp-*.tmp`. Es **oculto** (lo saltea `_is_hidden` del `VaultWatcher`) y su sufijo **no es `.md`** (lo saltea también el filtro por extensión, aunque `_is_hidden` fallara). Sin eso los temporales se indexaban como notas fantasma en ChromaDB y ensuciaban el mensaje del commit de backup; el sufijo distinto además evita que un `git add -A` concurrente los commitee.
+- **Modo del archivo:** `mkstemp` crea el temporal en `0600` y `os.replace` conserva ese modo, así que toda nota escrita por el bot quedaba `0600`. Ahora se preserva el modo del destino si el archivo ya existía (el usuario pudo ajustarlo a propósito), y `0644` si es nuevo (G4 de `docs/audit-2026-07-31.md`).
+- Ante cualquier excepción el temporal se borra y la excepción se propaga.
+- Es **síncrono y bloqueante**: se llama siempre vía `asyncio.to_thread`.
+
+#### Reserva de nombre sin TOCTOU — `_reserve_and_write_sync(dest_dir, filename, content)`
+
+El camino de `create_note()`. Elegir el nombre con un `_unique_path` y escribir varios `await` después abría una ventana: dos escrituras concurrentes con el mismo título el mismo día —una captura del usuario y `reclassify_inbox`, por ejemplo— elegían el mismo candidato y **la segunda sobrescribía a la primera en silencio**.
+
+La reserva ahora se hace con `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, que es atómico a nivel kernel: dos procesos no pueden ganar el mismo nombre. Si el nombre está tomado, se prueba `stem-2`, `stem-3`, … El contenido se escribe después con `_atomic_write_sync` sobre el placeholder ya reservado, así que un crash entre medio deja una nota **vacía**, nunca una nota **pisada**. Corre entero en un thread. G1 de `docs/audit-2026-07-31.md`.
+
+#### Sanitización de componentes de path — `_safe_component(name)`
+
+`project`, `section` y `area` vienen del frontmatter que propone el LLM (que procesó contenido externo susceptible a injection), y `name`/`project` de las operaciones de gestión vienen de texto libre del usuario. Todos se concatenan al path del vault, así que un `"../../etc"` escribiría fuera.
+
+`_safe_component` devuelve el nombre limpio solo si es **un único componente seguro**, y `None` en cualquier otro caso:
+
+| Entrada | Resultado |
+|---|---|
+| no-string | `None` |
+| vacío / solo espacios | `None` |
+| `"."` / `".."` | `None` |
+| empieza con `.` | `None` |
+| contiene `/`, `\` o `\x00` | `None` |
+| `Path(cleaned).name != cleaned` | `None` |
+| resto | el string stripeado |
+
+El caller trata `None` como "sin destino": la nota cae a `00-Inbox` (captura) o la operación se rechaza (`manage.py`).
+
+**Defensa en profundidad:** además, `create_note()` verifica `dest_dir.resolve().is_relative_to(vault_path.resolve())` antes de escribir. Y `save_resource()` aplica su propio `Path(original_filename).name`.
+
+---
+
 ### `create_note()`
 
 **Equivalente CLI:** `obsidian create`
@@ -262,10 +305,11 @@ Copia un archivo a `03-Resources/` en el vault.
 1. Verifica que `source_path` existe.
 2. **Sanitiza el nombre**: aplica `Path(original_filename).name` para eliminar cualquier componente de directorio y prevenir path traversal (ej: `../../.env` queda como `.env`, luego el destino final sigue siendo `03-Resources/.env`).
 3. Calcula `dest = 03-Resources/{safe_name}`.
-4. **Deduplicación:** si ya existe un archivo con el mismo nombre y el mismo tamaño, lo reutiliza y retorna el path existente sin copiar nada.
-5. Si existe con el mismo nombre pero distinto tamaño (archivo diferente), agrega sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc.
+4. **Deduplicación por contenido:** recorre los candidatos ocupados (`safe_name`, `stem_1.ext`, `stem_2.ext`, …) y reutiliza uno solo si tiene **el mismo hash SHA-256 del contenido** que el origen. El tamaño se usa como short-circuit: solo se hashea el candidato si `st_size` coincide. El hashing es por chunks (`_file_hash_sync`, memory-safe en la RPi4) y corre en `asyncio.to_thread`.
+5. Si el nombre está ocupado por contenido distinto, sigue con el próximo sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc. **Mismo nombre + distinto contenido ⇒ archivo nuevo**, nunca se descarta el entrante (dedupear solo por tamaño era pérdida de datos silenciosa: dos archivos distintos del mismo tamaño se confundían).
 6. Copia el archivo con `shutil.copy2` (preserva metadatos).
-7. Retorna el path del archivo en el vault.
+7. **`chmod 0644`** sobre el destino: `copy2` preserva el modo del origen, y el origen es el temporal de la descarga que `tempfile` crea en `0600` — sin esto todo PDF o imagen de `03-Resources/` quedaba ilegible para cualquier otro usuario o proceso (mismo problema que G4 en las notas, por otro camino).
+8. Retorna el path del archivo en el vault.
 
 **Errores:**
 - `FileNotFoundError` si `source_path` no existe → propagar.
@@ -496,11 +540,15 @@ async def find_tasks(
 - Aplica filtros `status`, `area`, `project` si se proveen.
 
 **Fuente 2 — checkboxes inline** (si `include_inline=True`):
-- Busca líneas `- [ ] {texto}` o `- [x] {texto}` en el body de cualquier nota.
-- Si `status="pending"`: solo `- [ ]`. Si `status="done"`: solo `- [x]`.
-- Las notas con checkboxes que ya son `type: task` no se duplican.
+- Busca líneas `- [ ] {texto}` o `- [x] {texto}` en el body de **cualquier** nota, incluidas las que ya son `type: task`.
+- Si `status="pending"`: solo `- [ ]`. Si `status="done"`: solo `- [x]`. Si `status=None`: ambos. Con cualquier otro `status` (ej. `"in-progress"`) la fuente 2 no aporta nada.
+- Los checkboxes se filtran solo por `area` y `project` — el `status` del frontmatter de la nota que los contiene no se mira.
 
 **Retorna** lista combinada de `NoteRef`. Para los checkboxes inline, el `snippet` contiene el texto del checkbox.
+
+> **Comportamiento actual — hay solapamiento entre las dos fuentes.** Una nota `type: task` que pasa los filtros se agrega **una vez como nota** (fuente 1) **y además una vez por cada checkbox** de su body (fuente 2). El set `seen_paths` que existe en `_scan` se puebla en la fuente 1 pero **nunca se consulta**, así que no deduplica nada (`vault_search.py`, `find_tasks._scan`).
+>
+> Efecto colateral del mismo bloque: una nota `type: task` que **no** pasa un filtro (`status`/`area`/`project`) hace `continue` antes de la fuente 2, así que sus checkboxes tampoco se listan — mientras que los de una nota que no es `type: task` sí se listan aunque su frontmatter diga otra cosa.
 
 ---
 
@@ -653,6 +701,18 @@ Cada documento en la colección tiene:
 
 ---
 
+### `compute_embedding()`
+
+```python
+async def compute_embedding(self, content: str) -> list[float]:
+```
+
+API pública que expone el cálculo del vector para **reutilizarlo**. Existe porque el mismo texto se embebe en más de una operación del flujo de captura: `query_similar()` para sugerir links en el preview e `index_note()` al confirmar. El vector viaja en el payload de `pending_note` como `_body_embedding`.
+
+> **Regla:** toda la sugerencia de links de un flujo de captura pasa por `_suggest_links()` (`handlers/capture.py`) — no llamar a `compute_embedding`/`query_similar` directo desde ahí. El vector solo puede guardarse como `_body_embedding` si el texto consultado **era el body**: el flujo de arXiv busca por el abstract y descarta el vector a propósito. Caracterizado en `tests/unit/test_capture_links.py`.
+
+---
+
 ### `index_note()`
 
 ```python
@@ -661,12 +721,13 @@ async def index_note(
     note_id: str,
     content: str,
     metadata: dict,
+    embedding: Optional[list[float]] = None,
 ) -> None:
 ```
 
 **Comportamiento:**
 
-1. Calcula el embedding de `content` via Gemini Embedding API (`gemini-embedding-001`).
+1. Calcula el embedding de `content` via Gemini Embedding API (`gemini-embedding-001`) — **salvo** que se pase `embedding`, en cuyo caso se usa el vector precomputado y no hay llamada a la API. Solo es válido si `content` es exactamente el texto del que salió ese vector.
 2. Serializa `metadata` al formato ChromaDB (nulos → `""`, tags list → string separado por comas).
 3. Ejecuta `collection.upsert(...)` — inserta si no existe, actualiza si ya existe (idempotente).
 
@@ -714,6 +775,7 @@ async def query_similar(
     n_results: int = 10,
     threshold: Optional[float] = None,
     where: Optional[dict] = None,
+    query_embedding: Optional[list[float]] = None,
 ) -> list[SimilarNote]:
 ```
 
@@ -731,7 +793,7 @@ class SimilarNote:
 
 **Comportamiento:**
 
-1. Calcula el embedding de `query_text` via Gemini Embedding API.
+1. Calcula el embedding de `query_text` via Gemini Embedding API — **salvo** que se pase `query_embedding`, en cuyo caso se reutiliza ese vector sin llamar a la API. Lo usa `knowledge_query.retrieve` para el reintento con umbral relajado (mismo texto, segunda pasada) y `_suggest_links` en la captura.
 2. Ejecuta `collection.query(query_embeddings=[embedding], n_results=n_results, where=where, include=["documents", "metadatas", "distances"])`.
 3. Filtra resultados con `distance > threshold` (si `threshold` provisto). La distancia coseno va de 0 (idéntico) a 2 (opuesto). Para la conversión a similitud: `similitud = 1 - (distance / 2)`.
 4. Retorna lista de `SimilarNote` ordenada por distancia ascendente (más similar primero).
@@ -780,6 +842,16 @@ async def reindex_vault(
 **Uso:** cron nocturno (`reindex.time` en `config.yaml`). Reconcilia ChromaDB con el vault ante cualquier drift.
 
 **Rate limiting:** la concurrencia contra la Embedding API está acotada por el semáforo `max_concurrent_embeds` de la instancia; cada embedding reintenta hasta 3 veces con backoff simple.
+
+---
+
+### `count()`
+
+```python
+def count(self) -> int:
+```
+
+**Síncrono** (es el único método público que no es `async`): inicializa la colección si hace falta y devuelve `collection.count()`. Lo usa `/status` para reportar cuántos documentos hay indexados.
 
 ---
 
@@ -837,19 +909,22 @@ El writer genera links en forma simple (`[[stem]]`) porque el patrón `YYYY-MM-D
 
 ### URI scheme `obsidian://`
 
-Para construir links clicables en Google Tasks y en informes `.md`:
+Para construir links clicables en los informes `.md`. El helper real es `_obsidian_link()` en `adso/reporters.py` — recibe el **path del vault** y el **path absoluto de la nota**, no un nombre y un path relativo:
 
 ```python
-from urllib.parse import quote
+# adso/reporters.py
+import urllib.parse
 
-def obsidian_uri(vault_name: str, file_path: str) -> str:
-    """Construye un URI obsidian:// para abrir una nota.
-
-    Args:
-        vault_name: Nombre del vault en Obsidian.
-        file_path: Path relativo al vault, sin extensión .md.
-    """
-    return f"obsidian://open?vault={quote(vault_name, safe='')}&file={quote(file_path, safe='')}"
+def _obsidian_link(vault_path: Path, note_path: Path) -> str:
+    """Genera un link obsidian:// para abrir una nota directamente."""
+    vault_name = urllib.parse.quote(vault_path.name)
+    rel = str(note_path.relative_to(vault_path).with_suffix(""))
+    file_encoded = urllib.parse.quote(rel, safe="/")
+    return f"obsidian://open?vault={vault_name}&file={file_encoded}"
 ```
 
-Caracteres que requieren encoding: `/` → `%2F`, `#` → `%23`, `^` → `%5E`, espacios → `%20`.
+El nombre del vault sale de `vault_path.name`; el `file` es el path relativo al vault **sin** la extensión `.md`.
+
+Encoding: los separadores `/` se **preservan** (`safe="/"`) — Obsidian los acepta tal cual en `file=`. Lo que sí se encodea son espacios (`%20`), `#` (`%23`), `^` (`%5E`) y demás caracteres reservados.
+
+Los links `obsidian://` **no** se usan en las notas que se pushean a Google Tasks: no funcionan desde Google Tasks/Calendar (ver `tasks_client.py` y CLAUDE.md).

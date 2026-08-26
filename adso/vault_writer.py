@@ -432,6 +432,41 @@ async def create_note(
 
     fm = dict(note_frontmatter)
 
+    # Defensa en profundidad: hasta acá `VALID_TYPES`/`VALID_STATUS` solo se
+    # usaban en `set_property`, así que `create_note` escribía al vault
+    # cualquier cosa que le llegara (el flujo de índices de `manage.py` y
+    # cualquier escritor que no venga del LLM no pasan por
+    # `_validate_capture_payload`). Un `type` inválido rompe el routing —
+    # `_resolve_dest_dir` cae a Inbox — y además desactiva en silencio la
+    # validación de status de `set_property`.
+    #
+    # Se COACCIONA en vez de lanzar: el caller típico es `_cb_confirm`, o sea
+    # el usuario ya apretó [Confirmar], y el texto de audio/OCR/Vision no
+    # existe en ningún otro lado. Regla de oro: sin pérdida de datos.
+    note_type = fm.get("type")
+    if note_type not in VALID_TYPES:
+        logger.warning(
+            "type inválido en create_note: %r — se degrada a idea/pending-classification",
+            note_type,
+        )
+        fm["type"] = "idea"
+        fm["status"] = "pending-classification"
+    else:
+        valid_status = VALID_STATUS.get(note_type, set())
+        # `area-index` declara el set vacío a propósito (no tiene ciclo de
+        # vida): ahí no hay nada que validar.
+        if valid_status and "status" in fm and fm["status"] not in valid_status:
+            fallback = (
+                "pending-classification"
+                if "pending-classification" in valid_status
+                else "active"
+            )
+            logger.warning(
+                "status %r inválido para type=%r — se degrada a %r",
+                fm["status"], note_type, fallback,
+            )
+            fm["status"] = fallback
+
     # Setear campos automáticos si no vienen
     now = _now_iso()
     fm.setdefault("date_created", now)
@@ -564,6 +599,13 @@ async def set_property(
             raise ValueError(f"type inválido: {value!r} (válidos: {VALID_TYPES})")
 
     if key == "status":
+        # Sin este guard, un `type` fuera del enum devolvía un set vacío y el
+        # `if valid and ...` de abajo desactivaba la validación en silencio —
+        # justo en las notas que ya están malformadas.
+        if note_type not in VALID_TYPES:
+            raise ValueError(
+                f"type inválido en la nota: {note_type!r} — no se puede validar status"
+            )
         valid = VALID_STATUS.get(note_type, set())
         if valid and value not in valid:
             raise ValueError(
@@ -707,18 +749,43 @@ async def update_wikilinks(
         logger.info("Wikilinks actualizados en: %s", note_path)
 
 
+def _fence_line_flags(lines: list[str]) -> list[bool]:
+    """Marca qué líneas caen dentro de un bloque de código markdown.
+
+    Args:
+        lines: Líneas del documento.
+
+    Returns:
+        Lista paralela a ``lines``: True si esa línea está dentro de un fence
+        (los delimitadores ``` en sí se marcan como dentro).
+    """
+    flags: list[bool] = []
+    in_fence = False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            flags.append(True)
+            continue
+        flags.append(in_fence)
+    return flags
+
+
 def _remove_empty_ver_tambien(content: str) -> str:
     """Elimina el header '## Ver también' si no quedan items de lista bajo él."""
     lines = content.split("\n")
     result: list[str] = []
+    fence_lines = _fence_line_flags(lines)
     i = 0
     while i < len(lines):
-        if lines[i].strip() == "## Ver también":
-            # Buscar si hay algún item de lista antes del próximo heading o EOF
+        if lines[i].strip() == "## Ver también" and not fence_lines[i]:
+            # Buscar si hay algún item de lista antes del próximo heading o EOF.
+            # Cuenta cualquier item `- `, no solo wikilinks: un bloque con un
+            # link roto y un item de texto plano del usuario debe conservar su
+            # header en vez de dejar el item huérfano.
             j = i + 1
             has_items = False
             while j < len(lines):
-                if lines[j].startswith("- [["):
+                if lines[j].startswith("- "):
                     has_items = True
                     break
                 if lines[j].startswith("## "):
@@ -747,8 +814,18 @@ def _strip_broken_links_in_ver_tambien(content: str, link_re: "re.Pattern[str]")
     lines = content.split("\n")
     result: list[str] = []
     in_block = False
+    in_fence = False
     for line in lines:
         stripped = line.strip()
+        # Un "## Ver también" dentro de un bloque de código es un ejemplo del
+        # usuario, no un bloque real: se preserva tal cual.
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            result.append(line)
+            continue
+        if in_fence:
+            result.append(line)
+            continue
         if stripped == "## Ver también":
             in_block = True
             result.append(line)
@@ -788,6 +865,17 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
     # función corre en el callback de delete del watcher — se materializa la
     # lista en un hilo. F11 de docs/audit-2026-07-31.md.
     md_files = await asyncio.to_thread(lambda: list(vault_path.rglob("*.md")))
+
+    # Los wikilinks de Obsidian resuelven por stem, no por path: si otra nota
+    # con el mismo stem sigue viva, el link NO está roto y borrarlo es pérdida
+    # de datos. Pasa siempre que el usuario MUEVE una nota (el watcher emite un
+    # delete del origen) y también con stems duplicados en carpetas distintas.
+    if any(p.stem == stem and p != deleted_path for p in md_files):
+        logger.debug(
+            "Limpieza de wikilinks omitida: [[%s]] sigue resolviendo a otra nota.", stem
+        )
+        return 0
+
     for md_path in md_files:
         if md_path == deleted_path or md_path.stem == "_index":
             continue

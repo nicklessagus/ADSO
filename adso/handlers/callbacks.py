@@ -97,6 +97,26 @@ from adso.security import authorized
 logger = logging.getLogger(__name__)
 
 
+async def _aviso_error_al_guardar(query, error: Exception) -> None:
+    """Avisa que la escritura falló SIN sacarle el teclado al preview.
+
+    `_cb_confirm` deja el estado en `user_data` cuando `create_note` falla, para
+    que un segundo [Confirmar] reintente (regla de oro: el texto de audio/OCR no
+    existe en ningún otro lado). Un `edit_message_text` sin `reply_markup` borra
+    el teclado — Telegram interpreta la ausencia como "sacar los botones" — y
+    ese reintento queda inalcanzable, con `_has_pending_keyboard` bloqueando
+    todo input nuevo. C1 de la auditoría 2026-08.
+
+    Args:
+        query: CallbackQuery del [Confirmar] que falló.
+        error: Excepción que abortó el guardado.
+    """
+    await query.edit_message_text(
+        f"Error al guardar: {error}\n\nReintentar con [Confirmar].",
+        reply_markup=build_capture_keyboard(),
+    )
+
+
 @authorized
 async def handle_callback(
     update: Update,
@@ -132,10 +152,10 @@ async def handle_callback(
                 logger.info("Edición idéntica ignorada en _cb_confirm.")
             else:
                 logger.exception("Error en _cb_confirm: %s", e)
-                await query.edit_message_text(f"Error al guardar: {e}")
+                await _aviso_error_al_guardar(query, e)
         except Exception as e:
             logger.exception("Error en _cb_confirm: %s", e)
-            await query.edit_message_text(f"Error al guardar: {e}")
+            await _aviso_error_al_guardar(query, e)
 
     elif data == CB_CANCEL:
         await _cb_cancel(query, context)
@@ -156,8 +176,12 @@ async def handle_callback(
             data[len(CB_DEST_AREA_PREFIX):], vault_path, is_project=False
         )
         if area is None:
+            # Reponer el selector actualizado: la nota sigue pendiente, y un
+            # aviso sin `reply_markup` la dejaba sin ningún botón para elegir
+            # otro destino — dead-end hasta /reset. C11 de la auditoría 2026-08.
             await query.edit_message_text(
-                "Esa área ya no existe. Elegir otro destino."
+                "Esa área ya no existe. Elegir otro destino.",
+                reply_markup=await build_area_selector(vault_path),
             )
         else:
             await _cb_dest(query, context, dest_type="area", dest_name=area)
@@ -167,8 +191,10 @@ async def handle_callback(
             data[len(CB_DEST_PROJECT_PREFIX):], vault_path, is_project=True
         )
         if project is None:
+            # Ver C11 en la rama de área.
             await query.edit_message_text(
-                "Ese proyecto ya no existe. Elegir otro destino."
+                "Ese proyecto ya no existe. Elegir otro destino.",
+                reply_markup=await build_project_selector(vault_path),
             )
         else:
             await _cb_dest(query, context, dest_type="project", dest_name=project)
@@ -297,6 +323,10 @@ async def handle_callback(
                     # Ver E2 — este camino también perdía el read_status.
                     extra_fm={"read_status": read_status} if read_status else None,
                     preserve_body=True,
+                    # El caption es la descripción que el usuario ya dio para
+                    # guardar este archivo: un `mode=manage` del LLM no puede
+                    # descartarla. C6 de la auditoría 2026-08.
+                    force_capture=True,
                 )
             else:
                 context.user_data["pending_description"] = pdf_info
@@ -513,6 +543,11 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "media_type": transcript.get("media_type", "image"),
                 "original_filename": transcript["resource_file"].get("filename", "imagen.jpg"),
                 "user_context": transcript.get("user_context"),
+                # Sin copiarlo, el nuevo `pending_transcript` se arma con
+                # `pending.get("read_status")` → None, y la elección explícita
+                # de [Ya lo leí]/[Lo quiero leer] se perdía al pedir Vision tras
+                # ver el OCR. C5 de la auditoría 2026-08 (mismo hueco que E2).
+                "read_status": transcript.get("read_status"),
             }
             from_ocr = True
         else:
@@ -543,6 +578,27 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as e:
         # Mismo dead-end que en OCR — ver E3 de docs/audit-2026-07-31.md.
         logger.error("Error en Gemini Vision: %s", e)
+        if from_ocr:
+            # Llegado desde el resultado OCR, el estado vivo es
+            # `pending_transcript`: popear `pending_fallback_pdf` era un no-op y
+            # borrar el temporal tiraba la imagen, dejando la transcripción sin
+            # botones (dead-end hasta /reset). El texto del OCR ya está pago y es
+            # lo valioso: se conserva el estado y se repone su teclado. C4 de la
+            # auditoría 2026-08.
+            from adso.keyboards import build_ocr_result_keyboard
+
+            transcript = context.user_data.get("pending_transcript") or {}
+            sent = await query.edit_message_text(
+                f"Error consultando Gemini Vision: {_esc(str(e))}\n\n"
+                + _build_extract_preview(
+                    "Texto extraído (OCR)", transcript.get("text", "")
+                ),
+                reply_markup=build_ocr_result_keyboard(),
+                parse_mode="HTML",
+            )
+            if transcript and sent is not None:
+                transcript["msg_id"] = getattr(sent, "message_id", None)
+            return
         context.user_data.pop("pending_fallback_pdf", None)
         tmp_path.unlink(missing_ok=True)
         await query.edit_message_text(

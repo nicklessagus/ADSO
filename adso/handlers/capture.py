@@ -52,6 +52,36 @@ _INJECTION_PREVIEW_WARNING = (
     "instrucciones. Revisar el preview con atención antes de confirmar.\n\n"
 )
 
+# Status que corresponde a cada type cuando el usuario confirma o reubica una
+# nota que venía en `pending-classification`. `VALID_STATUS` (llm_schema.py)
+# define conjuntos disjuntos por tipo: una task nunca puede quedar en `active`
+# ni en `raw`, o los filtros y reportes por `status` dejan de verla. C7 de la
+# auditoría 2026-08.
+STATUS_ON_CONFIRM: dict[str, str] = {
+    "reference": "active",
+    "task": "pending",
+    "idea": "raw",
+}
+
+
+def _remember_preview_msg(result: dict, sent: Any) -> None:
+    """Registra el `message_id` del mensaje donde quedó el preview vigente.
+
+    `_cb_confirm` compara este valor con el mensaje del callback para rechazar
+    un [Confirmar] disparado desde un preview viejo (G14). Sin registrarlo en
+    cada render, el guard se saltea siempre. C2 de la auditoría 2026-08.
+
+    Args:
+        result: Dict que se guarda como ``pending_note``.
+        sent: Lo que devolvió el `reply_text`/`edit_message_text`. Puede ser
+            ``True`` (edición de un mensaje inline) o ``None``: solo se acepta
+            un `message_id` entero, cualquier otra cosa deja el guard inactivo
+            en vez de bloquear una captura ya hecha.
+    """
+    msg_id = getattr(sent, "message_id", None)
+    if isinstance(msg_id, int):
+        result["msg_id"] = msg_id
+
 
 async def _suggest_links(
     context: ContextTypes.DEFAULT_TYPE,
@@ -105,9 +135,20 @@ async def _suggest_links(
         logger.warning("Error buscando links similares: %s", e)
         return [], embedding
 
-    links = [
-        {"note_id": s.note_id, "title": s.metadata.get("title", "")} for s in similar
-    ]
+    # Un `note_id` oculto no puede llegar al vault como wikilink. Pasó de
+    # verdad: un temporal de la escritura atómica se indexó antes del
+    # `os.replace` y quedó fosilizado como `- [[.adso-tmp-…]]` en una nota real,
+    # apuntando a un archivo que dejó de existir en el mismo instante. La fuga
+    # original ya está tapada en el watcher; este guard es para que una fuga
+    # futura del índice no vuelva a escribirse en una nota del usuario.
+    # B1 de la auditoría 2026-08.
+    links = []
+    for s in similar:
+        slug = s.note_id.rsplit("/", 1)[-1]
+        if slug.startswith("."):
+            logger.warning("Link sugerido oculto descartado: %s", s.note_id)
+            continue
+        links.append({"note_id": s.note_id, "title": s.metadata.get("title", "")})
     return links, embedding
 
 
@@ -233,8 +274,16 @@ async def _classify_and_preview(
 
     # Inyectar campos extra al frontmatter
     if extra_fm:
-        payload = result.get("payload", {})
-        fm = payload.get("frontmatter", {})
+        payload = result.get("payload") or {}
+        # `frontmatter: null` es legal en el schema de Gemini (y Groq lo emite
+        # libremente): el default de `.get` no aplica cuando la clave EXISTE con
+        # valor None, así que `fm.update()` mataba el flujo. Los caminos que
+        # traen `extra_fm` (read_status de un PDF escaneado, OCR/Vision
+        # confirmado) ya popearon su estado: ahí se perdía el texto extraído.
+        fm = payload.get("frontmatter")
+        if not isinstance(fm, dict):
+            fm = {}
+            payload["frontmatter"] = fm
         fm.update(extra_fm)
 
     if mode == "degraded":
@@ -257,12 +306,13 @@ async def _classify_and_preview(
         keyboard = build_capture_keyboard()
 
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        await reply_fn(
+        sent = await reply_fn(
             "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
             "Confirmar, corregir o cancelar.\n\n" + preview,
             reply_markup=keyboard,
             parse_mode="HTML",
         )
+        _remember_preview_msg(result, sent)
         _log_timing()
         return
 
@@ -360,11 +410,12 @@ async def _classify_and_preview(
         preview = _INJECTION_PREVIEW_WARNING + preview
 
     reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-    await reply_fn(
+    sent = await reply_fn(
         preview,
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+    _remember_preview_msg(result, sent)
     _log_timing()
 
 
@@ -549,8 +600,37 @@ def _apply_note_corrections(fm: dict, text: str, text_lower: str) -> bool:
             fm["type"] = "task"
         elif new_type in ("idea",):
             fm["type"] = "idea"
+        _resync_status_with_type(fm)
         return True
     return False
+
+
+def _resync_status_with_type(fm: dict) -> None:
+    """Realinea `status` (y los campos de tarea) con el `type` vigente.
+
+    `VALID_STATUS` define conjuntos disjuntos por tipo: cambiar el type desde
+    una corrección dejaba el status del tipo anterior (una `task` en `active`,
+    por ejemplo), y ese frontmatter inválido se escribía al vault sin volver a
+    pasar por `_validate_capture_payload`. C7 de la auditoría 2026-08.
+
+    Args:
+        fm: Frontmatter a mutar (ya con el `type` nuevo).
+    """
+    from adso.llm_schema import VALID_STATUS
+
+    note_type = fm.get("type", "")
+    valid = VALID_STATUS.get(note_type)
+    status = fm.get("status")
+    # Solo se toca un status ya presente: si no había ninguno, el default lo
+    # resuelve el resto del pipeline como siempre.
+    if status is not None and valid and status not in valid:
+        fm["status"] = STATUS_ON_CONFIRM.get(note_type, "active")
+
+    # Espejo del descarte que hace `_classify_and_preview`: due_date y scheduled
+    # solo son relevantes para tareas.
+    if note_type != "task":
+        fm.pop("due_date", None)
+        fm.pop("scheduled", None)
 
 
 def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
@@ -673,10 +753,19 @@ async def _handle_text_correction(
                     except Exception:
                         pass
         except Exception:
-            # Si el edit falla, al menos enviar el preview actualizado
-            await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
+            # Si el edit falla, al menos enviar el preview actualizado. El
+            # preview vigente pasa a ser ESE mensaje: sin actualizar `msg_id` el
+            # guard G14 seguiría apuntando al mensaje viejo. C2 de la auditoría
+            # 2026-08.
+            sent = await update.message.reply_text(
+                preview, reply_markup=keyboard, parse_mode="HTML"
+            )
+            _remember_preview_msg(pending, sent)
     else:
-        await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
+        sent = await update.message.reply_text(
+            preview, reply_markup=keyboard, parse_mode="HTML"
+        )
+        _remember_preview_msg(pending, sent)
 
 
 async def _handle_capture_from_callback(
@@ -732,11 +821,12 @@ async def _handle_capture_from_callback(
     preview = build_preview(fm, body, suggested_links)
     keyboard = build_capture_keyboard()
 
-    await query.edit_message_text(
+    sent = await query.edit_message_text(
         preview,
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+    _remember_preview_msg(result, sent)
 
 
 async def _index_note_safe(
@@ -828,7 +918,11 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     inbox_path_str: Optional[str] = context.user_data.get("clasificar_inbox_path")
 
     if not pending:
-        await query.edit_message_text("No hay nota pendiente.")
+        # Doble tap con lag: el primer tap ya consumió el estado y dejó el
+        # preview de la nota (con teclado) en este mismo mensaje. Editarlo lo
+        # destruiría; el aviso va como alerta efímera. C8 de la auditoría
+        # 2026-08.
+        await query.answer("No hay nota pendiente.", show_alert=True)
         return
 
     # El callback tiene que venir del preview vigente. Sin esta verificación, un
@@ -858,16 +952,19 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     preview_body = body
 
     original_body = body  # body limpio antes de agregar Ver también (para Tasks)
-    suggested_links = payload.get("suggested_links", [])
-    if suggested_links:
-        link_lines = []
-        for lnk in suggested_links:
-            note_id = lnk["note_id"]
-            title = lnk.get("title", "").strip()
-            slug = note_id.rsplit("/", 1)[-1]
-            label = title if title else slug
-            link_lines.append(f"- [[{slug}]] — {label}")
-        body = body.rstrip() + "\n\n## Ver también\n\n" + "\n".join(link_lines)
+
+    # El bloque de links se arma acá pero se concatena DESPUÉS del embed del
+    # adjunto: al revés, el `![[archivo]]` quedaba estructuralmente dentro de
+    # "## Ver también" — Obsidian lo renderizaba bajo el header equivocado y, si
+    # los links se rompían y el header se borraba, el embed quedaba flotando.
+    # B4 de la auditoría 2026-08.
+    link_lines: list[str] = []
+    for lnk in payload.get("suggested_links", []):
+        note_id = lnk["note_id"]
+        title = lnk.get("title", "").strip()
+        slug = note_id.rsplit("/", 1)[-1]
+        label = title if title else slug
+        link_lines.append(f"- [[{slug}]] — {label}")
 
     resource_file = pending.get("_resource_file")
     resource_temp: Optional[Path] = None
@@ -895,11 +992,15 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             resource_error = str(e)
             resource_temp = Path(resource_file["temp_path"])
 
+    # Recién ahora el bloque de links, para que quede al final de la nota y el
+    # embed del adjunto no caiga adentro de "## Ver también" (ver B4 arriba).
+    if link_lines:
+        body = body.rstrip() + "\n\n## Ver también\n\n" + "\n".join(link_lines)
+
     # Si viene de /clasificar y el LLM dejó pending-classification, la nota
     # fue revisada y confirmada por el usuario — ya no está pendiente.
     if inbox_path_str and fm.get("status") == "pending-classification":
-        _STATUS_CONFIRMED = {"reference": "active", "task": "pending", "idea": "raw"}
-        fm["status"] = _STATUS_CONFIRMED.get(fm.get("type", ""), "active")
+        fm["status"] = STATUS_ON_CONFIRM.get(fm.get("type", ""), "active")
 
     path = await create_note(fm, body, vault_path)
 
@@ -1049,7 +1150,9 @@ async def _cb_dest(
     """Actualiza destino de la nota pendiente."""
     pending = context.user_data.get("pending_note")
     if not pending:
-        await query.edit_message_text("No hay nota pendiente.")
+        # Aviso efímero, no edición: con doble tap este mensaje ya es el preview
+        # vigente y editarlo le borra los botones. C8 de la auditoría 2026-08.
+        await query.answer("No hay nota pendiente.", show_alert=True)
         return
 
     fm = pending["payload"]["frontmatter"]
@@ -1063,23 +1166,24 @@ async def _cb_dest(
         fm["section"] = None
         fm["area"] = dest_name
         if fm.get("status") == "pending-classification":
-            fm["status"] = "active" if fm.get("type") == "reference" else "raw"
+            fm["status"] = STATUS_ON_CONFIRM.get(fm.get("type", ""), "active")
     elif dest_type == "project":
         fm["project"] = dest_name
         fm["section"] = None
         fm["area"] = None
         if fm.get("status") == "pending-classification":
-            fm["status"] = "active" if fm.get("type") == "reference" else "raw"
+            fm["status"] = STATUS_ON_CONFIRM.get(fm.get("type", ""), "active")
 
     body = pending["payload"].get("body", "")
     suggested_links = pending["payload"].get("suggested_links", [])
     preview = build_preview(fm, body, suggested_links)
 
-    await query.edit_message_text(
+    sent = await query.edit_message_text(
         preview + "\n\n¿Confirmar?",
         reply_markup=build_capture_keyboard(),
         parse_mode="HTML",
     )
+    _remember_preview_msg(pending, sent)
 
 
 async def _cb_transcript_ok(
@@ -1088,9 +1192,18 @@ async def _cb_transcript_ok(
 ) -> None:
     """Confirma transcripción — para audio muestra [Tarea]/[Nota], para otros clasifica directo."""
     from adso.keyboards import build_save_keyboard
-    pt = context.user_data.pop("pending_transcript", None)
+    # El estado se lee con `get` y se descarta recién cuando el flujo siguiente
+    # terminó: un TimedOut en el edit —la falla más común de PTB— consumía la
+    # transcripción de OCR/Vision, que no existe en ningún otro lado, y dejaba
+    # el temporal huérfano en /tmp (tmpfs en la RPi4). Mismo patrón que
+    # `_cb_confirm`. Regla de oro: sin pérdida de datos. C3 de la auditoría
+    # 2026-08.
+    pt = context.user_data.get("pending_transcript")
     if not pt:
-        await update.callback_query.edit_message_text("No hay transcripción pendiente.")
+        # Ver C8 en `_cb_confirm`: aviso efímero, nunca editar el mensaje.
+        await update.callback_query.answer(
+            "No hay transcripción pendiente.", show_alert=True
+        )
         return
 
     text = pt["text"]
@@ -1098,20 +1211,23 @@ async def _cb_transcript_ok(
     temp_path = pt.get("temp_path")
     resource_file = pt.get("resource_file")
 
-    if temp_path and not resource_file:
-        Path(temp_path).unlink(missing_ok=True)
+    def _consumir() -> None:
+        context.user_data.pop("pending_transcript", None)
+        if temp_path and not resource_file:
+            Path(temp_path).unlink(missing_ok=True)
 
     if media_type == "audio":
+        await update.callback_query.edit_message_text(
+            "¿Guardar como tarea o como nota?",
+            reply_markup=build_save_keyboard(),
+        )
         context.user_data["pending_raw_content"] = text
         context.user_data["pending_capture_ctx"] = {
             "media_type": "audio",
             "preserve_body": True,
             "resource_file": resource_file,
         }
-        await update.callback_query.edit_message_text(
-            "¿Guardar como tarea o como nota?",
-            reply_markup=build_save_keyboard(),
-        )
+        _consumir()
     else:
         # `read_status` viene del PDF que resultó escaneado: el usuario lo
         # eligió con [Ya lo leí]/[Lo quiero leer] antes de que se supiera que
@@ -1125,7 +1241,13 @@ async def _cb_transcript_ok(
             extra_fm={"read_status": read_status} if read_status else None,
             user_context=pt.get("user_context"),
             preserve_body=True,
+            # El usuario ya confirmó que quiere guardar este texto: un
+            # `mode=manage` del LLM (fácil de disparar si el contenido habla de
+            # "crear un proyecto") lo descartaría entero. C6 de la auditoría
+            # 2026-08.
+            force_capture=True,
         )
+        _consumir()
 
 
 async def _cb_extraction_ok(
@@ -1133,9 +1255,15 @@ async def _cb_extraction_ok(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Confirma texto extraído y clasifica."""
-    pe = context.user_data.pop("pending_extraction", None)
+    # Ver C3 en `_cb_transcript_ok`: el estado se descarta recién cuando la
+    # clasificación terminó, para que un TimedOut en el edit no evapore el texto
+    # extraído ni deje el temporal huérfano.
+    pe = context.user_data.get("pending_extraction")
     if not pe:
-        await update.callback_query.edit_message_text("No hay extracción pendiente.")
+        # Ver C8 en `_cb_confirm`: aviso efímero, nunca editar el mensaje.
+        await update.callback_query.answer(
+            "No hay extracción pendiente.", show_alert=True
+        )
         return
 
     classify_text = pe.get("classify_content") or pe["text"]
@@ -1147,9 +1275,6 @@ async def _cb_extraction_ok(
             "temp_path": pe["temp_path"],
             "filename": pe["original_filename"],
         }
-    else:
-        if pe.get("temp_path"):
-            Path(pe["temp_path"]).unlink(missing_ok=True)
 
     if pe.get("read_status"):
         extra_fm["read_status"] = pe["read_status"]
@@ -1171,7 +1296,14 @@ async def _cb_extraction_ok(
         user_context=pe.get("user_context"),
         preserve_body=preserve_body,
         original_text=pe["text"] if preserve_body else None,
+        # Ver C6 en `_cb_transcript_ok`: el usuario ya confirmó el texto
+        # extraído, el `mode` del LLM no puede descartarlo.
+        force_capture=True,
     )
+
+    context.user_data.pop("pending_extraction", None)
+    if not resource_info and pe.get("temp_path"):
+        Path(pe["temp_path"]).unlink(missing_ok=True)
 
 
 async def _classify_and_preview_arxiv(
@@ -1302,8 +1434,9 @@ async def _classify_and_preview_arxiv(
         preview = _INJECTION_PREVIEW_WARNING + preview
 
     if reply_msg is not None:
-        await reply_msg.edit_text(preview, reply_markup=keyboard, parse_mode="HTML")
+        sent = await reply_msg.edit_text(preview, reply_markup=keyboard, parse_mode="HTML")
     elif update.callback_query:
-        await update.callback_query.edit_message_text(preview, reply_markup=keyboard, parse_mode="HTML")
+        sent = await update.callback_query.edit_message_text(preview, reply_markup=keyboard, parse_mode="HTML")
     else:
-        await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
+        sent = await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
+    _remember_preview_msg(result, sent)

@@ -49,6 +49,21 @@ class QueryResult:
     below_threshold: bool = False     # True si se relajó el umbral por falta de hits
 
 
+def _str_meta(value: object) -> str:
+    """Coacciona a `str` un valor de metadata de ChromaDB.
+
+    `_serialize_metadata` deja pasar int/float/bool tal cual, así que una nota
+    editada a mano con `title: 2024` (YAML lo parsea como int) se indexa con un
+    int. Ese valor es truthy, sobrevivía al `or` de abajo y llegaba hasta
+    `_esc(n.title)`, que reventaba con `AttributeError` y mataba `/buscar`
+    entero (E1 de la auditoría 2026-08). `ScoredNote` declara `str`: el dueño
+    del contrato es este módulo, así que la coacción va acá.
+    """
+    if value is None or isinstance(value, str):
+        return value or ""
+    return str(value)
+
+
 def _to_scored(hit: SimilarNote, vault_path: Path) -> ScoredNote:
     """Convierte un SimilarNote de embeddings en un ScoredNote."""
     rel = hit.path or f"{hit.note_id}.md"
@@ -56,12 +71,12 @@ def _to_scored(hit: SimilarNote, vault_path: Path) -> ScoredNote:
     return ScoredNote(
         note_id=hit.note_id,
         path=vault_path / rel,
-        title=meta.get("title") or Path(rel).stem,
+        title=_str_meta(meta.get("title")) or Path(rel).stem,
         snippet=hit.snippet,
         similarity=round(distance_to_similarity(hit.distance), 3),
-        status=meta.get("status", "") or "",
-        project=meta.get("project", "") or "",
-        area=meta.get("area", "") or "",
+        status=_str_meta(meta.get("status")),
+        project=_str_meta(meta.get("project")),
+        area=_str_meta(meta.get("area")),
         via="semantic",
     )
 

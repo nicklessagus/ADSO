@@ -101,7 +101,12 @@ async def run_query(
         )
     except Exception as e:
         logger.exception("Error en consulta '%s': %s", query_text, e)
-        await status_msg.edit_text(f"Error al buscar: {_esc(str(e))}")
+        # El texto va escapado, así que hay que declarar el parse_mode: sin él
+        # Telegram muestra las entidades crudas y el usuario lee `&lt;host&gt;`
+        # justo en el mensaje que necesita para entender qué falló (E8).
+        await status_msg.edit_text(
+            f"Error al buscar: {_esc(str(e))}", parse_mode="HTML"
+        )
         return
 
     if not result.notes:
@@ -112,7 +117,14 @@ async def run_query(
         return
 
     # Guardar el resultado para el botón de informe (evita re-consultar).
+    # Junto al resultado se guarda el id del mensaje que lleva el botón: es
+    # global y cada consulta lo pisa, así que sin esa marca el [Generar informe]
+    # de una consulta vieja del historial mandaba el informe de la última, con
+    # el mismo nombre de archivo y sin ningún aviso (E6, patrón G14).
     context.user_data["pending_query"] = result
+    context.user_data["pending_query_msg_id"] = getattr(
+        status_msg, "message_id", None
+    )
 
     if len(result.notes) <= _INLINE_MAX:
         await status_msg.edit_text(
@@ -208,12 +220,29 @@ async def cb_query_report(query: Any, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not result:
         await query.answer("La consulta expiró.", show_alert=True)
         return
+
+    # El callback tiene que venir del mensaje de la consulta vigente (E6).
+    # `pending_query_msg_id` puede faltar si el estado viene de una versión
+    # anterior del bot: en ese caso se acepta, para no romper un informe pedido.
+    esperado = context.user_data.get("pending_query_msg_id")
+    actual = getattr(getattr(query, "message", None), "message_id", None)
+    if esperado is not None and actual != esperado:
+        logger.info(
+            "Informe pedido desde una consulta vieja (msg %s, vigente %s).",
+            actual, esperado,
+        )
+        await query.answer("La consulta expiró.", show_alert=True)
+        return
+
     settings: Settings = context.bot_data["settings"]
     report_bytes = _build_report(result, settings.vault_path)
     doc = io.BytesIO(report_bytes)
     doc.name = "consulta.md"
     await context.bot.send_document(
-        chat_id=query.message.chat_id,
+        # `.chat.id` y no `.chat_id`: un mensaje de más de 48 h llega como
+        # `InaccessibleMessage`, que no expone `chat_id` (E7). Los botones
+        # [Generar informe .md] viven en el historial indefinidamente.
+        chat_id=query.message.chat.id,
         document=doc,
         filename="consulta.md",
     )

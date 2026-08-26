@@ -9,6 +9,72 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.5.0] — 2026-08-26
+
+Auditoría funcional completa: **39 bugs encontrados y arreglados**, cada uno con un test que primero falló reproduciéndolo. Siete pasadas de revisión (captura, medios, LLM/config, vault, embeddings, comandos/reportes/jobs, y docs), más una auditoría del **vault real de producción** que destapó cinco defectos que leyendo código no se veían.
+
+La regla que ordenó todo el trabajo: ningún bug se reporta sin un test que lo reproduzca, verificado con `--runxfail` para que un mock mal armado no se confunda con un defecto real. Salió **un falso positivo de 40 candidatos**, y lo atrapó la propia suite (ver más abajo).
+
+Detalle completo en `docs/audit-2026-08-26.md`. Suite: 770 → 897 tests. Cobertura: 76% → 84%.
+
+### Fixed
+
+**Pérdida de datos** — la regla de oro del proyecto, rota en cuatro lugares:
+- **El error al guardar borraba el teclado** (#6): el `except` de `_cb_confirm` editaba el mensaje sin `reply_markup`, así que el reintento que el fix A2 prometía era **inalcanzable** — no quedaba ningún `[Confirmar]` que apretar. El estado seguía en `user_data`, pero la única salida era `/reset`, que descarta el texto de audio/OCR. A2 creía haber cerrado exactamente este agujero
+- **Los confirmadores descartaban el estado antes de usarlo** (#8): `_cb_transcript_ok`/`_cb_extraction_ok` hacían `pop` al entrar y recién después editaban el mensaje y clasificaban; un `TimedOut` en el medio evaporaba el texto de OCR/extracción y dejaba el temporal huérfano. Ahora siguen el patrón "crear antes de descartar" de `_cb_confirm`
+- **OCR → Vision con error dejaba el bot muerto** (#9): el `except` limpiaba `pending_fallback_pdf`, que en ese camino no existe, y borraba el temporal mientras `pending_transcript` seguía vivo → todo input rechazado sin un solo botón en pantalla. Ahora conserva el texto de OCR (que ya está pago) y repone su teclado
+- **`mode=manage` descartaba contenido ya confirmado** (#10): los cuatro flujos donde el usuario ya apretó guardar no pasaban `force_capture=True`
+
+**El bot se quedaba trabado:**
+- **Editar un mensaje crasheaba los cuatro handlers** (#16): los `MessageHandler` matcheaban también `edited_message`, donde `update.message` es `None`. Corregir un typo en el propio mensaje —gesto rutinario de Telegram— tiraba `AttributeError`
+- **Estado seteado antes del reply** (#17): en cinco sitios, si el envío fallaba el estado quedaba colgado y `_has_pending_keyboard` rechazaba todo sin que hubiera botones. E9 ya lo había arreglado para audio; faltaban los otros cinco
+- **Doble tap destruía el preview vigente** (#12): la rama "no hay estado" editaba el mensaje que para entonces ya mostraba el preview con su teclado
+- **Destino borrado dejaba la captura sin botones** (#15) y el guard G14 estaba **inerte** porque ningún render guardaba el `msg_id` que compara (#7)
+
+**Corrupción del vault:**
+- **Mover una nota borraba wikilinks válidos** (#3): los wikilinks resuelven por *stem*, así que mover no rompe nada — pero `on_moved` emite un delete del origen y la limpieza corría sin verificar si el stem seguía vivo. Se perdían links curados, en silencio
+- **La limpieza destripaba bloques de código** (#5): un `## Ver también` dentro de un fence se trataba como bloque real
+- **`create_note` no validaba nada** (#54) y en `set_property` un `type` inválido **desactivaba en silencio** la validación de `status` (el set vacío es falsy). Ahora `create_note` coacciona en vez de rechazar: el usuario ya confirmó y su texto no existe en ningún otro lado
+- **`status` inválido para el tipo** (#11) al corregir el tipo o reubicar: una task terminaba en `raw`
+
+**Retrieval:**
+- **Una nota con `title: 2024` tumbaba `/buscar` entero** (#25): YAML lo parsea como int y `_esc` hace `.replace()`. Misma clase C4 que ya se había arreglado en `vault_search`/`reporters`, pero no en el camino semántico
+- **El watcher indexaba `05-Archive` y `_index.md`** (#26) y el reindex nocturno los borraba como huérfanos: ciclo diario de embed + delete, y resultados de búsqueda que cambiaban según la hora del día
+- **`import chromadb` congelaba el event loop 4,4 s** (#29, medido en la RPi4) en el primer mensaje tras cada arranque. Ahora hay warm-up en `_post_init`, donde el freeze no molesta a nadie
+- Nota vaciada que conservaba su embedding viejo para siempre (#27), carrera del sweep de huérfanos (#28), botón de informe de una consulta vieja (#30) y `InaccessibleMessage.chat_id` en mensajes de más de 48 h (#31)
+
+**Silenciosos** — los que nadie iba a reportar:
+- **Notas atascadas en el Inbox quemando quota para siempre** (#23): una nota degradada cuyo contenido parece pregunta hacía que el LLM devolviera `mode=query`, y el cron la salteaba en **cada** pasada — ~48 llamadas a Gemini por día, por nota, sin síntoma visible
+- **La detección de "reporte vacío" era código muerto** (#33): el umbral era 400 bytes y el header solo pesa 655, así que la rama nunca ejecutaba y el usuario recibía un `.md` lleno de "_Sin referencias activas._"
+- **La notificación del cron rompía la garantía "una por ciclo"** (#35): el `return` estaba después del `send_message`, así que un fallo de notificación encadenaba `classify()` contra un free tier de 15 RPM
+- Un `type` inválido degradaba capturas de texto/audio **cuyo tipo ya había elegido el usuario con los botones** (#18), y un `status`/`priority` vacío tiraba toda la respuesta a degradado (#19)
+
+**Encontrados solo auditando el vault real** (90 notas, cinco meses de datos):
+- **Un temporal `.adso-tmp-*` fosilizado como wikilink** (#59) en una nota de `00-Inbox`: se indexó antes del `os.replace` y `_suggest_links` lo propagó. La fuga ya estaba tapada; ahora hay un guard para que una futura no vuelva a escribirse en una nota
+- **El adjunto se escribía *dentro* de `## Ver también`** (#52) — 6 de las 8 notas con `source_file` lo tienen así
+- **Los 7 `_index.md` colapsaban en una sola entrada** en `get_note_index` (#55): el dict keyeaba por stem y ganaba el último de `rglob`
+- **`description: ""` se aceptaba al crear proyecto/área** (#56) porque se chequeaba la presencia de la clave, no su contenido. No es cosmético: 3 de 7 índices del vault están vacíos, y ese campo es el contexto que el LLM usa para elegir destino — explica parte de las misclasificaciones
+- **El mismo PDF creó dos notas** (#53): la dedup mira `source_url` y `doi`, y un archivo subido no tiene ninguno — aunque `save_resource` ya calculó su SHA-256 y detectó que era el mismo
+
+### Added
+
+- **`docs/audit-2026-08-26.md`** — índice completo de la auditoría: método, los 39 bugs con su issue y su test, lo que encontró el vault y lo que se verificó sano
+- **~100 tests** en `tests/unit/test_audit_2026_08_*.py` (siete archivos). Todos empezaron reproduciendo su bug y hoy son guards de regresión
+- **Convención de reproductores con `xfail(strict=True)`** en `CLAUDE.md`: un bug que no se arregla en el momento se documenta con un test que especifica el comportamiento correcto y lleva la marca, de modo que el día que se arregle el test pase a XPASS y `strict` obligue a sacarla en el mismo commit. Con dos reglas que lo hacen funcionar: verificar con `--runxfail` que falla por el mecanismo real, y acompañarlo de contra-casos, porque casi todos estos fixes son guards de una línea fáciles de aplicar de más
+- **Regla de idioma** en `CLAUDE.md`: desde 2026-08-26 todo lo **nuevo** (símbolos, docstrings, docs nuevas, issues) se escribe en inglés. Lo existente no se traduce hacia atrás, y un archivo en español se corrige en español — un archivo bilingüe es peor que uno consistente en el idioma equivocado
+
+### Changed
+
+- **48 puntos de drift de documentación corregidos** y **14 funcionalidades documentadas por primera vez**. `architecture.md` concentraba lo peor: describía un flujo de extracción web genérica que **no existe**, daba el sync bidireccional de Google Tasks y el modo edición como implementados, y tenía teclados que no coincidían con `keyboards.py`. También se corrigieron contradicciones internas de `security.md` (el snippet del schema omitía las `properties` de `params`, y copiarlo reintroducía un bug crítico), `frontmatter-schema.md` (identificaba papers por un tag que el sanitizador filtra) y `obsidian-vault-structure.md` (presentaba como soportadas operaciones de gestión que responden "todavía no está disponible")
+- `docs/testing.md`: cifras remedidas (623 → 897 tests, 76% → 84%) y secciones nuevas sobre el harness de regresión de modelo y la convención de reproductores
+
+### Known
+
+- **#61 — `find_tasks`**: se reportó como bug de duplicación, se escribió el fix, y **rompió un test existente** cuyo fixture y comentario documentan que la duplicación es deliberada (los checkboxes de una tarea son sus subtareas). Se revirtió y quedó como pregunta de diseño, con tests de caracterización que fijan el comportamiento actual. La inconsistencia real es que las dos fuentes de `find_tasks` filtran distinto
+- Quedan abiertas **19 mejoras** (#36–#51, #57, #58, #60) con propuesta de implementación y tests propuestos, incluida la limpieza de datos del vault y las decisiones de taxonomía que la auditoría dejó a la vista
+
+---
+
 ## [1.4.0] — 2026-08-13
 
 Cierre de la auditoría 2026-07-31: bloques **E, F y G completos** (36 ítems) más el bloque **I** nuevo, salido de una pasada de código muerto. Con esto la auditoría queda en **0 pendientes**.

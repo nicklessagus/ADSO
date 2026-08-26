@@ -437,7 +437,16 @@ async def find_tasks(
                 results.append(_note_ref_from_data(note))
                 seen_paths.add(md_path)
 
-            # Fuente 2: checkboxes inline (incluye notas type: task)
+            # Fuente 2: checkboxes inline (incluye notas type: task).
+            #
+            # Una nota `type: task` aporta la nota Y cada uno de sus checkboxes:
+            # los checkboxes de una tarea son sus subtareas y se listan como
+            # ítems propios (ver `test_inline_checkboxes_included`). `seen_paths`
+            # se puebla pero no se consulta: es residuo de un diseño anterior que
+            # deduplicaba. Ver #61 — la asimetría real entre las dos fuentes es
+            # que la 1 filtra por status+area+project y la 2 solo por
+            # area+project, y que el `continue` de la 1 silencia los checkboxes
+            # de una tarea filtrada.
             if include_inline:
                 if status == "done":
                     matches = _CHECKBOX_DONE_RE.findall(note.body)
@@ -579,8 +588,23 @@ async def get_note_index(vault_path: Path) -> dict[str, Path]:
 
     def _scan() -> dict[str, Path]:
         index: dict[str, Path] = {}
+        colisiones: set[str] = set()
         for md_path in _scan_vault(vault_path):
-            index[md_path.stem] = md_path
+            stem = md_path.stem
+            if stem not in index:
+                index[stem] = md_path
+                continue
+            # Stems repetidos: `index[stem] = path` hacía que ganara el último
+            # que devolviera rglob y los demás desaparecieran del índice. En un
+            # vault real son los `_index.md` — uno por proyecto y área, todos
+            # con el mismo stem. Las entradas ambiguas se exponen además bajo su
+            # ruta relativa sin extensión, que es el mismo `note_id` que usa el
+            # índice de embeddings.
+            if stem not in colisiones:
+                primero = index[stem]
+                index[str(primero.relative_to(vault_path).with_suffix(""))] = primero
+                colisiones.add(stem)
+            index[str(md_path.relative_to(vault_path).with_suffix(""))] = md_path
         return index
 
     return await asyncio.to_thread(_scan)

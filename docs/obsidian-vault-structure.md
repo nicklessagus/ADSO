@@ -93,23 +93,27 @@ Las áreas no tienen ciclo de vida — existen indefinidamente.
 
 ---
 
-## Operaciones de gestión soportadas por el bot
+## Operaciones de gestión
 
-| Operación | Confirmación | Qué hace |
-|---|---|---|
-| Crear proyecto | Simple | Crea `01-Projects/{nombre}/` + `_index.md` con description requerida |
-| Crear área | Simple | Crea `02-Areas/{nombre}/` + `_index.md` con description requerida |
-| Crear sección | Simple | Crea subcarpeta dentro de un proyecto |
-| Convertir idea en proyecto | Simple | Mueve la nota de `02-Areas/` a `01-Projects/`, no queda copia |
-| Archivar proyecto | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md` y en metadata de ChromaDB |
-| Desarchivar proyecto | Simple | Mueve de `05-Archive/` a `01-Projects/`, actualiza `status: active` en `_index.md` y en metadata de ChromaDB |
-| Borrar proyecto | Doble + resolución de backlinks | Ver reglas abajo |
-| Borrar área | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
-| Renombrar proyecto/área | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
-| Mover nota | — | **Fuera de scope como comando del bot** — existe la primitiva `move_note()` en `vault_writer.py` (la usan otros flujos), pero no hay flujo de usuario para mover una nota suelta |
-| Borrar nota | Simple o con aviso de backlinks | Ver reglas abajo |
+Solo las tres primeras están implementadas. `_cb_manage_confirm` (`adso/handlers/manage.py`) resuelve `create_project`, `create_area` y `create_section`; cualquier otra operación cae al `else` y responde *"Operación 'X' todavía no está disponible"*. Las filas marcadas como diseño se conservan porque describen el comportamiento previsto, no el actual.
 
-### Reglas de borrado de nota
+| Operación | Estado | Confirmación | Qué hace |
+|---|---|---|---|
+| Crear proyecto | ✅ implementado | Simple | Crea `01-Projects/{nombre}/` + `_index.md` con description requerida |
+| Crear área | ✅ implementado | Simple | Crea `02-Areas/{nombre}/` + `_index.md` con description requerida |
+| Crear sección | ✅ implementado | Simple | Crea subcarpeta dentro de un proyecto |
+| Convertir idea en proyecto | ❌ *(diseño — no implementado)* | Simple | Mueve la nota de `02-Areas/` a `01-Projects/`, no queda copia |
+| Archivar proyecto | ❌ *(diseño — no implementado)* | Simple | Mueve carpeta a `05-Archive/`, actualiza `status: archived` en `_index.md` y en metadata de ChromaDB |
+| Desarchivar proyecto | ❌ *(diseño — no implementado)* | Simple | Mueve de `05-Archive/` a `01-Projects/`, actualiza `status: active` en `_index.md` y en metadata de ChromaDB |
+| Borrar proyecto | ❌ *(diseño — no implementado)* | Doble + resolución de backlinks | Ver reglas abajo |
+| Borrar área | ❌ *(diseño — no implementado)* | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
+| Renombrar proyecto/área | ❌ *(diseño — no implementado)* | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
+| Mover nota | ❌ fuera de scope | — | **Fuera de scope como comando del bot** — existe la primitiva `move_note()` en `vault_writer.py` (la usan otros flujos), pero no hay flujo de usuario para mover una nota suelta |
+| Borrar nota | ❌ *(diseño — no implementado)* | Simple o con aviso de backlinks | Ver reglas abajo |
+
+Mientras tanto, archivar, renombrar, mover y borrar se hacen a mano en el filesystem o en Obsidian; el `VaultWatcher` reconcilia los embeddings, y el reindex nocturno limpia los huérfanos.
+
+### Reglas de borrado de nota *(diseño — no implementado)*
 
 Antes de borrar, el bot busca notas que referencian la nota a borrar con `[[wikilink]]`:
 
@@ -118,7 +122,7 @@ Antes de borrar, el bot busca notas que referencian la nota a borrar con `[[wiki
 
 El bot nunca modifica automáticamente las notas que apuntan a la nota borrada — eso queda a criterio del usuario.
 
-### Reglas de borrado de proyecto
+### Reglas de borrado de proyecto *(diseño — no implementado)*
 
 Antes de borrar, el bot resuelve backlinks automáticamente según cuántas notas externas apuntan al proyecto:
 
@@ -128,14 +132,16 @@ Antes de borrar, el bot resuelve backlinks automáticamente según cuántas nota
 
 En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no quedan links rotos.
 
-> **Futuro:** mover notas entre proyectos/áreas desde el bot. Obsidian en clientes es read-only — ADSO es el único escritor del vault.
+> **Futuro:** mover notas entre proyectos/áreas desde el bot.
+
+> **Nota:** ADSO es el **escritor principal** del vault (toda creación de notas pasa por Telegram), pero no el único: los clientes de Obsidian editan notas existentes y el `VaultWatcher` re-embede el cambio automáticamente (ver "Consideraciones de uso" más abajo). La afirmación de que los clientes son read-only quedó obsoleta con el sync bidireccional.
 
 ### Notas sobre archivar
 
-- Los embeddings de notas archivadas se **conservan** en ChromaDB con `status: archived` en metadata — no se recalculan al desarchivar
-- Las búsquedas semánticas excluyen archivados por default; el usuario puede pedir explícitamente "buscar también en archivados"
+- `05-Archive` está en `vault.exclude_dirs` (`config.yaml`), así que **queda fuera del índice de embeddings**. El reindex nocturno (`reindex_vault`) borra como huérfano todo ID que ya no aparezca en el scan: archivar una nota elimina su embedding, y desarchivarla lo recalcula desde cero. No se conserva metadata `status: archived` en ChromaDB.
+- Por lo mismo, las búsquedas semánticas **no pueden** incluir archivados: no hay vectores que consultar ni opción de "buscar también en archivados".
 - Los wikilinks que apunten a notas archivadas siguen funcionando (Obsidian resuelve por nombre de archivo, no por ruta)
-- Archivar es reversible; borrar no lo es — al borrar sí se eliminan los embeddings definitivamente
+- Archivar es reversible; borrar no lo es — pero en ambos casos los embeddings se eliminan
 
 ---
 
@@ -153,9 +159,9 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 
 | Tipo | Destino | Descripción |
 |---|---|---|
-| `reference` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o el bot pregunta destino si no tiene proyecto ni área | Contenido de referencia. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
-| `task` | `02-Areas/{area}/` + Google Tasks | Tarea sin proyecto activo — el área determina la carpeta destino |
-| `idea` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
+| `reference` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o `00-Inbox/` si no tiene proyecto ni área (el preview lo muestra como destino; se cambia con `[Reubicar]`) | Contenido de referencia. Incluye papers académicos (con campos opcionales: authors, year, doi, methods, etc.) |
+| `task` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno — más Google Tasks | Tarea. Mismo orden que el resto de los tipos: **project gana sobre area** (`_resolve_dest_dir` en `vault_writer.py`), una task con `project` va al proyecto aunque tenga `area` seteada |
+| `idea` | `01-Projects/{proyecto}/{seccion}/`, `02-Areas/{area}/`, o `00-Inbox/` si no tiene proyecto ni área (se cambia con `[Reubicar]`) | Idea exploratoria — se promueve a proyecto o se descarta |
 | `idea` (sin destino) | `00-Inbox/` | Bot no pudo clasificar con confianza — `status: pending-classification` |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |

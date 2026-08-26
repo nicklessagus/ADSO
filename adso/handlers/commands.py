@@ -14,6 +14,7 @@ from adso import __version__ as ADSO_VERSION
 from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
+from adso.handlers.capture import _redirect_unimplemented_mode, _remember_preview_msg
 from adso.keyboards import build_capture_keyboard, build_preview
 from adso.llm_client import classify, extract_original_from_degraded
 from adso import vault_cache
@@ -266,8 +267,9 @@ async def handle_clasificar(
 
     await reply("Clasificando...")
 
+    contenido = extract_original_from_degraded(note.body)
     result = await classify(
-        content=extract_original_from_degraded(note.body),
+        content=contenido,
         media_type=orig_fm.get("media_type", "text"),
         existing_projects=projects,
         existing_areas=areas,
@@ -280,7 +282,11 @@ async def handle_clasificar(
         await reply("El LLM no está disponible. La nota quedó en Inbox.")
         return
 
-    if result.get("mode") != "capture" or "frontmatter" not in result.get("payload", {}):
+    # Mismo redirect que el flujo interactivo de captura: sin él, una nota cuyo
+    # texto parece pregunta recibía "No se pudo clasificar" en cada /clasificar
+    # y no había forma de sacarla del Inbox desde el bot.
+    mode = _redirect_unimplemented_mode(result, contenido)
+    if mode != "capture" or "frontmatter" not in result.get("payload", {}):
         await reply("No se pudo clasificar la nota.")
         return
 
@@ -299,4 +305,8 @@ async def handle_clasificar(
     preview_text = "♻️ <b>Nota de Inbox</b>\n\n" + build_preview(new_fm, body, [])
     keyboard = build_capture_keyboard()
 
-    await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")
+    sent = await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")
+    # El guard G14 de `_cb_confirm` compara contra este `msg_id`: sin
+    # registrarlo, un [Confirmar] de un preview viejo sigue pasando. C2 de la
+    # auditoría 2026-08.
+    _remember_preview_msg(result, sent)

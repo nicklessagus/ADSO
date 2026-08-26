@@ -67,8 +67,20 @@ tests/
 │   ├── test_reporters.py          # formateo de reportes (reporte, reporte_full)
 │   ├── test_bot_errors.py         # error handler global de PTB
 │   ├── test_confirm_failure.py    # "crear antes de descartar": reintento tras fallo de escritura
+│   ├── test_capture_links.py      # caracterización de `_suggest_links`: reutilización del embedding del preview (I5)
+│   ├── test_timing.py             # `Stopwatch` de la captura + silenciado del log de apscheduler
 │   ├── test_audit_block_b.py      # guards de regresión del bloque B (auditoría 2026-07-31)
 │   ├── test_audit_block_cd.py     # guards de regresión de los bloques C y D
+│   ├── test_audit_block_e.py      # bloque E: flujos de captura/UI (bot bloqueado sin teclado, pérdida de contenido)
+│   ├── test_audit_block_f.py      # bloque F: otros medios (watcher, reportes, arXiv, callback_data)
+│   ├── test_audit_block_g.py      # bloque G: hallazgos bajos (TOCTOU de `_unique_path`, auth, permisos, config)
+│   ├── test_audit_2026_08_vault.py    # auditoría 2026-08: capa de vault (wikilinks al mover, watcher, code fences)
+│   ├── test_audit_2026_08_capture.py  # auditoría 2026-08: flujo de captura (reintento, estado colgado, OCR→Vision)
+│   ├── test_audit_2026_08_input.py    # auditoría 2026-08: entrada de medios (`edited_message`, estado antes del reply)
+│   ├── test_audit_2026_08_llm.py      # auditoría 2026-08: capa LLM y config (type/status inválidos, fallback de título)
+│   ├── test_audit_2026_08_query.py    # auditoría 2026-08: embeddings y retrieval (metadata de Chroma, huérfanos, warmup)
+│   ├── test_audit_2026_08_reports.py  # auditoría 2026-08: reportes y jobs (reporte vacío, scope borrado, escapado)
+│   ├── test_audit_2026_08_data.py     # auditoría 2026-08: datos escritos al vault (bugs con evidencia en el vault real)
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -484,7 +496,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **76%** sobre 4655 statements.
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **84%** sobre 5113 statements (auditoría 2026-08-26).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
@@ -494,9 +506,9 @@ del proyecto. Con los handlers omitidos, **un test nuevo sobre un handler no
 movía el gate**, que es justo donde la regla test-first más hace falta. Detalle
 en I3 de `docs/audit-2026-07-31.md`.
 
-Cobertura actual de handlers (el terreno a ganar): `query.py` 88%, `callbacks.py`
-77%, `input.py` 67%, `jobs.py` 66%, `capture.py` 61%, `manage.py` 55%,
-`commands.py` 39%, `reports.py` 16%.
+Cobertura actual de handlers (el terreno a ganar): `query.py` 93%, `callbacks.py`
+82%, `capture.py` 82%, `commands.py` 75%, `manage.py` 75%, `jobs.py` 70%,
+`input.py` 67%, `reports.py` 38%.
 
 ### Qué NO se mide en CI
 
@@ -560,6 +572,114 @@ ese es el momento de excluirlo por marker (y de actualizar esta sección).
 
 ---
 
+## Tests de reproducción — `xfail(strict=True)`
+
+Convención introducida por la auditoría 2026-08-26 (`docs/audit-2026-08-26.md`).
+Es el mecanismo que hace cumplir la regla test-first del repo **para bugs**, no
+solo para features.
+
+Un bug abierto no se documenta con un TODO ni con un issue a secas: se documenta
+con un **test que especifica el comportamiento correcto** y lleva la marca
+`xfail(strict=True)`.
+
+```python
+class TestE1MetadataNoString:
+    @pytest.mark.xfail(
+        strict=True,
+        reason="BUG E1: _to_scored no coacciona a str la metadata de ChromaDB",
+    )
+    def test_to_scored_coacciona_los_campos_a_str(self) -> None:
+        ...
+```
+
+Cómo funciona el ciclo:
+
+1. **Se escribe el reproductor** y se lo mira fallar por el mecanismo documentado
+   (los de la auditoría se verificaron además con `--runxfail`, para que un test
+   que falla por un mock mal armado no se confunda con un defecto real).
+2. **Se le pone `xfail(strict=True)`.** La suite queda **verde** — el bug está
+   documentado y ejecutable sin romper CI.
+3. **El día que alguien arregla el bug**, el test pasa a **XPASS**, y `strict`
+   convierte ese XPASS en **fallo**. No hay forma de mergear el fix sin sacar la
+   marca en el mismo commit.
+4. **Sin la marca, el test queda como guard de regresión**: si el defecto vuelve,
+   falla.
+
+El `reason` es obligatorio y nombra el bug (`"BUG E1: ..."`), así que el reporte
+de la suite es la lista viva de defectos conocidos. Un issue está cerrado cuando
+su `xfail` desapareció y su test pasa.
+
+Los seis archivos `tests/unit/test_audit_2026_08_*.py` siguen esta convención;
+conviven en ellos tests ya sin marca (bugs arreglados) y tests con marca (bugs
+abiertos).
+
+---
+
+## Harness de regresión de modelo
+
+`scripts/llm_regression.py` + los datos en `tests/llm_regression/`
+(`cases.yaml`, `baselines/`). Es parte de la estrategia de testing aunque **no
+sea pytest**.
+
+### Qué mide
+
+El **contrato estructural** que el resto del bot asume del modelo. No mide
+calidad de redacción ni de resumen — eso lo valida el usuario en el preview antes
+de confirmar cada nota. Mide lo que el usuario *no* ve:
+
+- que `validate_llm_response` **no lance** (si lanza, *toda* captura cae a modo
+  degradado y termina en `00-Inbox`),
+- que el `mode`, el `title`, el `body`, el destino y `confidence` cumplan lo
+  mínimo que el código de abajo da por hecho,
+- que el modelo **no obedezca prompt injection** ni filtre el system prompt.
+
+Las reglas duras invalidan la corrida; las blandas (higiene de tags, `due_date`)
+bajan el score y se comparan contra la baseline. La tabla completa de reglas está
+en `tests/llm_regression/README.md`.
+
+### Por qué no es un test de pytest
+
+Porque **pega contra la API real y quema quota**. Si viviera bajo `tests/` como
+test de pytest, un `pytest` local o un cambio en CI podría dispararlo por
+accidente. Por eso es un script suelto en `scripts/` y `tests/llm_regression/`
+guarda solo los datos. Costo por corrida: ~34 requests (11 casos × 3 + 1 de
+Vision), holgado dentro del free tier; `--delay` los espacia para no chocar con
+el RPM.
+
+### Cuándo correrlo
+
+**Antes de tocar `GEMINI_MODEL`.** Primero la baseline del modelo actual, después
+el candidato comparado contra ella:
+
+```bash
+make llm-baseline                                        # baseline del modelo actual
+make llm-check MODEL=gemini-3.7-flash BASE=gemini-3.5-flash-lite
+# --vision-model evalúa un candidato de Vision por separado
+```
+
+Con `--compare` el exit code refleja **regresiones contra la baseline**, no
+fallas absolutas: lo que decide una actualización no es que el candidato sea
+perfecto, sino que no empeore nada. `ADSO_GEMINI_MODEL` overridea `GEMINI_MODEL`
+sin tocar código y existe justamente para apuntar el harness a un candidato; en
+producción se deja sin setear.
+
+### Dos reglas de diseño que costaron falsos positivos
+
+- **R12 (injection) escanea el frontmatter, `operation`/`params` y `summary` —
+  nunca el `body`.** El body es transcripción legítima del input, así que
+  cualquier marcador embebido aparece ahí *sin* que el modelo haya obedecido
+  nada. R12b cubre el body aparte, buscando frases del propio system prompt (que
+  es lo que las inyecciones piden filtrar).
+- **R5 (`type`) es regla dura solo cuando `media_type` no es `text`/`audio`.** En
+  texto y audio el tipo lo eligen los botones `[Tarea]`/`[Nota]` y el del LLM se
+  descarta, así que ahí la regla es informativa.
+
+Además: las reglas de tags (R8-R11) se evalúan sobre el payload **crudo**, antes
+de `_validate_capture_payload` — sobre el sanitizado nunca fallarían, y lo que se
+quiere medir es el modelo, no el sanitizador.
+
+---
+
 ## Grabación de fixtures del LLM
 
 Para mantener los tests deterministas, las respuestas de Gemini se graban como JSON en `tests/fixtures/llm_responses/`. Procedimiento:
@@ -579,5 +699,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 623 tests: 430 unit, 48 integration, 145 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 897 tests: 704 unit, 48 integration, 145 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

@@ -28,7 +28,7 @@ import logging
 
 from adso import vault_cache
 from adso.config import Settings, load_settings
-from adso.embeddings import EmbeddingsClient
+from adso.embeddings import EmbeddingsClient, should_index
 from adso.handlers.callbacks import handle_callback
 from adso.tasks_client import TasksClient
 from adso.handlers.commands import handle_clasificar, handle_help, handle_reset, handle_start, handle_status
@@ -53,6 +53,17 @@ async def _post_init(app: Application) -> None:
     embeddings: EmbeddingsClient = app.bot_data["embeddings"]
     vault_path = settings.vault_path
 
+    # Warm-up de ChromaDB: `_ensure_initialized` es síncrona e importa chromadb
+    # (medido en la RPi4: 4,4 s) además de abrir sqlite. Sin esto, el primer
+    # mensaje del usuario la dispara desde `query_similar` y congela el event
+    # loop entero — ni callbacks, ni heartbeat, ni watcher — durante segundos, y
+    # el Stopwatch de captura se lo atribuye a `links` como si fuera red.
+    # Acá el freeze no molesta a nadie: todavía no arrancó el polling.
+    try:
+        await asyncio.to_thread(embeddings._ensure_initialized)
+    except Exception as exc:  # noqa: BLE001 — el arranque no debe caerse por el warm-up
+        _bot_logger.warning("Warm-up de ChromaDB fallido (se hará lazy): %s", exc)
+
     async def _reindex_external_note(path: Path) -> None:
         """Lee una nota modificada externamente y actualiza su embedding.
 
@@ -64,17 +75,39 @@ async def _post_init(app: Application) -> None:
         if path in bot_written:
             bot_written.discard(path)
             return
-        try:
-            note = await asyncio.to_thread(vault_cache.parse_cached, path)
-            if note is None:
-                return
-            body = note.body.strip()
-            if not body:
-                return
-            await _index_note_safe(embeddings, path, body, note.frontmatter, vault_path)
-            _bot_logger.info("Reindex externo completado: %s", path)
-        except Exception as exc:
-            _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
+        # Mismos filtros que el reindex nocturno: sin ellos, editar desde
+        # Obsidian una nota de `05-Archive` (o un `_index.md`) la metía al
+        # índice y esa noche `reindex_vault` la borraba como huérfana — ciclo
+        # diario de embed + delete (E2). El backup git no se saltea: el cambio
+        # existe aunque la nota no vaya al índice semántico.
+        if should_index(path, vault_path, settings.vault.exclude_dirs):
+            try:
+                note = await asyncio.to_thread(vault_cache.parse_cached, path)
+                if note is None:
+                    # YAML ilegible: puede ser un archivo a medio sincronizar.
+                    # NO se borra el embedding — un error de parseo transitorio
+                    # no significa que la nota dejó de existir
+                    # (docs/decisions-log.md).
+                    _bot_logger.debug("Nota ilegible, no se reindexa: %s", path)
+                elif not note.body.strip():
+                    # La nota se vació desde Obsidian. Sin esto su embedding
+                    # viejo seguía en ChromaDB y `/buscar` la devolvía con un
+                    # snippet del contenido que el usuario ya había borrado,
+                    # hasta el reindex nocturno. E3, del lado del watcher.
+                    note_id = str(path.relative_to(vault_path).with_suffix(""))
+                    await embeddings.remove_note(note_id)
+                    _bot_logger.info(
+                        "Nota vaciada externamente, embedding eliminado: %s", note_id
+                    )
+                else:
+                    await _index_note_safe(
+                        embeddings, path, note.body.strip(), note.frontmatter, vault_path
+                    )
+                    _bot_logger.info("Reindex externo completado: %s", path)
+            except Exception as exc:
+                _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
+        else:
+            _bot_logger.debug("Cambio externo fuera del índice, no se reindexa: %s", path)
         git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
         if git_backup:
             await git_backup.notify(path.stem)
@@ -125,7 +158,10 @@ async def _post_shutdown(app: Application) -> None:
     """Limpieza async ejecutada por PTB al detener el bot."""
     watcher: Optional[VaultWatcher] = app.bot_data.get("vault_watcher")
     if watcher:
-        await watcher.stop()
+        try:
+            await watcher.stop()
+        except Exception as exc:  # noqa: BLE001 — el shutdown no debe saltear el flush
+            _bot_logger.warning("Error deteniendo el VaultWatcher al shutdown: %s", exc)
     # Vaciar el debounce del backup: una nota escrita en los últimos segundos
     # quedaría sin commit/push hasta la próxima escritura si no forzamos el flush.
     git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
@@ -238,10 +274,21 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     app.add_handler(CommandHandler("buscar", handle_buscar))
     app.add_handler(CommandHandler("reporte", handle_reporte_command))
     app.add_handler(CommandHandler("reporte_full", handle_reporte_full_command))
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    # `filters.UpdateType.MESSAGE` en las cuatro: los filtros de contenido
+    # (TEXT, PHOTO, Document.ALL, VOICE|AUDIO) matchean también un
+    # `edited_message`, donde `update.message` es None. Editar un mensaje ya
+    # mandado —o el caption de una foto/PDF— mataba a los cuatro handlers con
+    # AttributeError y el usuario recibía "Ocurrió un error inesperado" por
+    # corregir un typo. Una edición no es contenido nuevo: no hay flujo de
+    # re-procesamiento, así que se ignora.
+    app.add_handler(MessageHandler(
+        (filters.VOICE | filters.AUDIO) & filters.UpdateType.MESSAGE, handle_audio))
+    app.add_handler(MessageHandler(
+        filters.PHOTO & filters.UpdateType.MESSAGE, handle_photo))
+    app.add_handler(MessageHandler(
+        filters.Document.ALL & filters.UpdateType.MESSAGE, handle_document))
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     # Jobs periódicos

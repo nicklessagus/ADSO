@@ -40,6 +40,16 @@ de conocimiento verificable de un chatbot que alucina sobre notas personales.
 | `gemini-embedding-001` | embeddings (indexado + consultas) | **1.000 RPD**, 100 RPM |
 | Groq (`llama-3.1-8b-instant`) | fallback de generación | ya integrado |
 
+> **La tabla es un snapshot de jul-2026 y se deja tal cual.** El modelo de
+> generación en producción hoy es **`gemini-3.5-flash-lite`** (ver `GEMINI_MODEL`
+> en `config.py`), no `gemini-3.1-flash-lite`, y Google ya no publica el cap del
+> free tier en la doc — hay que verificarlo por proyecto en AI Studio. Las cifras
+> de abajo no se reescriben porque lo que sostiene el razonamiento de diseño es
+> el **orden de magnitud** (generación holgada, embeddings como presupuesto más
+> ajustado), y ese no cambió. Hay además un segundo modelo, `GEMINI_VISION_MODEL`
+> (`gemini-3.6-flash`), con quota **propia** — el free tier es por modelo, así que
+> el OCR de un PDF no consume el RPD de la captura diaria.
+
 Implicancias para el diseño:
 
 - **Generación ya no es el cuello de botella.** A ~1.000 RPD y 250k TPM, sintetizar
@@ -70,14 +80,16 @@ Implicancias para el diseño:
 
 La infraestructura de retrieval ya existe; Fase 7 es sobre todo orquestación.
 
-- **`embeddings.query_similar(query_text, n_results, threshold, where)`**
-  (`embeddings.py:253`) — embebe la consulta y busca en ChromaDB. Ya soporta:
+- **`embeddings.EmbeddingsClient.query_similar(query_text, n_results, threshold, where, query_embedding)`**
+  — embebe la consulta y busca en ChromaDB. Ya soporta:
   - `threshold` → filtro por similitud mínima.
   - `where` → filtro de metadata de ChromaDB (**esto habilita el scope por
     `project`/`area` sin código extra**).
+  - `query_embedding` → vector precomputado, para no re-embeder el mismo texto
+    (lo usa el reintento con umbral relajado de `knowledge_query.retrieve`).
   - Devuelve `list[SimilarNote]` con `note_id`, `distance`, `metadata`, `snippet`.
-- **`vault_search.get_backlinks(note_name, vault_path)`** (`vault_search.py:130`)
-  y **`get_wikilinks(note_path)`** (`vault_search.py:460`) — para la expansión
+- **`vault_search.get_backlinks(note_name, vault_path)`** y
+  **`vault_search.get_wikilinks(note_path)`** — para la expansión
   estructural desde un nodo (backlinks entrantes + wikilinks salientes). Sin LLM.
 - **`reporters.py`** — generador de informes `.md` con header ASCII + versión +
   fecha, `_note_block()` para renderizar notas, y `_llm_synthesis()` como patrón

@@ -190,7 +190,10 @@ async def handle_report_callback(
     # --- Scope final: generar reporte de proyecto/área/inbox ---
     if data.startswith(CB_REPORT_SCOPE_PREFIX):
         suffix = data[len(CB_REPORT_SCOPE_PREFIX):]
-        project, area, inbox = await _parse_scope_suffix(suffix, vault_path)
+        project, area, inbox, missing = await _parse_scope_suffix(suffix, vault_path)
+        if missing:
+            await _aviso_scope_borrado(query, context, suffix)
+            return
         await query.edit_message_text("Generando reporte...")
         await _send_report(
             query, context,
@@ -202,7 +205,10 @@ async def handle_report_callback(
     # --- Scope final: generar reporte de ideas ---
     if data.startswith(CB_REPORT_IDEAS_PREFIX):
         suffix = data[len(CB_REPORT_IDEAS_PREFIX):]
-        project, area, _ = await _parse_scope_suffix(suffix, vault_path)
+        project, area, _, missing = await _parse_scope_suffix(suffix, vault_path)
+        if missing:
+            await _aviso_scope_borrado(query, context, suffix)
+            return
         await query.edit_message_text("Generando reporte de ideas...")
         await _send_report(
             query, context,
@@ -214,7 +220,10 @@ async def handle_report_callback(
     # --- Scope final: generar cola de lectura ---
     if data.startswith(CB_REPORT_READING_PREFIX):
         suffix = data[len(CB_REPORT_READING_PREFIX):]
-        project, area, _ = await _parse_scope_suffix(suffix, vault_path)
+        project, area, _, missing = await _parse_scope_suffix(suffix, vault_path)
+        if missing:
+            await _aviso_scope_borrado(query, context, suffix)
+            return
         await query.edit_message_text("Generando cola de lectura...")
         await _send_report(
             query, context,
@@ -276,12 +285,12 @@ async def _show_items_keyboard(
 
 async def _parse_scope_suffix(
     suffix: str, vault_path: Path
-) -> tuple[Optional[str], Optional[str], bool]:
+) -> tuple[Optional[str], Optional[str], bool, bool]:
     """Parsea el sufijo del callback_data de scope.
 
     Formatos:
-    - "p:nombre"  → project="nombre", area=None, inbox=False
-    - "a:nombre"  → project=None, area="nombre", inbox=False
+    - "p:token"   → project="nombre", area=None, inbox=False
+    - "a:token"   → project=None, area="nombre", inbox=False
     - "inbox"     → project=None, area=None, inbox=True
     - "all"       → project=None, area=None, inbox=False
 
@@ -289,21 +298,48 @@ async def _parse_scope_suffix(
         suffix: Parte del callback_data después del prefijo.
 
     Returns:
-        Tupla (project, area, inbox).
+        Tupla (project, area, inbox, missing). `missing=True` significa que el
+        token tenía forma válida pero el proyecto/área ya no existe (se borró
+        entre que se dibujó el teclado y el usuario apretó el botón).
     """
     if suffix == "inbox":
-        return None, None, True
+        return None, None, True, False
     if suffix == "all":
-        return None, None, False
+        return None, None, False, False
     # El sufijo lleva un token, no el nombre: antes viajaba el nombre truncado
     # a 32 chars y `scope_report` armaba `01-Projects/{truncado}`, un path
     # inexistente → "No se encontraron notas", reporte vacío y sin error.
     # F3 de docs/audit-2026-07-31.md.
+    #
+    # El `None` de `resolve_item_token` significa "ese proyecto/área ya no
+    # existe" y hay que propagarlo como tal: devolverlo como `project=None`
+    # hacía que `scope_report` cayera al scope "Vault completo" y el usuario
+    # recibiera un reporte de TODO el vault como si fuera el que pidió (R2).
     if suffix.startswith("p:"):
-        return await resolve_item_token(suffix[2:], vault_path, True), None, False
+        project = await resolve_item_token(suffix[2:], vault_path, True)
+        return project, None, False, project is None
     if suffix.startswith("a:"):
-        return None, await resolve_item_token(suffix[2:], vault_path, False), False
-    return None, None, False
+        area = await resolve_item_token(suffix[2:], vault_path, False)
+        return None, area, False, area is None
+    return None, None, False, False
+
+
+async def _aviso_scope_borrado(query, context: ContextTypes.DEFAULT_TYPE, suffix: str) -> None:
+    """Avisa que el proyecto/área elegido ya no existe y repone el menú.
+
+    Mismo trato que `callbacks.py` le da al `None` de `resolve_item_token` en el
+    flujo de captura. El menú queda activo (`pending_report`) para que el
+    usuario elija otro reporte sin tener que repetir el comando.
+    """
+    tipo = "Ese proyecto" if suffix.startswith("p:") else "Esa área"
+    context.user_data["pending_report"] = True
+    try:
+        await query.edit_message_text(
+            f"{tipo} ya no existe. Elegir otro reporte.",
+            reply_markup=build_report_type_keyboard(),
+        )
+    except Exception:
+        logger.warning("No se pudo avisar que el scope del reporte ya no existe.")
 
 
 async def _send_report(
@@ -314,8 +350,8 @@ async def _send_report(
 ) -> None:
     """Genera un reporte y lo envía como documento .md. Limpia pending_report al terminar.
 
-    Si el reporte está vacío (menos de 400 bytes), notifica en el chat
-    en vez de enviar un archivo vacío.
+    Si el reporte no tiene ningún ítem (`ReportBytes.item_count == 0`), notifica
+    en el chat en vez de enviar un archivo con secciones vacías.
 
     Args:
         query: CallbackQuery para editar el mensaje de progreso.
@@ -332,13 +368,21 @@ async def _send_report(
         logger.exception("Error generando reporte '%s': %s", filename, e)
         context.user_data.pop("pending_report", None)
         try:
-            await query.edit_message_text(f"Error al generar el reporte: {_esc(str(e))}")
+            # `_esc` + parse_mode van juntos: escapar sin declararlo hacía que
+            # el usuario leyera `&lt;...&gt;` literal en el aviso de error (E8).
+            await query.edit_message_text(
+                f"Error al generar el reporte: {_esc(str(e))}", parse_mode="HTML"
+            )
         except Exception:
             pass
         return
 
-    # Reporte vacío: solo tiene el header
-    if len(report_bytes) < 400:
+    # Reporte vacío: ningún ítem en el scope. El conteo lo trae el reporter
+    # (`ReportBytes.item_count`): medirlo en bytes no funcionaba — el header
+    # solo ya pesa ~650 bytes, así que el umbral de 400 nunca se alcanzaba y
+    # esta rama era código muerto. El usuario recibía igual un .md que solo
+    # decía "_Sin referencias activas._" (R1).
+    if getattr(report_bytes, "item_count", None) == 0:
         context.user_data.pop("pending_report", None)
         try:
             await query.edit_message_text("No se encontraron notas para este scope.")
@@ -363,6 +407,8 @@ async def _send_report(
     except Exception as e:
         logger.exception("Error enviando reporte '%s': %s", filename, e)
         try:
-            await query.edit_message_text(f"Error al enviar el reporte: {_esc(str(e))}")
+            await query.edit_message_text(
+                f"Error al enviar el reporte: {_esc(str(e))}", parse_mode="HTML"
+            )
         except Exception:
             pass

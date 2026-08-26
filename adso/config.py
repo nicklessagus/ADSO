@@ -244,9 +244,22 @@ def _build_section(
 
 
 def _build_vault_seed(data: dict[str, Any] | None) -> VaultSeedConfig:
-    """Construye VaultSeedConfig validando que cada ítem tenga description."""
+    """Construye VaultSeedConfig validando que cada ítem tenga description.
+
+    Raises:
+        ConfigError: Si la sección no es un mapa de claves, o si algún ítem no
+            tiene `name`/`description`.
+    """
     if data is None:
         return VaultSeedConfig()
+    # Misma guarda que `_build_section`: `vault_seed` escrito como lista —la
+    # confusión natural, porque sus hijos SÍ son listas— llegaba al `data.get()`
+    # y mataba el arranque con `AttributeError` crudo, sin decir qué clave tocar.
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"vault_seed: se esperaba un mapa de claves (projects / areas), "
+            f"se obtuvo {type(data).__name__}"
+        )
 
     projects: list[VaultSeedItem] = []
     for item in data.get("projects", []):
@@ -356,6 +369,21 @@ def _validate_types(settings: Settings) -> None:
         try:
             datetime.strptime(str(valor), "%H:%M")
         except (ValueError, TypeError):
+            # PyYAML resuelve un escalar sin comillas con dos puntos como
+            # sexagesimal (YAML 1.1): `12:00` llega acá como el int 720. El
+            # mensaje genérico reportaba entonces un valor que NO aparece en el
+            # archivo del usuario. Con `03:00` no pasa (el cero inicial rompe el
+            # resolver), así que el ejemplo del propio error funcionaba y el del
+            # usuario no. Se sigue rechazando —adivinar la intención de un
+            # número es peor— pero nombrando la causa real.
+            if isinstance(valor, int) and not isinstance(valor, bool) and valor >= 0:
+                horas, minutos = divmod(valor, 60)
+                if horas < 24:
+                    raise ConfigError(
+                        f"{campo}: el YAML leyó la hora como el número {valor}. "
+                        f"Falta escribirla entre comillas: "
+                        f'time: "{horas:02d}:{minutos:02d}"'
+                    ) from None
             raise ConfigError(
                 f"{campo}: '{valor}' no es una hora válida (formato HH:MM, ej: 03:00)"
             ) from None

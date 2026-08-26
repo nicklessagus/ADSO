@@ -44,20 +44,61 @@ El peor caso razonable es que una nota quede mal clasificada o con frontmatter c
 El bot ignora silenciosamente cualquier mensaje de IDs no autorizados. No responde ni confirma su existencia.
 
 ```python
-# Soporta múltiples IDs separados por coma: "12345,67890"
-_raw = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "")
-ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip()}
+# Soporta múltiples IDs separados por coma: "12345,67890".
+# `_parse_allowed_ids` LANZA si la variable está vacía o no queda ningún ID
+# numérico válido: el bot se niega a arrancar. Antes se filtraba con `isdigit()`
+# en un set-comprehension y un valor no numérico ("12a") dejaba el set vacío
+# silenciosamente — lockout total, sin nada en los logs que lo explicara
+# (G7 de docs/audit-2026-07-31.md). Los valores no numéricos que conviven con
+# al menos un ID válido se ignoran con un WARNING.
+def _parse_allowed_ids(raw: str) -> set[int]:
+    if not raw.strip():
+        raise RuntimeError("TELEGRAM_ALLOWED_USER_ID is not set — bot refuses to start")
+    ids, invalidos = set(), []
+    for parte in (p.strip() for p in raw.split(",")):
+        if not parte:
+            continue
+        if parte.isdigit():
+            ids.add(int(parte))
+        else:
+            invalidos.append(parte)
+    if not ids:
+        raise RuntimeError(
+            "TELEGRAM_ALLOWED_USER_ID no contiene ningún ID numérico válido "
+            f"(recibido: {raw!r}) — el bot quedaría inaccesible para todos"
+        )
+    if invalidos:
+        logger.warning(
+            "TELEGRAM_ALLOWED_USER_ID: se ignoran valores no numéricos: %s",
+            ", ".join(invalidos),
+        )
+    return ids
+
+
+ALLOWED_USER_IDS: set[int] = _parse_allowed_ids(
+    os.environ.get("TELEGRAM_ALLOWED_USER_ID", "")
+)
+
+
+def is_authorized(update: Update) -> bool:
+    """Helper compartido por el decorador y el gate global de `bot.py`."""
+    user = update.effective_user
+    return user is not None and user.id in ALLOWED_USER_IDS
+
 
 def authorized(handler):
     @wraps(handler)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if update.effective_user is None:
-            return None
-        if update.effective_user.id not in ALLOWED_USER_IDS:
+        if not is_authorized(update):
             return None  # silencio total — sin respuesta, sin log del contenido
         return await handler(update, context, *args, **kwargs)
     return wrapper
 ```
+
+La autenticación es de dos capas: el gate global `_global_auth_gate` de `bot.py`
+(registrado como `TypeHandler(Update, ...)` en `group=-1`, descarta el update con
+`ApplicationHandlerStop` antes de que llegue a ningún handler) y el decorador
+`@authorized` por handler como segunda barrera. Ambos llaman a `is_authorized()`.
 
 ### 2. Separación estricta sistema / datos en prompts
 
@@ -116,12 +157,36 @@ _GEMINI_RESPONSE_SCHEMA = {
                 "body":      {"type": "STRING",  "nullable": True},
                 "summary":   {"type": "STRING",  "nullable": True},
                 "operation": {"type": "STRING",  "nullable": True},  # Modo manage
-                "params":    {"type": "OBJECT",  "nullable": True},
+                # `params` DEBE declarar sus `properties` — ver nota abajo.
+                "params": {
+                    "type": "OBJECT",
+                    "nullable": True,
+                    "properties": {
+                        "name":         {"type": "STRING", "nullable": True},
+                        "description":  {"type": "STRING", "nullable": True},
+                        "project":      {"type": "STRING", "nullable": True},
+                        "old_name":     {"type": "STRING", "nullable": True},
+                        "new_name":     {"type": "STRING", "nullable": True},
+                        # convert_idea_to_project
+                        "note":         {"type": "STRING", "nullable": True},
+                        "project_name": {"type": "STRING", "nullable": True},
+                    },
+                },
             },
         },
     },
 }
 ```
+
+> **`params` sin `properties` rompe todo el modo manage.** El constrained decoding
+> de Gemini solo puede emitir claves que estén declaradas en el schema: con
+> `"params": {"type": "OBJECT", "nullable": True}` a secas, el modelo devolvía
+> siempre `{}` — incluso con el nombre del proyecto visible en el input.
+> `_validate_manage_payload` entonces lanzaba `LLMResponseError` y **el modo
+> manage por texto libre caía entero a modo degradado**. Toda clave nueva de
+> `params` tiene que agregarse acá además de al prompt. Detectado por
+> `scripts/llm_regression.py` contra el modelo en producción; guard de regresión
+> en `test_manage_params_declares_properties`.
 
 ### 4. Validación campo por campo del output JSON
 
@@ -171,9 +236,45 @@ def validate_llm_response(response_json: dict) -> dict:
 
 Esto convierte cualquier inyección que corrompa los campos en un fallo controlado, no en una nota inválida persistida.
 
+### 4b. Whitelist de claves del frontmatter
+
+La validación de arriba comprueba **valores**. La whitelist comprueba **claves**: `_validate_capture_payload` descarta, antes que nada, cualquier clave del frontmatter que no esté en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), y loguea cada descarte a `warning`.
+
+```python
+# llm_schema.py — claves legítimas según docs/frontmatter-schema.md
+ALLOWED_FRONTMATTER_KEYS = frozenset({
+    # Base
+    "title", "date_created", "date_modified", "type", "tags", "source",
+    "media_type", "status", "source_file", "source_url", "read_status",
+    # Destino
+    "project", "section", "area",
+    # Contenido / relaciones
+    "summary", "related", "priority", "relevance", "context",
+    # Tareas
+    "due_date", "scheduled",
+    # Académicos (pipeline de extracción + LLM)
+    "authors", "year", "journal", "doi", "keywords",
+    "contribution", "methods", "dataset", "conclusions",
+    # Índices de proyecto/área (auto-generados, no del LLM, pero legítimos)
+    "description", "sections",
+})
+
+# En _validate_capture_payload(), antes de cualquier otra validación:
+unknown = [k for k in fm if k not in ALLOWED_FRONTMATTER_KEYS]
+for key in unknown:
+    logger.warning("Clave de frontmatter fuera del schema, descartada: %r", key)
+    del fm[key]
+```
+
+**Por qué es una capa de seguridad y no solo higiene:** el schema constrained de Gemini (capa 3) ya limita las claves que *ese* modelo puede emitir, pero no cubre los dos caminos que lo esquivan — el **fallback de Groq**, que responde sin schema constrained, y una **inyección en un PDF/OCR** que consiga que el modelo agregue campos. Sin la whitelist esas claves llegaban al frontmatter y se serializaban en la nota; en particular `handler` y `content` **corrompían el archivo entero al escribirlo**, porque `_build_post` (`vault_writer.py`) las pasa como kwargs a `frontmatter.Post`, donde tienen significado propio. El whitelisteo cierra el vector en origen.
+
+Se aplica **antes** de que `capture.py` inyecte `extra_fm`/`user_context`, así que esos campos —que pone el bot, no el LLM— no se ven afectados.
+
 ### 5. Separación de prompts: extracción vs. clasificación
 
-Cuando el input es contenido externo (PDF, URL, imagen OCR), el procesamiento se divide en dos llamadas al LLM:
+> **Alcance real:** hoy esta separación aplica **solo a Gemini Vision** (imágenes y PDFs escaneados, `describe_image_with_vision` en `llm_client.py`). Los PDFs con capa de texto se extraen **localmente con pymupdf**, sin ninguna llamada al LLM (`document_extractor.py`), y las URLs genéricas **no se procesan** — solo los links de arXiv, cuya metadata viene literal de la API de arXiv, también sin LLM de extracción. El límite `llm.max_web_tokens` de `config.yaml` existe pero todavía no tiene consumidor.
+
+Cuando el input es contenido externo que necesita al LLM para leerse (imagen, PDF escaneado), el procesamiento se divide en dos llamadas:
 
 ```
 PASO 1 — Extracción (prompt minimalista):
@@ -415,21 +516,25 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 
 **Params por operación:**
 
-| Operación | Params requeridos | Params opcionales |
-|---|---|---|
-| `create_project` | `name`, `description` | — |
-| `create_area` | `name`, `description` | — |
-| `archive_project` | `name` | — |
-| `unarchive_project` | `name` | — |
-| `delete_project` | `name` | — |
-| `delete_area` | `name` | — |
-| `rename_project` | `old_name`, `new_name` | — |
-| `rename_area` | `old_name`, `new_name` | — |
-| `create_section` | `project`, `name` | — |
-| `convert_idea_to_project` | `idea_title`, `project_name`, `description` | — |
-| `reclassify_inbox` | — | `target_title` (si es específico; `null` = todo el inbox) |
+| Operación | Params | Validado en `_validate_manage_payload` | Ejecutado en `manage.py` |
+|---|---|---|---|
+| `create_project` | `name`, `description` | sí (ambos requeridos) | ✅ |
+| `create_area` | `name`, `description` | sí (ambos requeridos) | ✅ |
+| `create_section` | `project`, `name` | sí (ambos requeridos) | ✅ |
+| `archive_project` | `name` | no | ❌ *(no implementado)* |
+| `unarchive_project` | `name` | no | ❌ *(no implementado)* |
+| `delete_project` | `name` | no | ❌ *(no implementado)* |
+| `delete_area` | `name` | no | ❌ *(no implementado)* |
+| `rename_project` | `old_name`, `new_name` | sí (ambos requeridos) | ❌ *(no implementado)* |
+| `rename_area` | `old_name`, `new_name` | sí (ambos requeridos) | ❌ *(no implementado)* |
+| `convert_idea_to_project` | `note`, `project_name`, `description` | no | ❌ *(no implementado)* |
+| `reclassify_inbox` | — | no | ❌ *(no implementado como operación de gestión — existe solo como cron, `jobs.reclassify_inbox`; tampoco está en la lista de operaciones del prompt)* |
 
-Todas las operaciones de gestión requieren confirmación explícita del usuario antes de ejecutarse. Las destructivas (delete) requieren doble confirmación.
+Los nombres de params son los declarados en `_GEMINI_RESPONSE_SCHEMA["...params"].properties` y en el prompt de `llm_client.build_system_prompt`. Una clave que no esté en `properties` **no la puede emitir el constrained decoding** — agregar una operación implica tocar el schema, el prompt y la validación juntos.
+
+Las operaciones marcadas ❌ pasan la validación (o la saltean) pero `_cb_manage_confirm` responde `"Operación '<op>' todavía no está disponible."`. No hay camino que las ejecute.
+
+Todas las operaciones de gestión requieren confirmación explícita del usuario antes de ejecutarse. Las destructivas (delete) requieren doble confirmación *(diseño — hoy ninguna operación destructiva está implementada)*.
 
 ### 10. Truncado de contenido externo
 
@@ -468,6 +573,7 @@ El truncado más agresivo para contenido web previene ataques que ocultan instru
 [2] Etiquetas <input> con instrucción explícita  → el LLM sabe que es dato, no instrucción
 [3] Output JSON con schema fijo (Gemini)         → limita qué puede devolver el LLM
 [4] Validación campo por campo del JSON          → falla controlada si el schema es inválido
+[4b] Whitelist de claves del frontmatter         → una clave fuera del schema nunca llega al .md
 [5] Separación extracción / clasificación        → el LLM de extracción no conoce el schema
 [6] Detección de patrones de inyección           → visibilidad y confirmación explícita
 [7] Contexto RAG read-only                       → notas del vault no pueden disparar acciones
@@ -486,10 +592,11 @@ Las capas son complementarias: ninguna es perfecta sola. En conjunto hacen muy d
 - [ ] `TELEGRAM_ALLOWED_USER_ID` configurado correctamente
 - [ ] `.env` no commiteado (verificar con `git status`)
 - [ ] `credentials/` no commiteado (verificar con `git status`)
-- [ ] Repositorio ADSO y repositorio del vault configurados como privados en GitHub
+- [ ] Repositorio del **vault** (backup) configurado como privado en GitHub — el repo de **código** es público desde v1.0.0 (ver §11), así que todo lo que se commitea ahí es público: código, docs y **mensajes de commit**
 - [ ] Variables de entorno seteadas en `docker-compose.yml` por referencia, no por valor
 - [ ] Logs no exponen valores de variables de entorno
 - [ ] `validate_llm_response()` + `_validate_capture_payload()` se aplican en todo camino que escribe al vault
-- [ ] Preview de confirmación muestra todos los campos del frontmatter (no solo los principales)
+- [ ] `ALLOWED_FRONTMATTER_KEYS` cubre todas las claves de `docs/frontmatter-schema.md` (una clave legítima que falte se descarta silenciosamente de la nota)
+- [ ] Preview de confirmación muestra el subconjunto curado de campos (título, tipo, destino, status, prioridad, tags, due_date, snippet del body) — ver §8
 - [ ] Prompts RAG incluyen instrucción read-only explícita sobre el contexto
 - [ ] Logs de detección de inyección habilitados

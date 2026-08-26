@@ -24,7 +24,7 @@ Define la estructura de metadatos que el bot genera automáticamente para cada n
 ---
 title: "Título descriptivo de la nota"
 date_created: 2025-01-15T14:30:00     # ISO 8601, generado por el bot — sin comillas para tipo Date & time en Obsidian
-date_modified: 2025-01-15T14:30:00    # ISO 8601, actualizado en cada edición — sin comillas
+date_modified: 2025-01-15T14:30:00    # ISO 8601, actualizado por el bot en cada edición hecha vía ADSO — sin comillas
 type: reference                         # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
@@ -37,6 +37,8 @@ read_status: unread                    # Text enum — unread | read (ver secci�
 ```
 
 `source_file` y `source_url` son mutuamente opcionales y pueden coexistir (ej: un paper del que se tiene el PDF y el link).
+
+> **`date_modified` solo lo mantiene el bot.** Se actualiza en las escrituras que hace ADSO (`create_note`, `append_to_note`, `set_property`, `update_wikilinks`). Una edición externa desde Obsidian no lo toca: el `VaultWatcher` detecta el cambio y re-embede la nota, pero no reescribe el frontmatter. Consecuencia práctica: el `mtime` del archivo puede ser bastante más nuevo que `date_modified` (en el vault real hay 18 notas con esa divergencia, hasta 98 días). Para "última modificación real", usar `file.mtime` de Dataview, no `date_modified`.
 
 ---
 
@@ -59,7 +61,7 @@ Reglas de serialización para máxima compatibilidad con la UI de Properties de 
   source_file: "[[paper.pdf]]"
   ```
 
-- **Links en listas — siempre entre comillas dobles:** En campos `related`, los wikilinks dentro de arrays YAML **deben ir entre comillas dobles**. Sin ellas, el `[[` rompe el parseo de YAML y Obsidian muestra error en el frontmatter.
+- **Links en listas — siempre entre comillas dobles:** En campos de tipo lista de wikilinks (como el reservado `related`), los wikilinks dentro de arrays YAML **deben ir entre comillas dobles**. Sin ellas, el `[[` rompe el parseo de YAML y Obsidian muestra error en el frontmatter.
   ```yaml
   # Correcto
   related: ["[[otra-nota]]", "[[paper-similar]]"]
@@ -98,10 +100,9 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
-| `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
+| `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
 | `task` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Tarea (proyecto > área > Inbox; con `due_date`/`scheduled` opcionales → Google Calendar) |
-| `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o el bot pregunta destino | Idea exploratoria — se promueve a proyecto o se descarta |
-
+| `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Idea exploratoria — se promueve a proyecto o se descarta |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
 
@@ -116,17 +117,20 @@ type: reference
 project: tesis                          # Text plano — nombre del proyecto (carpeta) — opcional
 section: experimentos                   # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
 area: docencia                          # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
-summary: "Resumen generado por LLM"    # para notas largas
-related: ["[[otra-nota]]"]             # links siempre entre comillas dobles dentro del array
+summary: "Resumen generado por LLM"    # RESERVADO — no implementado (ver nota abajo)
+related: ["[[otra-nota]]"]             # RESERVADO — no implementado (ver nota abajo)
 ---
 ```
-> Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el bot pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
+
+> Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el preview muestra `00-Inbox` como destino; el bot **no** dispara ningún selector proactivamente. Para cambiarlo, el usuario aprieta `[Reubicar]` en el preview y elige `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
+
+> **`summary` y `related` son campos reservados — ningún código los escribe.** Están declarados en el schema del LLM y en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), así que sobreviven a la sanitización si el LLM los devuelve, pero ningún flujo del bot los popula y ninguna nota del vault real los usa. En particular, los links por similitud **no** van a `related`: se escriben como wikilinks en el bloque `## Ver también` del body. El campo `summary` del LLM que sí se usa es el del payload (nivel superior, no frontmatter), y solo en el flujo de arXiv para el callout `> [!summary] AI Summary` del body.
 
 ### Campos opcionales para contenido académico
 
-Cuando el pipeline de extracción detecta contenido académico (papers, artículos, preprints), estos campos se agregan al frontmatter de la nota. No definen un tipo separado — un paper es una `reference` con tag `#paper` y estos campos poblados.
+Cuando el pipeline de extracción detecta contenido académico (papers, artículos, preprints), estos campos se agregan al frontmatter de la nota. No definen un tipo separado — un paper es una `reference` con estos campos poblados.
 
-Los papers se identifican por la presencia del tag `#paper` y/o la presencia de estos campos en el frontmatter.
+**Criterio de identificación — campos académicos, no el tag.** Un paper se identifica por la presencia de campos académicos en el frontmatter (`authors`, `year`, `doi`, `keywords`). El tag `#paper` **no es confiable como criterio**: `_TYPE_TAGS` (`llm_schema.py`) filtra `paper` de los tags que propone el LLM, por duplicar el `type`. El único flujo que lo escribe es el de arXiv, que lo antepone explícitamente después de la sanitización (`capture.py`); un paper subido como PDF queda sin el tag. En el vault real esto ya se nota: 6 notas con campos académicos y solo 5 con el tag. Filtrar por `contains(tags, "paper")` deja papers afuera — filtrar por `authors` (o `doi`) no.
 
 ```yaml
 ---
@@ -147,7 +151,7 @@ contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
 methods: ["transformer", "contrastive-learning"]  # métodos/técnicas usadas
 dataset: ["ImageNet", "COCO"]                     # opcional
 conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
-related: ["[[otra-nota]]", "[[paper-similar]]"]   # generado por el pipeline de embeddings — links siempre entre comillas dobles
+related: ["[[otra-nota]]", "[[paper-similar]]"]   # RESERVADO — no implementado; los links van al bloque `## Ver también` del body
 ---
 ```
 
@@ -209,13 +213,13 @@ project: tesis                          # Text plano — opcional, determina car
 section: brainstorm                     # Text plano — sección dentro del proyecto — opcional, solo si tiene proyecto
 area: investigacion                     # Text plano — opcional, solo si no tiene proyecto. Determina carpeta destino (02-Areas/{area}/)
 priority: low                           # Text enum — low | medium | high — inferido o explícito
-related: ["[[nota-relacionada]]"]       # links siempre entre comillas dobles dentro del array
+related: ["[[nota-relacionada]]"]       # RESERVADO — no implementado; los links van al bloque `## Ver también` del body
 ---
 ```
 
 ### `_index.md` (nota índice de proyecto)
 
-Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea por captura de mensaje — se genera automáticamente al crear un proyecto via `/gestión` o cuando el LLM clasifica una nota en un proyecto nuevo. El usuario puede editarlo después via el bot (modo edición por Telegram).
+Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea por captura de mensaje — se genera automáticamente al crear un proyecto por el flujo de gestión del bot (lenguaje natural + botones; **no existe un comando `/gestión`**) o por la siembra inicial desde `config.yaml` (`seed_vault`). El LLM clasificando una nota en un proyecto nuevo **no** dispara la creación del índice. Para editarlo después, se edita el archivo en Obsidian: el modo edición por Telegram no está implementado (ver Fase 7).
 
 ```yaml
 ---
@@ -270,9 +274,9 @@ source: system
 
 ## `read_status`
 
-Campo opcional que indica si el contenido fue leído/revisado. Aplica únicamente a **PDFs y links** (web genérico, arXiv, NASA ADS) — los tipos que representan contenido externo que el usuario puede o no haber consumido.
+Campo opcional que indica si el contenido fue leído/revisado. Aplica a los inputs que representan contenido externo que el usuario puede o no haber consumido: **PDFs** y **links de arXiv**.
 
-No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como contenido a leer).
+No aplica a: texto libre, audio, imágenes, documentos de texto (`.md`/`.txt`) ni links genéricos (web no-arXiv) — ninguno de esos flujos setea el campo.
 
 | Valor | Significado |
 |---|---|
@@ -282,10 +286,9 @@ No aplica a: texto libre, audio, imágenes (se mandan para guardar algo, no como
 Los valores válidos son solo estos dos (`VALID_READ_STATUS` en `llm_schema.py`) — cualquier otro valor que devuelva el LLM se descarta.
 
 **Cuándo se setea:**
-- Al recibir un PDF o link, el bot pregunta `[Ya lo leí]` `[Lo quiero leer]`
-- `[Ya lo leí]` → `read_status: read` — el usuario lo agrega al vault para que se relacione con el resto
-- `[Lo quiero leer]` → `read_status: unread`
-- Es siempre una decisión explícita del usuario — nunca automático
+- **PDF** (`input.py`): al recibir el archivo el bot pregunta con botones `[Ya lo leí]` `[Lo quiero leer]` antes de procesarlo. `[Ya lo leí]` → `read_status: read` (el usuario lo agrega al vault para que se relacione con el resto); `[Lo quiero leer]` → `read_status: unread`. Es decisión explícita del usuario. La elección se arrastra por todos los caminos del PDF, incluido el de PDF escaneado (Vision).
+- **Link de arXiv** (`capture.py`): el bot **no** pregunta — el flujo aplica `read_status: unread` por defecto. Se corrige editando la nota en Obsidian.
+- **Cualquier otro input:** no se setea el campo. Si el LLM lo devuelve igual, `_validate_capture_payload` lo valida contra `VALID_READ_STATUS` y descarta cualquier valor fuera de `{read, unread}`.
 
 **Cómo se actualiza:** editando la nota en Obsidian. La actualización via bot ("ya leí el paper X" → `read`, botón `[Marcar como leído]`) es funcionalidad planificada del modo edición (Fase 7) — no está implementada.
 
@@ -331,7 +334,7 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 ```dataview
 TABLE authors, year, priority, relevance
 FROM "01-Projects" OR "03-Resources"
-WHERE contains(tags, "paper") AND read_status = "unread"
+WHERE authors AND read_status = "unread"
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
 
@@ -355,7 +358,7 @@ SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC
 ```dataview
 TABLE authors, year, priority, relevance
 FROM "01-Projects" OR "03-Resources"
-WHERE contains(tags, "paper") AND authors
+WHERE authors
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
 
@@ -363,7 +366,7 @@ SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```dataview
 TABLE authors, year, relevance
 FROM "01-Projects/tesis"
-WHERE contains(tags, "paper")
+WHERE authors
 SORT year DESC
 ```
 

@@ -6,6 +6,7 @@ Todos los tipos de input convergen aquí antes de pasar al flujo de clasificaci�
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,36 @@ from adso.llm_client import check_injection_risk
 from adso.security import authorized
 from adso.transcriber import transcribe_audio
 
+logger = logging.getLogger(__name__)
+
+
+def _solo_mensajes_nuevos(handler):
+    """Ignora los updates de edición, donde ``update.message`` es None.
+
+    Los `MessageHandler` ya se registran con `filters.UpdateType.MESSAGE`
+    (`bot.py`), que es donde se toma la decisión. Este decorador es la red de
+    seguridad para cualquier invocación fuera de ese registro: sin él, la
+    primera línea de cada handler (`update.message.text`, `msg.document`,
+    `msg.photo`, `msg.voice or msg.audio`) muere con AttributeError y el usuario
+    recibe "Ocurrió un error inesperado" por corregir un typo. Editar un mensaje
+    no es contenido nuevo: el bot no tiene ningún flujo de re-procesamiento.
+
+    Args:
+        handler: Handler async de entrada de medios.
+
+    Returns:
+        El handler wrapeado, que retorna None ante un update sin `message`.
+    """
+
+    @functools.wraps(handler)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        if update.message is None:
+            logger.debug("Update sin `message` (edición) ignorado por %s", handler.__name__)
+            return None
+        return await handler(update, context, *args, **kwargs)
+
+    return wrapper
+
 
 async def _exceeds_size_after_download(
     tmp_path: Path,
@@ -58,10 +89,9 @@ async def _exceeds_size_after_download(
         return True
     return False
 
-logger = logging.getLogger(__name__)
-
 
 @authorized
+@_solo_mensajes_nuevos
 async def handle_text(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -131,6 +161,10 @@ async def handle_text(
             resource_file=resource_info,
             extra_fm=extra_fm or None,
             preserve_body=True,
+            # El usuario ya eligió guardar el archivo y acaba de escribir su
+            # descripción: un `mode=manage` del LLM la descartaría entera. C6 de
+            # la auditoría 2026-08.
+            force_capture=True,
         )
         return
 
@@ -282,6 +316,7 @@ async def _handle_arxiv(
 
 
 @authorized
+@_solo_mensajes_nuevos
 async def handle_audio(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -367,6 +402,7 @@ async def handle_audio(
 
 
 @authorized
+@_solo_mensajes_nuevos
 async def handle_document(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -422,11 +458,24 @@ async def handle_document(
                 "user_context": msg.caption or None,
             }
             transferred = True
-            await msg.reply_text(
-                f"PDF recibido: <b>{_esc(filename)}</b>",
-                reply_markup=build_read_status_keyboard(),
-                parse_mode="HTML",
-            )
+            try:
+                await msg.reply_text(
+                    f"PDF recibido: <b>{_esc(filename)}</b>",
+                    reply_markup=build_read_status_keyboard(),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                # El estado se setea antes del reply que dibuja los botones: si
+                # el envío falla (TimedOut/NetworkError, lo más común en PTB),
+                # queda un `pending_*` sin teclado y todo input posterior se
+                # rechaza con "Hay una acción pendiente" hasta `/reset`. Se
+                # limpia el estado y se repone `transferred` para que el
+                # `finally` borre el temporal (en la RPi4 /tmp es tmpfs: RAM
+                # filtrada hasta el reinicio). Mismo modo de falla que cerró E9
+                # para `handle_audio`.
+                context.user_data.pop("pending_read_status", None)
+                transferred = False
+                raise
 
         elif is_text_file(filename):
             try:
@@ -450,13 +499,19 @@ async def handle_document(
                 snippet = text[:500]
                 if len(text) > 500:
                     snippet += "..."
-                await msg.reply_text(
-                    f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                    f"<code>{_esc(snippet)}</code>\n\n"
-                    "Confirmar, o enviar texto corregido.",
-                    reply_markup=build_extraction_keyboard(),
-                    parse_mode="HTML",
-                )
+                try:
+                    await msg.reply_text(
+                        f"<b>Contenido de {_esc(filename)}:</b>\n\n"
+                        f"<code>{_esc(snippet)}</code>\n\n"
+                        "Confirmar, o enviar texto corregido.",
+                        reply_markup=build_extraction_keyboard(),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    # Ver el comentario del PDF: estado colgado sin teclado.
+                    context.user_data.pop("pending_extraction", None)
+                    transferred = False
+                    raise
 
             except Exception as e:
                 logger.error("Error leyendo archivo de texto: %s", e)
@@ -469,14 +524,21 @@ async def handle_document(
                 "media_type": "document",
             }
             transferred = True
-            await msg.reply_text(
-                f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
-                "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
-                ]),
-                parse_mode="HTML",
-            )
+            try:
+                await msg.reply_text(
+                    f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
+                    "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
+                    ]),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                # Ver el comentario del PDF. `pending_description` espera texto,
+                # así que el que bloquea acá es `_is_awaiting_text_input`.
+                context.user_data.pop("pending_description", None)
+                transferred = False
+                raise
     except Exception as e:
         logger.error("Error procesando documento: %s", e)
         await msg.reply_text(f"Error al procesar documento: {e}")
@@ -486,6 +548,7 @@ async def handle_document(
 
 
 @authorized
+@_solo_mensajes_nuevos
 async def handle_photo(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -534,10 +597,23 @@ async def handle_photo(
         "user_context": msg.caption or None,
     }
 
-    await msg.reply_text(
-        "Imagen recibida. ¿Cómo extraer el contenido?",
-        reply_markup=build_fallback_pdf_keyboard(),
-    )
+    try:
+        await msg.reply_text(
+            "Imagen recibida. ¿Cómo extraer el contenido?",
+            reply_markup=build_fallback_pdf_keyboard(),
+        )
+    except Exception as e:
+        # Este reply no estaba dentro de ningún `try`: la excepción escapaba del
+        # handler con `pending_fallback_pdf` ya seteado (todo input posterior
+        # rechazado hasta `/reset`) y el temporal huérfano en /tmp, que en la
+        # RPi4 es tmpfs. Ver E9 en `handle_audio`.
+        logger.error("Error mostrando opciones de imagen: %s", e)
+        context.user_data.pop("pending_fallback_pdf", None)
+        tmp_path.unlink(missing_ok=True)
+        try:
+            await msg.reply_text(f"Error al procesar la imagen: {e}")
+        except Exception:
+            pass  # la red sigue caída; el log ya lo registró
 
 
 async def _process_pdf_after_read_status(
@@ -633,5 +709,15 @@ async def _process_pdf_after_read_status(
 
     except Exception as e:
         logger.error("Error extrayendo PDF: %s", e)
-        await query.edit_message_text(f"Error extrayendo PDF: {e}")
+        # Si lo que falló fue el edit del preview, el estado ya está seteado y
+        # apunta al temporal que este mismo `except` borra: quedaba un
+        # `pending_extraction` con `_has_pending_keyboard` en True, sin botones,
+        # y un `[Confirmar]` de un teclado fantasma leía un path inexistente.
+        # Mismo razonamiento que E9 en `handle_audio`.
+        context.user_data.pop("pending_extraction", None)
+        context.user_data.pop("pending_fallback_pdf", None)
+        try:
+            await query.edit_message_text(f"Error extrayendo PDF: {e}")
+        except Exception:
+            pass  # la red sigue caída; el log ya lo registró
         tmp_path.unlink(missing_ok=True)

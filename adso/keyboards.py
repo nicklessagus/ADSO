@@ -51,8 +51,18 @@ from adso.constants import (
 from adso.llm_client import extract_original_from_degraded
 
 
-def _esc(text: str) -> str:
-    """Escapa caracteres HTML para Telegram."""
+def _esc(text: object) -> str:
+    """Escapa caracteres HTML para Telegram.
+
+    Acepta cualquier tipo y coacciona a `str` como defensa en profundidad: el
+    frontmatter editado a mano y la metadata de ChromaDB pueden traer int/float
+    (`title: 2024` lo parsea YAML como int). Sin la coacción, `int.replace`
+    lanzaba `AttributeError` y el error handler global mataba la interacción
+    entera (E1 de la auditoría 2026-08). El dueño del contrato sigue siendo
+    quien construye el dato — esto solo evita que un descuido tumbe el render.
+    """
+    if not isinstance(text, str):
+        text = "" if text is None else str(text)
     return (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")

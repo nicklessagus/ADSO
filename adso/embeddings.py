@@ -85,6 +85,50 @@ def similarity_to_distance(similarity: float) -> float:
     return 2.0 * (1.0 - similarity)
 
 
+DEFAULT_EXCLUDE_DIRS = ["05-Archive", ".obsidian", ".trash"]
+
+
+def should_index(
+    md_path: Path,
+    vault_path: Path,
+    exclude_dirs: Optional[list[str]] = None,
+) -> bool:
+    """True si ese archivo corresponde a una nota indexable del vault.
+
+    Predicado único de "qué entra al índice semántico". Existe porque los dos
+    caminos que indexan —el reindex nocturno y el reindex externo del watcher—
+    tenían criterios distintos: el watcher no filtraba nada, así que editar
+    desde Obsidian una nota de `05-Archive` (o un `_index.md`) la metía al
+    índice contra el diseño y esa misma noche el reindex la borraba como
+    huérfana. El resultado era un ciclo diario de embed + delete que gastaba
+    quota de la Embedding API y ensuciaba `/buscar` hasta las 3 AM (E2).
+
+    Args:
+        md_path: Path del archivo (absoluto).
+        vault_path: Raíz del vault.
+        exclude_dirs: Directorios excluidos. None = default del vault.
+
+    Returns:
+        False para paths fuera del vault, bajo `exclude_dirs`, `_index.md`,
+        conflictos de Syncthing o cualquier archivo que no sea `.md`.
+    """
+    if exclude_dirs is None:
+        exclude_dirs = DEFAULT_EXCLUDE_DIRS
+    try:
+        rel = md_path.relative_to(vault_path)
+    except ValueError:
+        return False
+    if rel.suffix != ".md":
+        return False
+    if any(part in exclude_dirs for part in rel.parts):
+        return False
+    if rel.stem == "_index":
+        return False
+    if ".sync-conflict-" in md_path.name:
+        return False
+    return True
+
+
 def distance_to_similarity(distance: float) -> float:
     """Convierte distancia coseno [0,2] a similitud coseno [0,1]."""
     return 1.0 - (distance / 2.0)
@@ -367,7 +411,7 @@ class EmbeddingsClient:
         self._ensure_initialized()
 
         if exclude_dirs is None:
-            exclude_dirs = ["05-Archive", ".obsidian", ".trash"]
+            exclude_dirs = DEFAULT_EXCLUDE_DIRS
 
         from adso import vault_cache
 
@@ -395,24 +439,14 @@ class EmbeddingsClient:
         md_files = await asyncio.to_thread(lambda: sorted(vault_path.rglob("*.md")))
 
         for md_path in md_files:
+            # exclude_dirs, conflictos de Syncthing y `_index.md`: el mismo
+            # predicado que usa el reindex externo del watcher (E2).
+            if not should_index(md_path, vault_path, exclude_dirs):
+                continue
+
             rel = md_path.relative_to(vault_path)
-
-            # Filtrar por exclude_dirs
-            if any(part in exclude_dirs for part in rel.parts):
-                continue
-
-            # Ignorar archivos de conflicto de Syncthing
-            if ".sync-conflict-" in md_path.name:
-                continue
-
             # ID: ruta relativa sin extensión (ej: "01-Projects/tesis/nota")
             note_id = str(rel.with_suffix(""))
-
-            # Skip _index.md
-            if md_path.stem == "_index":
-                continue
-
-            vault_note_ids.add(note_id)
 
             try:
                 # parse_cached evita releer/reparsear notas sin cambios desde
@@ -420,13 +454,26 @@ class EmbeddingsClient:
                 note = await asyncio.to_thread(vault_cache.parse_cached, md_path)
                 if note is None:
                     # Sin frontmatter, ilegible o YAML inválido (ya logueado).
+                    # Cuenta como viva a propósito: un YAML roto transitorio
+                    # (editado a mano, a mitad de sync) no debe borrar el
+                    # embedding — ver docs/decisions-log.md.
+                    vault_note_ids.add(note_id)
                     continue
 
                 fm = note.frontmatter
                 body = note.body
 
                 if not body.strip():
+                    # Nota vaciada desde Obsidian: el embedding es del texto
+                    # ANTERIOR, así que /buscar seguía devolviéndola por
+                    # contenido que ya no existe en el archivo (E3). No alcanza
+                    # con no sumarla a `vault_note_ids`: el sweep de huérfanos
+                    # ahora re-verifica el disco y el .md sí existe. Hay que
+                    # borrarla explícitamente.
+                    await self.remove_note(note_id)
                     continue
+
+                vault_note_ids.add(note_id)
 
                 # Comparar hash para evitar re-embeds innecesarios
                 content_hash = hashlib.md5(body.encode()).hexdigest()
@@ -456,6 +503,23 @@ class EmbeddingsClient:
                 logger.warning("Error indexando %s: %s", md_path, e)
                 stats["errors"] += 1
 
+        def _sigue_en_el_vault(note_id: str) -> bool:
+            """True si el .md del ID existe en disco y el scan lo indexaría.
+
+            El snapshot de `rglob` se toma al principio y el reindex tarda
+            minutos (0,2 s de rate limiting por nota + latencia de la API): una
+            captura confirmada en esa ventana entra a ChromaDB pero no al
+            snapshot, y el sweep la borraba como huérfana — la nota existía en
+            el vault y quedaba invisible para /buscar hasta el reindex de la
+            noche siguiente (E4). Re-verificar en disco cierra la carrera.
+
+            Los filtros del scan se repiten a propósito: un ID bajo
+            `exclude_dirs`, un `_index.md` o un conflicto de Syncthing SÍ deben
+            borrarse del índice aunque el archivo exista.
+            """
+            md_path = vault_path / f"{note_id}.md"
+            return should_index(md_path, vault_path, exclude_dirs) and md_path.is_file()
+
         # Detectar huérfanos en ChromaDB (notas borradas del vault)
         try:
             all_docs = await asyncio.to_thread(
@@ -463,7 +527,12 @@ class EmbeddingsClient:
                 include=[],
             )
             chroma_ids = set(all_docs["ids"])
-            orphans = chroma_ids - vault_note_ids
+            candidates = chroma_ids - vault_note_ids
+            # El stat() de cada candidato va a un hilo: en la RPi4 la SD es
+            # lenta y esto corre con el event loop del bot vivo.
+            orphans = await asyncio.to_thread(
+                lambda: {oid for oid in candidates if not _sigue_en_el_vault(oid)}
+            )
 
             if orphans:
                 await asyncio.to_thread(

@@ -314,7 +314,7 @@ def _clean_title(raw: object) -> str:
 
 
 def _norm_enum(value: object) -> str:
-    """Normaliza un valor de enum del LLM a minúsculas sin espacios sobrantes.
+    """Normaliza un valor de enum del LLM a minúsculas kebab-case.
 
     Acepta cualquier tipo (incluidos dict/list no hasheables que el fallback de
     Groq puede devolver) sin lanzar: se stringifica antes de normalizar.
@@ -327,7 +327,75 @@ def _norm_enum(value: object) -> str:
     """
     if value is None:
         return ""
-    return str(value).strip().lower()
+    # Los espacios internos se colapsan a guión: un modelo chico devuelve
+    # "In Progress" tan seguido como "in-progress", y sin esto el primero no
+    # matchea el enum y tira TODA la respuesta a modo degradado.
+    return re.sub(r"\s+", "-", str(value).strip().lower())
+
+
+# `media_type` donde el `type` del LLM se descarta: en texto y audio lo elige el
+# usuario con los botones [Tarea]/[Nota] y `capture.py` lo pisa con `forced_type`.
+BUTTON_CHOSEN_TYPE_MEDIA = frozenset({"text", "audio"})
+
+# Lo que devuelve un modelo chico cuando el prompt le habla de "notas". Solo se
+# aplican donde el type se descarta igual (ver `coerce_discarded_type`): en
+# document/image/link el type sí lo decide el LLM y un valor inválido debe
+# seguir cayendo a modo degradado.
+_TYPE_ALIASES: dict[str, str] = {
+    "note": "reference",
+    "nota": "reference",
+    "referencia": "reference",
+    "tarea": "task",
+    "todo": "task",
+    "recordatorio": "task",
+}
+
+
+def coerce_discarded_type(response_json: object, media_type: str) -> None:
+    """Rescata una captura de texto/audio con un `type` inválido.
+
+    `_validate_capture_payload` lanza si el `type` no está en `VALID_TYPES`, y
+    `classify()` quema los 3 reintentos y cae a modo degradado. Para
+    `media_type` text/audio eso es puro desperdicio: el tipo lo eligió el
+    usuario con los botones y el bot lo sobreescribe después, así que la nota
+    se degradaba por un campo que iba a descartar igual.
+
+    Args:
+        response_json: Respuesta cruda del LLM (se muta in-place).
+        media_type: Tipo de medio de la captura.
+
+    Behavior on error: no lanza nunca; si el payload no tiene la forma esperada
+    no toca nada y la validación posterior decide.
+    """
+    if media_type not in BUTTON_CHOSEN_TYPE_MEDIA:
+        return
+    if not isinstance(response_json, dict) or response_json.get("mode") != "capture":
+        return
+    payload = response_json.get("payload")
+    if not isinstance(payload, dict):
+        return
+    fm = payload.get("frontmatter")
+    if not isinstance(fm, dict):
+        return
+
+    note_type = _norm_enum(fm.get("type"))
+    if note_type in VALID_TYPES:
+        return
+
+    nuevo = _TYPE_ALIASES.get(note_type, "idea")
+    logger.warning(
+        "type %r inválido para media_type=%r — se usa %r (lo pisan los botones)",
+        fm.get("type"), media_type, nuevo,
+    )
+    fm["type"] = nuevo
+
+    # El `status` venía atado al type descartado: si no aplica al nuevo se
+    # descarta (el default aguas abajo lo completa) en vez de hacer fallar la
+    # validación por la coerción que acaba de rescatar la respuesta.
+    status = _norm_enum(fm.get("status"))
+    status = STATUS_ALIASES.get(status, status)
+    if status and status not in VALID_STATUS.get(nuevo, set()):
+        fm["status"] = None
 
 
 def _validate_capture_payload(payload: dict) -> None:
@@ -361,6 +429,14 @@ def _validate_capture_payload(payload: dict) -> None:
     if note_type not in VALID_TYPES:
         raise LLMResponseError(f"Invalid type: {fm.get('type')!r}")
     fm["type"] = note_type
+
+    # Un enum vacío ("" del LLM) es "sin valor", igual que None —que ya se
+    # acepta—: se descarta el campo. Antes tiraba toda la respuesta a modo
+    # degradado por un campo opcional que el default aguas abajo completa.
+    for enum_field in ("status", "priority"):
+        val = fm.get(enum_field)
+        if isinstance(val, str) and not val.strip():
+            fm[enum_field] = None
 
     status = fm.get("status")
     if status is not None:
@@ -406,6 +482,12 @@ def _validate_capture_payload(payload: dict) -> None:
                 _dt.fromisoformat(str(val))
             except (ValueError, TypeError):
                 fm[date_field] = None
+            else:
+                # Coaccionar además de validar: Groq (sin schema constrained)
+                # devuelve `due_date: 20260101` como int, que `fromisoformat`
+                # acepta vía `str(val)` pero después rompe el slice
+                # `due_date[:10]` de tasks_client al pushear la tarea.
+                fm[date_field] = str(val)
 
     # Campos académicos: forzar tipos y descartar si no se puede (nunca crashear
     # aguas abajo por un tipo inesperado del LLM, sobre todo del fallback de Groq).
@@ -435,6 +517,16 @@ def _validate_capture_payload(payload: dict) -> None:
         rs = str(read_status).strip().lower()
         fm["read_status"] = rs if rs in VALID_READ_STATUS else None
 
+    # `summary` (lo usa el flujo de arXiv) puede venir no-string del fallback de
+    # Groq, que no tiene schema constrained. Un dict o una lista son truthy, así
+    # que el `(payload.get("summary") or "").strip()` de
+    # `_classify_and_preview_arxiv` lanzaba AttributeError y mataba la captura
+    # del paper. C9 de la auditoría 2026-08.
+    summary = payload.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        logger.warning("`summary` no-string descartado: %r", type(summary).__name__)
+        payload["summary"] = None
+
     # `body` puede venir ausente (modelos chicos lo omiten) o explícitamente
     # null — el schema de Gemini lo permite (`nullable: True`). Ambos casos se
     # normalizan a "" para que el preview no reviente con AttributeError.
@@ -456,8 +548,14 @@ def _validate_manage_payload(payload: dict) -> None:
     if operation in ("create_project", "create_area"):
         if "name" not in params:
             raise LLMResponseError(f"{operation} requires 'name'")
-        if "description" not in params:
-            raise LLMResponseError(f"{operation} requires 'description'")
+        # Se valida el CONTENIDO, no la presencia de la clave: `description: ""`
+        # (y `null`, que el schema declara legal) pasaban el chequeo anterior y
+        # llegaban al `_index.md`. No es cosmético — `description` es lo que
+        # `_get_existing_items` le pasa al prompt como scope de cada destino, así
+        # que un proyecto sin descripción se le presenta al LLM sin contexto y
+        # degrada el routing de todas las capturas. B8 de la auditoría 2026-08.
+        if not str(params.get("description") or "").strip():
+            raise LLMResponseError(f"{operation} requires a non-empty 'description'")
 
     if operation == "create_section":
         if "project" not in params:

@@ -292,8 +292,14 @@ async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]
             description = ""
             note = parse_cached(index)
             if note is not None:
-                name = note.frontmatter.get(field, name)
-                description = note.frontmatter.get("description", "")
+                # `.get(field, name)` solo aplica el default si la clave FALTA:
+                # un `_index.md` con `project:` a secas (YAML lo parsea como
+                # None, trivial de producir editando el índice desde Obsidian)
+                # dejaba `name=None`, y `item_token(None)` reventaba al construir
+                # el selector — el proyecto entero quedaba inalcanzable como
+                # destino. C10 de la auditoría 2026-08.
+                name = str(note.frontmatter.get(field) or "").strip() or dir_path.name
+                description = str(note.frontmatter.get("description") or "").strip()
             return {"name": name, "description": description}
 
         projects_dir = vault_path / "01-Projects"

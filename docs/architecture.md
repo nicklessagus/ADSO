@@ -44,7 +44,7 @@ Texto / Link        Audio / Imagen
             ▼
 ┌───────────────────┐
 │     LLM API       │  Gemini API — clasificación, YAML, resumen
-│                   │  Groq API — fallback cuando Gemini no responde
+│                   │  Groq API — fallback solo si Gemini agota cuota diaria
 └─────────┬─────────┘
           │
      ┌────┼────────────────────┐
@@ -56,8 +56,9 @@ Captura  Gestión             Consulta
      ▼        │               ┌────┴────┐
 Filesystem    │               │         │
 Docker vol    ▼               ▼         ▼
-     │   Google Calendar   ChromaDB   vault_search.py
-     │   + Google Tasks    semántica  estructural
+     │   Google Tasks      ChromaDB   vault_search.py
+     │   (Calendar: Fase 6  semántica  estructural
+     │    diferida)
      │                     (vectores) (backlinks, tags, properties)
      │
      ├──→ Git backup (GitHub privado)
@@ -76,14 +77,16 @@ Obsidian (pueden editar notas existentes — VaultWatcher re-embed)
 
 | Input | read_status | Procesamiento |
 |---|---|---|
-| Texto libre | No | Clasificación LLM directa |
-| Audio | No | Whisper → texto → LLM |
-| Imagen | No | [OCR] [Gemini Vision] [Describir] → texto → LLM |
-| PDF | Sí | [Ya lo leí] [Lo quiero leer] → pymupdf → LLM |
-| Documento de texto (.txt, .py, .csv, .json, .md) | Sí | [Ya lo leí] [Lo quiero leer] → lectura directa → LLM |
-| Link web genérico | Sí | [Ya lo leí] [Lo quiero leer] → extracción web → LLM |
-| Link arXiv / NASA ADS | Sí | [Ya lo leí] [Lo quiero leer] → extracción API → LLM |
-| Nombre de paper | Sí | Bot busca en arXiv/ADS, usuario confirma → LLM |
+| Texto libre | No | `[Cancelar]` `[Tarea]` `[Nota]` → clasificación LLM |
+| Audio | No | Whisper → confirmar/corregir la transcripción → `[Cancelar]` `[Tarea]` `[Nota]` → LLM |
+| Imagen | No | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` → texto → LLM |
+| PDF | Sí | `[Ya lo leí]` `[Lo quiero leer]` → pymupdf → LLM |
+| Documento de texto (`TEXT_EXTENSIONS` en `document_extractor.py`) | No | lectura directa → confirmar/corregir el texto → LLM |
+| Otro archivo (binario, formato no compatible) | No | el usuario escribe la descripción → LLM |
+| Link genérico (no arXiv) | No | sin extracción web: sigue el flujo de texto, la URL queda en el body |
+| Link de arXiv | Sí — `unread` automático | API de arXiv → metadata literal → LLM (solo proyecto, área, tags y summary) |
+
+La pregunta `[Ya lo leí]` / `[Lo quiero leer]` existe **solo para PDFs** (`handle_document` en `input.py`). Los documentos de texto van directo a la extracción, y en arXiv el `read_status` se setea automáticamente en `unread` (`_classify_and_preview_arxiv`). NASA ADS y la búsqueda de un paper por su nombre **no están implementados** — ver "Integraciones externas".
 
 ---
 
@@ -96,10 +99,10 @@ Obsidian (pueden editar notas existentes — VaultWatcher re-embed)
   - `input.py` — entrada de mensajes: texto, foto, audio, documento, URL
   - `capture.py` — flujo de captura: clasificación, preview, corrección, confirmación
   - `callbacks.py` — callbacks de los inline keyboards
-  - `manage.py` — crear/archivar/renombrar proyectos y áreas
+  - `manage.py` — gestión de proyectos y áreas. Implementadas: `create_project`, `create_area`, `create_section`. Archivar, borrar y renombrar están en el diseño pero el handler responde `"Operación '…' todavía no está disponible."`
   - `query.py` — `/buscar` (retrieval semántico, Fase 7.0)
   - `reports.py` — `/reporte` y `/reporte_full`
-  - `jobs.py` — crons (reclasificación de inbox, reindex nocturno, heartbeat, reporte semanal)
+  - `jobs.py` — crons. `bot.py` registra tres: `heartbeat_job` (cada 60s), `reclassify_inbox` (cada `llm.degraded_retry_minutes`) y `reindex_job` (diario, a `reindex.time`). El **reporte semanal está configurado** en `config.yaml` (`weekly_report`) **pero todavía no tiene job registrado** — pendiente (§2.2 de `docs/improvements-2026-07.md`)
 - Entry point sincrónico (`run_bot()`); el setup async del vault se ejecuta via `post_init` de PTB antes de arrancar el polling — PTB gestiona su propio event loop
 - Inline keyboards (`InlineKeyboardMarkup`, construidos en `keyboards.py`) para confirmación, desambiguación y navegación de resultados
 - Middleware de autenticación por `user_id` (gate global + decorador por handler)
@@ -128,13 +131,13 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 
 ### `llm_client.py` — Cliente LLM
 - Proveedor primario: Gemini API (Google AI Studio, free tier) — modelo en `config.GEMINI_MODEL`
-- Proveedor fallback: Groq (`llama-3.1-8b-instant`) cuando Gemini agota cuota o no responde
+- Proveedor fallback: Groq (`llama-3.1-8b-instant`) — se intenta **solo cuando Gemini reporta cuota diaria agotada** (`PerDay` dentro del error 429). Cualquier otro fallo (red, timeout, parse, rate limit RPM) que sobreviva los 3 intentos cae directo a modo degradado, sin pasar por Groq. Groq no soporta schema constrained: su respuesta se post-valida con el mismo `_validate_capture_payload` que la de Gemini
 - Responsabilidades:
   - Clasificar contenido y determinar destino en la taxonomía
   - Generar Frontmatter YAML + cuerpo de la nota
   - Sugerir proyecto/sección si no existe
   - Generar respuestas a consultas RAG a partir de notas recuperadas por `knowledge_query.py`
-- **Rate limiting:** cola interna con exponential backoff para respetar límites del free tier de Gemini. Si varias notas llegan juntas, se procesan en serie con delay adaptativo.
+- **Rate limiting:** no hay cola interna ni serialización de requests — cada captura llama a la API en el momento. El único control de tasa son los reintentos adaptativos de abajo, por request.
 - **Reintentos:** 3 intentos con lógica adaptativa según el tipo de error:
   - **Cuota diaria agotada** (`PerDay` en el error): degradado inmediato, sin reintentos — no tiene sentido esperar.
   - **Rate limit RPM**: espera el `retryDelay` sugerido por la API (máx 70s) antes de reintentar.
@@ -147,14 +150,14 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
   **Caso B — nota sin destino:** el cron no hace nada. El usuario debe invocar `/clasificar` para procesarlas de a una, con preview y confirmación. `/status` muestra el desglose (con/sin destino) y ofrece el botón `[Clasificar inbox]` cuando hay notas Caso B pendientes.
 - **Normalización de status:** si el LLM devuelve valores de `status` no canónicos (ej: `todo`, `open`, `new`), el bot los normaliza automáticamente al valor más cercano antes de validar.
 - **Schema de frontmatter estricto en el prompt:** el system prompt define explícitamente cada campo con su tipo y valores válidos. El body siempre se genera en español. Campos académicos con nombres fijos: `authors` (lista), `year`, `journal`, `doi`, `read_status`.
-- **Obsidian Skills como referencia:** el LLM usa los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano como parte del system prompt para generar contenido compatible con Obsidian. Son documentos de referencia (no ejecutables) que definen la sintaxis correcta. Se incorporan al prompt de clasificación/generación, no al código. Se actualizan independientemente del bot.
+- **Obsidian Skills — referencia de diseño, no código** *(idea — no implementado)*: los [Obsidian Skills](https://github.com/kepano/obsidian-skills) de kepano son documentos de referencia sobre la sintaxis de Obsidian. Sirvieron para redactar el schema y las convenciones del prompt, pero `build_system_prompt()` **no los incluye ni los referencia**: el prompt define su propio schema de frontmatter y sus reglas de formato. Incorporarlos al prompt sigue siendo una idea abierta.
 
-  | Skill | Uso en ADSO |
+  | Skill | Uso posible en ADSO |
   |---|---|
-  | **obsidian-markdown** | Genera wikilinks (`[[nota]]`), callouts (`> [!tip]`), embeds (`![[imagen.png]]`), properties YAML correctos |
-  | **json-canvas** | Genera archivos `.canvas` para mapas visuales (idea futura post Fase 8) |
-  | **obsidian-bases** | Genera archivos `.base` con vistas tipo spreadsheet (idea futura) |
-  | **defuddle** | Extracción limpia de contenido web → útil para Fase 5 (links, papers) |
+  | **obsidian-markdown** | Wikilinks (`[[nota]]`), callouts (`> [!tip]`), embeds (`![[imagen.png]]`), properties YAML |
+  | **json-canvas** | Archivos `.canvas` para mapas visuales (idea futura post Fase 8) |
+  | **obsidian-bases** | Archivos `.base` con vistas tipo spreadsheet (idea futura) |
+  | **defuddle** | Extracción limpia de contenido web (hoy no hay extracción web genérica) |
 
 ### `config.py` — Configuración y constantes
 - Carga variables de entorno y `config.yaml` (obligatorio; si no existe, el bot falla con error)
@@ -167,12 +170,34 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Decorador/middleware que se aplica a todos los handlers
 - Mensajes de IDs no autorizados se ignoran silenciosamente (sin respuesta, sin log del contenido)
 
+### `bot_utils.py` — Utilidades compartidas
+- `spawn_tracked()` — trabajo de fondo fire-and-forget (push a Tasks, indexado, re-embed) con referencia fuerte al task (evita que el GC lo cancele a mitad) y logging de excepciones. Reemplaza a `asyncio.create_task`.
+- `Stopwatch` — cronómetro por etapas para instrumentar latencia. `_classify_and_preview` mide `scan` (los dos scans del vault), `classify` y `links`, y emite **una sola** línea INFO al salir, por todos los caminos — incluido el modo degradado, que es justamente el lento porque quema los 3 reintentos:
+  ```
+  Captura (text): scan 0.13s | classify 6.11s | links 1.24s | total 7.48s
+  ```
+  `total` es wall-clock desde la construcción del cronómetro, así que `total` >> suma de etapas señala un tramo sin instrumentar. El reloj es inyectable (`clock=`) para tests. El flujo de arXiv (`_classify_and_preview_arxiv`) todavía **no** está instrumentado.
+- `_get_existing_items()` / `_get_existing_tags()` — descubrimiento de proyectos, áreas y tags del vault (bajo `asyncio.to_thread`).
+- `_has_pending_keyboard()` / `_is_awaiting_text_input()` — guards de bloqueo de input mientras hay un teclado o una corrección pendiente.
+- `_detect_manage_keywords()` — detecta keywords de gestión (`proyecto`, `área`, `archivar`, `borrar`, `renombrar`) en el texto para ofrecer el teclado de intención.
+
+### `logging_setup.py` — Configuración de logging
+- `configure_logging()` toma el nivel de `LOG_LEVEL` (default INFO; un valor inválido cae a INFO en vez de abortar el arranque) y baja a WARNING las librerías ruidosas: `httpx`, `telegram`, `chromadb`, `googleapiclient.discovery_cache` y `apscheduler.executors.default` (más `chromadb.telemetry.product.posthog` a CRITICAL).
+- Se silencia el **executor** de apscheduler, no `apscheduler` entero: el logger del scheduler avisa el arranque y `Run time of job was missed`, que es la señal de que el event loop se está bloqueando. Motivo del filtro: 2880 de las 3001 líneas de un día (96%) eran las dos INFO por corrida del `heartbeat_job`.
+- Vive en su propio módulo y no en `__main__.py` porque importar `__main__` arranca el bot, y así la configuración no se podía testear.
+
+### `vault_cache.py` — Caché de parsing de notas
+- `parse_cached(path)` cachea el parseo de cada `.md` keyed por `(mtime_ns, size)`. Lo usan todas las funciones de scan de `vault_search.py` (vía `_parse_note_safe`), el reindex nocturno y el conteo de `/status`.
+- Correctness-preserving: cualquier modificación de una nota cambia el `mtime` y la entrada se invalida sola en el siguiente `stat()` — no hay acoplamiento con `VaultWatcher` ni ventana de staleness.
+- LRU acotado a 2000 entradas. El frontmatter devuelto es siempre una copia fresca, para que una mutación del caller no corrompa el caché. Thread-safe (los scans corren bajo `asyncio.to_thread`).
+- Métricas (`entries`, `hit_ratio`) expuestas en `/status`.
+
 ### `vault_writer.py` — Escritura al vault
 - Escritura directa al filesystem via volumen Docker
 - Crea carpetas de proyecto/sección si no existen (previa confirmación)
 - Maneja conflictos de nombres y actualización de notas existentes
 - Después de cada escritura confirmada, acumula cambios y hace `git commit + push` al repo de backup del vault con debounce configurable (`backup.debounce_seconds` en `config.yaml`, default 30s). Si llegan varias notas seguidas, se consolidan en un solo commit+push
-- Mensaje de commit generado automáticamente: `"Add note: {título}"` o `"Update note: {título}"` (si el debounce agrupa varias, lista los títulos)
+- Mensaje de commit generado automáticamente por `_build_message()`: `"Add note: {título}"` con un solo título, o `"Add {N} notes: {t1}, {t2}, … (+{K} más)"` cuando el debounce agrupa varias (lista hasta 5 títulos). No existe un mensaje `"Update note:"` — toda escritura acumulada se commitea como `Add`
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
 
 > Especificación detallada de todas las funciones (firmas, comportamiento, errores, validaciones) en `docs/vault-interface.md`.
@@ -287,28 +312,35 @@ Ambos motores siempre disponibles. El usuario elige en el momento, no hay config
 
 **Prompt de Gemini Vision para PDFs escaneados:** solicita secciones estructuradas de paper — TÍTULO, AUTHORS, DOI, ABSTRACT, KEYWORDS, METHODS, CONCLUSIONS.
 
-El resultado (OCR o Vision) se muestra igual que una transcripción de audio: en tipografía `código` (tap-to-copy) con botones `[Confirmar]` `[Corregir]` `[Cancelar]`. El usuario puede corregir antes de clasificar.
+El resultado se muestra igual que una transcripción de audio: en tipografía `código` (tap-to-copy) y con teclado para corregir antes de clasificar. El teclado difiere según el motor:
+
+- **Resultado de OCR:** fila 1 `[Cancelar]` `[Corregir]`, fila 2 `[Gemini Vision]` `[Confirmar]` — `[Gemini Vision]` descarta el OCR y reprocesa la misma imagen.
+- **Resultado de Gemini Vision:** `[Cancelar]` `[Corregir]` `[Confirmar]`.
+
+**Caption reutilizado como descripción:** si la imagen (o el PDF escaneado) llegó con caption, `[Describir]` no vuelve a pedir texto — usa el caption como contenido y clasifica directo (rama `CB_DESCRIBE` de `handle_callback`, `callbacks.py`). Sin caption, el bot pide la descripción por texto.
+
+**Aviso de inyección:** si el texto extraído (OCR, Vision, PDF o documento) dispara `check_injection_risk`, `_classify_and_preview` antepone `_INJECTION_PREVIEW_WARNING` al preview para que el usuario lo escrute antes de confirmar. No bloquea: la nota igual requiere confirmación explícita.
 
 ### Links
 
+Los links no tienen un pipeline propio de extracción de contenido. `handle_text()` solo distingue un caso: arXiv.
+
 ```
-Usuario manda link por Telegram
+Usuario manda un link por Telegram
   │
-  ├─ [Ya lo leí]  [Lo quiero leer]   ← setea read_status: read / unread
+  ├─ URL de arxiv.org (abs/, pdf/, con o sin versión, formato antiguo)
+  │      → API de arXiv (no scraping) → metadata literal
+  │      → chequeo de duplicados por source_url / doi en el vault
+  │      → preview → [Cancelar] [Corregir] [Reubicar] / [Confirmar]
   │
-  ├─ Link arXiv / NASA ADS → extrae metadatos estructurados via API
-  │      (título, autores, abstract, métodos, dataset)
-  │      → bot muestra metadata extraída → usuario confirma o corrige
-  │
-  └─ Link genérico → extrae contenido (Gemini o trafilatura)
-         → bot muestra texto extraído → usuario confirma o corrige
-  │
-  └─ texto disponible → LLM clasifica → flujo de confirmación → vault
+  └─ cualquier otra URL
+         → sigue el flujo de texto plano: [Cancelar] [Tarea] [Nota]
+           (+ [🔎 Buscar en el vault])
+         → el LLM clasifica el mensaje tal como llegó; la URL queda
+           en el body y media_type es "text"
 ```
 
-El motor de extracción para links genéricos (`gemini` o `trafilatura`) es configurable en `config.yaml` via `content_extraction.engine`, no una elección del usuario en runtime.
-
-**Límite de tokens:** el contenido se trunca a `llm.max_web_tokens` (8000) antes de la clasificación. Con el motor `gemini` el truncado es responsabilidad de Gemini; con `trafilatura` se aplica en el bot.
+**Extracción de contenido web genérico: no implementada.** No hay motor configurable — la sección `content_extraction` (con su `engine: gemini | trafilatura`) fue **eliminada de la configuración**; si aparece en un `config.yaml` viejo, se ignora como clave desconocida. Tampoco se aplica truncado por `llm.max_web_tokens`: el campo sigue declarado en `config.py` pero ningún módulo lo lee. Para indexar el contenido de un paper hay dos rutas soportadas: mandar el PDF, o mandar el link de arXiv.
 
 ### Documentos y archivos adjuntos
 
@@ -345,7 +377,11 @@ Usuario manda imagen
   ├─ [Gemini Vision] → Gemini Vision API → descripción en código → [Confirmar][Corregir][Cancelar]
   └─ [Describir] → usuario escribe descripción → LLM clasifica → flujo de confirmación
   │
-  Si [OCR] no encuentra texto → teclado reducido: [Gemini Vision] [Describir] [Cancelar]
+  Si [OCR] corre bien pero no encuentra texto → teclado sin botón OCR:
+      fila 1: [Gemini Vision]   fila 2: [Cancelar] [Describir]
+  Si [OCR] o [Gemini Vision] fallan con error → no hay teclado de fallback:
+      el bot limpia el estado, borra el temporal y pide reenviar la imagen
+      (sin esa limpieza el bot quedaba trabado hasta /reset)
   → LLM clasifica → flujo de confirmación → vault
 ```
 Sin pregunta de read_status — la imagen se manda para guardar algo, no como contenido a leer.
@@ -354,11 +390,17 @@ Sin pregunta de read_status — la imagen se manda para guardar algo, no como co
 ```
 Usuario manda archivo
   │
-  ├─ texto plano (.md, .txt, .py, .csv, .json) → lectura directa
-  └─ binario/no reconocido → [Describilo vos]
+  ├─ texto plano (TEXT_EXTENSIONS) → lectura directa (máx 50.000 chars)
+  │     → preview del contenido → [Cancelar] [Corregir] [Confirmar]
+  │     → body verbatim: el LLM solo genera frontmatter
+  └─ binario / formato no compatible → "Describir el contenido para
+        clasificarlo, o cancelar." + [Cancelar] → el usuario escribe
+        la descripción por texto
   │
   → LLM clasifica → flujo de confirmación → vault
 ```
+
+Las extensiones que se leen como texto plano son las de `TEXT_EXTENSIONS` (`document_extractor.py`): `.md`, `.txt`, `.py`, `.csv`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.sh`, `.bash`, `.zsh`, `.js`, `.ts`, `.html`, `.css`, `.xml`, `.sql`, `.r`, `.R`, `.tex`, `.bib`, `.log`, `.rst`, `.org`. Cualquier otra extensión cae en la rama de descripción manual.
 
 El paso de confirmación/corrección del texto extraído aplica a todas las extracciones automáticas — el usuario ve lo que el bot leyó antes de que el LLM clasifique.
 
@@ -370,7 +412,7 @@ En todos los casos se guardan **dos archivos** en el vault:
 
 | Formato | Ejemplos | Extracción automática |
 |---|---|---|
-| **Texto plano** | `.md`, `.txt`, `.py`, `.csv`, `.json` | Lectura directa del contenido |
+| **Texto plano** | las 27 extensiones de `TEXT_EXTENSIONS` (`.md`, `.txt`, `.py`, `.csv`, `.json`, `.yaml`, `.tex`, `.bib`, `.sh`, `.sql`, …) | Lectura directa del contenido |
 | **PDF** | `.pdf` | `pymupdf`: texto + metadata (título, autor, páginas) |
 | **Imagen** | `.jpg`, `.png`, `.webp` | OCR local o Gemini Vision (remoto) — el usuario elige con botones |
 | **Binario / otro** | `.docx`, `.xlsx`, ejecutables | No disponible — solo descripción del usuario |
@@ -388,16 +430,16 @@ En ambos casos, el resultado entra al mismo flujo de confirmación/corrección q
 
 #### Papers: todas las fuentes producen la misma nota
 
-Un paper puede llegar por link de arXiv/ADS, por PDF adjunto, o por búsqueda por nombre. En todos los casos produce una nota `type: reference` con campos académicos poblados (authors, year, doi, methods, dataset, contribution, conclusions). La diferencia es solo el campo de origen:
+Un paper puede llegar por link de arXiv o por PDF adjunto. En ambos casos produce una nota `type: reference` con campos académicos poblados (authors, year, doi, methods, dataset, contribution, conclusions). La diferencia es solo el campo de origen:
 
-| | Link arXiv/ADS | PDF adjunto | Búsqueda por nombre |
-|---|---|---|---|
-| **Obtener contenido** | API arXiv/ADS | `pymupdf` extrae texto | Bot busca en arXiv/ADS, usuario confirma |
-| **Metadata** | Estructurada desde la API | Extraída localmente (título, autores, DOI) — bypass LLM | Estructurada desde la API |
-| **Clasificar** | LLM → `type: reference` + campos académicos | LLM → `type: reference` + campos académicos | LLM → `type: reference` + campos académicos |
-| **Campo origen** | `source_url` | `source_file` | `source_url` |
-| **Archivo físico** | No | Sí (PDF en `03-Resources/`) | No |
-| **Embeddings** | Del contenido extraído | Del texto extraído del PDF | Del contenido extraído |
+| | Link de arXiv | PDF adjunto |
+|---|---|---|
+| **Obtener contenido** | API de arXiv | `pymupdf` extrae texto |
+| **Metadata** | Estructurada desde la API (literal, bypass LLM) | Extraída localmente (título, autores, DOI) — bypass LLM |
+| **Clasificar** | LLM → `type: reference` + campos académicos | LLM → `type: reference` + campos académicos |
+| **Campo origen** | `source_url` | `source_file` |
+| **Archivo físico** | No | Sí (PDF en `03-Resources/`) |
+| **Embeddings** | Del abstract para sugerir links; del body al indexar | Del texto extraído del PDF |
 
 Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos (`source_url` + `source_file`).
 
@@ -417,10 +459,6 @@ Si el usuario provee PDF **y** link del mismo paper, la nota tiene ambos campos 
 
 El archivo original siempre va a `03-Resources/`. La nota `.md` va donde el LLM clasifique el contenido (proyecto, área, etc.) y referencia al archivo con `![[archivo]]`.
 
-#### PDFs escaneados (sin texto extraíble)
-
-Si `pymupdf` no puede extraer texto del PDF (escaneo, imagen), el bot cae al flujo de "otro" — pide descripción al usuario.
-
 #### Embeddings
 
 Se indexa lo que se usó para clasificar: el texto extraído (si hubo extracción automática) o la descripción del usuario (si se describió manualmente). En ambos casos el embedding representa el significado del contenido, no el archivo binario.
@@ -437,28 +475,33 @@ Tope configurable en `config.yaml` via `documents.max_size_mb` (default: 20MB). 
 
 `pymupdf` tiene wheels ARM64 precompilados. El pico de RAM es durante la extracción y se libera inmediatamente después.
 
-### Integraciones externas — arXiv y NASA ADS (Fase 5)
+### Integraciones externas — arXiv (Fase 5)
 
-El usuario puede enviar cualquiera de estos inputs para indexar un paper:
-- Link de arXiv (`arxiv.org/abs/...`)
-- Link de NASA ADS
+Inputs soportados hoy para indexar un paper:
+- Link de arXiv (`arxiv.org/abs/...`, `pdf/...`, con o sin versión, formato antiguo `hep-ph/XXXXXXX`)
 - PDF adjunto
-- Solo el nombre o título del paper (el bot busca y confirma antes de proceder)
 
-El bot extrae los metadatos del paper (título, autores, año, abstract, contribución, métodos, dataset, conclusiones) y genera una nota (`type: reference` con campos académicos) en el vault con el frontmatter correspondiente. La nota incluye el link clickeable al paper original en `source_url`.
+*(No implementado: NASA ADS y la búsqueda de un paper por su nombre o título. `arxiv_client.py` solo resuelve un ID de arXiv — no expone búsqueda.)*
 
-El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → usuario confirma → escritura al vault.
+Al detectar una URL de arXiv (`extract_arxiv_id`, antes del flujo genérico de texto), el bot consulta la **API de arXiv** — no scraping — y obtiene metadata literal: título, autores, año, abstract, DOI, keywords. El LLM solo aporta proyecto, área, tags y `summary`; los campos académicos nunca se inventan. El body se arma como `> [!summary] AI Summary` + `## Abstract` (literal de la API) + `## Personal Notes`, y `media_type` es `link` (no se descarga el PDF).
 
-**Búsqueda contextual en arXiv/ADS (futuro, post Fase 8):** dado un resultado RAG o un gap detectado en la literatura, el bot podría buscar automáticamente papers relacionados en arXiv/ADS. No está planificado para esta fase.
+**Detección de duplicados:** antes de mostrar el preview, el bot busca en todo el vault (con `find_by_property`, que excluye `05-Archive`, `.obsidian` y `.trash`) una nota con el mismo `source_url` o el mismo `doi` — buscar por `doi` permite detectar un paper que ya se había subido como PDF. Si la encuentra, muestra la ruta del archivo existente y el teclado `[Cancelar]` `[Crear igual]`. `[Crear igual]` (`_cb_arxiv_create_anyway`) retoma el flujo normal de clasificación sin restricciones. Diseño: un paper = una nota; los demás proyectos que lo necesiten lo referencian con un wikilink.
+
+Si la API de arXiv falla, el bot ofrece guardar el link como nota genérica con el teclado estándar de texto.
+
+El flujo sigue el ciclo de confirmación estándar: preview del frontmatter → `[Cancelar]` `[Corregir]` `[Reubicar]` / `[Confirmar]` → escritura al vault. Si la metadata dispara `check_injection_risk`, el preview lleva antepuesto el aviso de inyección.
+
+**Búsqueda contextual en arXiv/ADS (futuro, post Fase 8):** dado un resultado RAG o un gap detectado en la literatura, el bot podría buscar automáticamente papers relacionados. No está planificado para esta fase.
 
 ### `tasks_client.py` — Google Tasks (Fase 6)
 - API: Google Tasks API
 - **Lectura:** todas las listas de tareas del usuario (para consultas y contexto semanal)
 - **Escritura:** exclusivamente en una lista dedicada llamada `ADSO` (creada por el bot si no existe)
 - **Borrado:** permitido solo en la lista `ADSO`, nunca en listas externas del usuario
-- Las tasks de ADSO nacen siempre en el vault: son notas de tipo `task` que se sincronizan a Google Tasks al confirmarse
-- Sincronización periódica: mismo cron que Calendar (`sync.interval_minutes` en `config.yaml`, default 30 min)
-- Modelo de uso: planificación semanal (inicio de semana) + revisión semanal (fin de semana) vía reporte automático
+- Las tasks de ADSO nacen siempre en el vault: son notas de tipo `task` que se empujan a Google Tasks al confirmarse
+- **Estado real: push unidireccional.** Al confirmar una task, `_cb_confirm` lanza `create_task` en background (`spawn_tracked`). El `task_id` que devuelve la API **no se persiste todavía** en el frontmatter, y **no hay cron de reconciliación**: nada de lo que pase en Google Tasks vuelve al vault. Si el push falla, el bot notifica por Telegram con el motivo; con `tasks.debug: true` notifica también el push exitoso. Todo el sync bidireccional descrito más abajo es **diseño pendiente** — requiere primero persistir `gtask_id` (§5.1 de `docs/improvements-2026-07.md`) y el job de reconciliación (§5.2)
+- Token OAuth en `/credentials/token_tasks.json`; si expira, re-autenticar con `scripts/auth_google_tasks.py`
+- Modelo de uso: planificación semanal (inicio de semana) + revisión semanal (fin de semana) vía reporte
 
 #### Modelo de tarea
 
@@ -468,32 +511,31 @@ Las tasks son **intenciones de trabajo**, no punteros a notas específicas. Ejem
 ```
 1. Usuario describe la intención ("tengo que preparar la presentación del baseline de tesis")
 2. LLM clasifica como type: task + identifica scope (proyecto/área)
-3. Bot busca en vault notas relevantes del scope (vault_search + ChromaDB en Fase 7)
-4. Genera cuerpo: descripción + links a notas relevantes + link obsidian:// al proyecto/área
-5. Preview → [Confirmar] [Cancelar]
-6. Vault → sync a Google Tasks
+3. Bot busca en ChromaDB notas similares y las propone como links sugeridos
+   (`_suggest_links`, mismo mecanismo que cualquier captura)
+4. Cuerpo: el texto original del usuario. Los links sugeridos se escriben al
+   confirmar, bajo `## Ver también` (sin links obsidian:// en el body)
+5. Preview → [Cancelar] [Corregir] [Reubicar] / [Confirmar]
+6. Vault → push a Google Tasks (unidireccional, en background)
 ```
 
 El bot decide qué notas incluir como links — sin confirmación adicional de links por ahora.
 
-**Campo `notes` en Google Tasks** (vault → Google Tasks, unidireccional):
+**Campo `notes` en Google Tasks** (vault → Google Tasks, unidireccional). Lo arma `build_task_notes()` (`tasks_client.py`):
 ```
 Preparar las slides del experimento baseline y resultados preliminares.
 
-• Revisar métricas del experimento
-• Comparar con paper de referencia
-• Preparar visualizaciones
-
-obsidian://open?vault=ADSO&file=01-Projects/tesis
-obsidian://open?vault=ADSO&file=2026-01-10-baseline-cnn-results
-obsidian://open?vault=ADSO&file=2025-11-03-paper-referencia-metodologia
+Proyecto: tesis
+Prioridad: high
+Horario: 12/03/2026 15:30
 ```
-- Descripción de la tarea (texto plano)
-- Subtareas como bullets `•` (sin checkboxes — Google Tasks no los renderiza)
-- Links `obsidian://` al proyecto/área (siempre el primero) + a todas las notas relevantes que el bot encontró en el vault
-- Wikilinks del body se convierten a links `obsidian://` directos
+- Descripción original del usuario (body limpio, sin callouts)
+- `Proyecto: X` — o `Área: X` si la nota no tiene proyecto
+- `Prioridad: high | medium | low`, si está seteada
+- `Horario: DD/MM/YYYY HH:MM`, solo si `scheduled` o `due_date` traen una hora distinta de medianoche
+- **No incluye links `obsidian://`** (decisión explícita: no funcionan desde Google Tasks/Calendar), ni bullets de subtareas
 
-**Edición de tareas:** la UI del bot no permite editar tasks. Los cambios en título, `due_date`, `scheduled` o `status` se hacen directamente en Google Tasks o Calendar — el cron los detecta y los aplica al vault. Esto no es una limitación del sync (que sí es bidireccional) sino una decisión de diseño: la herramienta correcta para gestionar tasks es Google Tasks, no el bot. Para cambios sustanciales en el contenido de la nota: borrar y recrear via ADSO.
+**Edición de tareas:** la UI del bot no permite editar tasks. Los cambios en título, `due_date`, `scheduled` o `status` se hacen directamente en Google Tasks o Calendar. Decisión de diseño: la herramienta correcta para gestionar tasks es Google Tasks, no el bot. Con el sync todavía sin implementar, esos cambios **no vuelven al vault** — la nota queda como se confirmó. Para cambios sustanciales en el contenido: borrar y recrear via ADSO.
 
 ---
 
@@ -522,26 +564,26 @@ Para embeddings: la nota se escribe igual al vault — el embedding queda pendie
 ### Extracción de imágenes
 
 ```
-Usuario elige [OCR] → falla
-  → "No pude extraer texto con OCR."
-  → [Gemini Vision]  [Describí vos]  [Cancelar]
+[OCR] corre bien pero no encuentra texto
+  → "OCR no encontró texto. Intentar con Gemini Vision o describir el contenido."
+  → fila 1: [Gemini Vision]   fila 2: [Cancelar] [Describir]
 
-Usuario elige [Gemini Vision] → falla
-  → "Gemini no disponible."
-  → [OCR]  [Describí vos]  [Cancelar]
+[OCR] o [Gemini Vision] lanzan un error
+  → "Error en OCR: {e}" + "Reenviar la imagen para reintentar."
+    (o el equivalente de Gemini Vision)
+  → sin teclado: el bot limpia `pending_fallback_pdf` y borra el temporal.
+    Dejar el estado colgado hacía que `_has_pending_keyboard` siguiera en True
+    y todo input posterior recibiera "Hay una acción pendiente" sin botones a
+    la vista — el bot quedaba muerto hasta /reset.
 ```
 
 ### Extracción web (links)
 
-```
-Extracción falla (Gemini o trafilatura)
-  → "No pude extraer contenido del link."
-  → [Describí vos]  [Cancelar]
-```
+No aplica: no hay extracción web genérica (ver la sección "Links").
 
 ### PDFs sin texto extraíble
 
-Ya documentado: `pymupdf` no extrae texto → bot pide descripción manual al usuario.
+`pymupdf` no extrae texto → el bot muestra el mismo teclado que para imágenes: `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]`.
 
 ---
 
@@ -551,14 +593,35 @@ El bot funciona en un único chat de Telegram. No hay estado de contexto persist
 
 ### Comandos slash
 
+`bot.py` registra ocho comandos:
+
 | Comando | Descripción |
 |---|---|
 | `/start` | Confirma que el bot está activo |
-| `/status` | Estado del sistema: modelo LLM activo, embeddings, git backup, conteo de notas en vault e inbox (con pendientes de clasificar), path del vault. TODOs: último push git, conteo por área/proyecto, uso de tokens del día. |
+| `/help` | Lista los comandos disponibles |
+| `/status` | Estado del sistema (ver abajo) |
+| `/reset` | Cancela cualquier operación pendiente y vuelve al estado inicial. Sin confirmación, funciona siempre |
+| `/clasificar` | Clasifica notas del Inbox sin destino asignado (Caso B), de a una, con preview y confirmación |
+| `/buscar <consulta>` | Retrieval semántico sobre el vault (Fase 7.0) |
+| `/reporte` | Genera un reporte del vault (proyecto/área/inbox, ideas, salud, cola de lectura) |
+| `/reporte_full` | Igual a `/reporte` pero incluye el contenido completo de cada nota |
+
+**Contenido de `/status`:**
+- Versión de ADSO, modelo LLM activo (`GEMINI_MODEL`) y modelo de Vision (`GEMINI_VISION_MODEL`)
+- Estado de embeddings y de git backup
+- Estado del `VaultWatcher`: activo / activo · debug / no iniciado, último evento, conflictos detectados y — solo en modo debug — cambios externos
+- Conteo de notas del vault y del inbox (el `rglob` y el parseo corren en `asyncio.to_thread` para no congelar el event loop en la RPi4)
+- Métricas del caché de parsing (`entries` y `hit_ratio`)
+- Path del vault
+- Si hay notas pendientes en el inbox, un desglose entre las que tienen destino asignado (las procesa el cron) y las que no; con estas últimas ofrece el botón `[Clasificar inbox]`
+
+TODOs: último push git, conteo por área/proyecto, uso de tokens del día.
 
 ### Dos estados
 
-**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). El LLM infiere tipo, proyecto/área y sección del contenido mismo. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards. Si el LLM no puede asignar proyecto ni área a una nota, el bot pregunta destino con botones (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`). Los binarios (PDFs, imágenes) siempre van a `03-Resources/` independientemente del destino de la nota.
+**Estado default — captura:** el usuario manda contenido (texto, audio, link, imagen, documento). Para texto y audio el bot pregunta primero `[Tarea]` o `[Nota]` — el tipo lo elige el usuario, no el LLM. Para PDFs, imágenes y links de arXiv el tipo se infiere del contenido. El LLM infiere proyecto/área y sección. El bot propone la clasificación y el usuario confirma, corrige, reubica o cancela con inline keyboards. Si el LLM no asigna proyecto ni área, **el preview igual se muestra**, con destino `00-Inbox` y el teclado de captura habitual: el selector de destino aparece solo si el usuario aprieta `[Reubicar]`. Los binarios (PDFs, imágenes) siempre van a `03-Resources/` independientemente del destino de la nota.
+
+**Teclado de intención por keywords de gestión:** si el texto menciona `proyecto` o `área` (`_detect_manage_keywords` sobre `MANAGE_KEYWORDS`), el bot ofrece además `[Crear proyecto]` / `[Crear área]` en una fila arriba del `[Cancelar]` `[Tarea]` `[Nota]` habitual, en vez del teclado de guardado. Sin esas keywords, el teclado es `[Cancelar]` `[Tarea]` `[Nota]` + `[🔎 Buscar en el vault]`.
 
 **Estado transiente — consulta:** el usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado y vuelve al estado default. No queda ningún estado activado.
 
@@ -568,23 +631,32 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 
 | Momento | Botones |
 |---|---|
-| **PDF o link recibido** | `[Ya lo leí]` `[Lo quiero leer]` |
-| **Imagen recibida** | `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
-| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
-| **Captura** (destino claro) | `[Cancelar]` `[Reubicar]` `[Confirmar]` |
-| **Corregir destino** | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` |
-| **Captura** (sin destino) | `[Elegir área]` `[Elegir proyecto]` `[Inbox]` + `[Cancelar]` abajo |
-| **Consulta** (si falta scope) | `[Todo]` `[Proyecto1]` `[Proyecto2]` ... |
-| **Resultado de consulta** | `[Ver referencias completas]` `[Generar informe .md]` |
-| **Expansión desde nodo** | `[Solo relaciones directas]` `[Expandir un grado más]` |
+| **Texto recibido** | `[Cancelar]` `[Tarea]` `[Nota]` / `[🔎 Buscar en el vault]` — dos filas |
+| **Texto con keywords de gestión** | `[Crear proyecto]` `[Crear área]` / `[Cancelar]` `[Tarea]` `[Nota]` |
+| **PDF recibido** | `[Cancelar]` `[Ya lo leí]` `[Lo quiero leer]` |
+| **Imagen recibida** (o PDF sin texto extraíble) | `[OCR]` `[Gemini Vision]` / `[Cancelar]` `[Describir]` — dos filas |
+| **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` → al confirmar: `[Cancelar]` `[Tarea]` `[Nota]` / `[🔎 Buscar en el vault]` |
+| **Resultado de OCR** | `[Cancelar]` `[Corregir]` / `[Gemini Vision]` `[Confirmar]` |
+| **Resultado de Gemini Vision** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
+| **Texto extraído de un documento** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
+| **Captura** (nota o tarea, con o sin destino) | `[Cancelar]` `[Corregir]` `[Reubicar]` / `[Confirmar]` — dos filas |
+| **Reubicar destino** | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` — tres filas |
+| **Selector de área / proyecto** | los ítems existentes en pares / `[Cancelar]` `[← Volver]` |
+| **Paper de arXiv ya existente** | `[Cancelar]` `[Crear igual]` |
+| **Gestión** (crear proyecto/área) | `[Cancelar]` `[Confirmar]` |
+| **Resultado de consulta** | `[Generar informe .md]` |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
-| **Fallback OCR falla** | `[Gemini Vision]` `[Describí vos]` `[Cancelar]` |
-| **Fallback Gemini Vision falla** | `[OCR]` `[Describí vos]` `[Cancelar]` |
-| **Fallback extracción web falla** | `[Describí vos]` `[Cancelar]` |
+| **OCR sin texto encontrado** | `[Gemini Vision]` / `[Cancelar]` `[Describir]` |
+| **`/status` con inbox pendiente sin destino** | `[Clasificar inbox]` |
+| **`/reporte`** | tres teclados encadenados: tipo → categoría → lista de ítems (ver `reports.py`) |
+
+*(Diseño, no implementado: `[Todo]` `[Proyecto1]` … para refinar el scope de una consulta, `[Ver referencias completas]` y `[Solo relaciones directas]` / `[Expandir un grado más]` para la expansión desde nodo — Fase 7.)*
+
+Ante un **error** de OCR o de Gemini Vision no hay teclado de fallback: el bot limpia el estado y pide reenviar la imagen. El teclado alternativo aparece solo cuando el OCR corre bien y no encuentra texto.
 
 **Convención de orden:** en teclados con `[Cancelar]` y `[Confirmar]` en la misma fila, `[Cancelar]` siempre va a la izquierda (más alejado del pulgar) y `[Confirmar]` a la derecha. Las acciones intermedias (Reubicar, Corregir) van en el centro.
 
-**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución (`pending_note`, `pending_raw_content`, `pending_transcript` sin `awaiting_correction`, `pending_extraction`), el bot rechaza cualquier nuevo mensaje (texto, audio, documento) y comandos que arranquen flujos nuevos (`/clasificar`) con un aviso. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat. Comandos de solo lectura (`/status`) no se bloquean.
+**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución, el bot rechaza cualquier nuevo mensaje (texto, audio, documento) y los comandos que arrancan flujos nuevos (`/clasificar`) con un aviso. `_has_pending_keyboard` cubre `pending_note`, `pending_raw_content`, `pending_transcript` y `pending_extraction` (ambos sin `awaiting_correction`), `pending_fallback_pdf`, `pending_report`, `pending_read_status`, `pending_arxiv` y `pending_operation`. Los estados que esperan texto a propósito (`awaiting_correction`, `pending_description`, `manage_missing_fields`) no bloquean texto, pero sí bloquean audio, fotos, documentos y comandos vía `_is_awaiting_text_input`. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat. Comandos de solo lectura (`/status`) no se bloquean.
 
 ### Desambiguación de intención
 
@@ -596,9 +668,9 @@ El patrón es: **el LLM interpreta lo que pueda del lenguaje natural, los botone
 
 Si el usuario ya especificó el scope ("papers pendientes de tesis"), el bot responde directo. Si no ("dame todo lo que tengo que hacer"), el bot ofrece botones para elegir scope: toda la bóveda, uno o más proyectos.
 
-**Límite de botones:** se muestran los 5 proyectos/áreas más activos (por `date_modified` más reciente de sus notas) + `[Todo]` + `[Más...]`. El botón `[Más...]` muestra el resto en un segundo mensaje. Mismo criterio aplica a `[Elegir área]` y `[Elegir proyecto]` en el flujo de corrección de destino.
+**Límite de botones:** *(diseño — no implementado)*. Hoy `build_area_selector` y `build_project_selector` muestran **todos** los proyectos/áreas existentes, en filas de a dos, con `[Cancelar]` `[← Volver]` como última fila fija. No hay `[Todo]`, no hay `[Más...]` ni ordenamiento por actividad. Los ítems salen de `_get_existing_items` (subdirectorios de `01-Projects/` y `02-Areas/`), así que un área o proyecto sin `_index.md` también aparece. El nombre viaja en el `callback_data` como hash corto y estable (`item_token`, 10 chars hex): Telegram corta el `callback_data` en 64 bytes y un nombre acentuado de ~27 chars ya lo superaba.
 
-Ejemplos:
+Ejemplos del diseño de refinamiento de scope, pendiente de Fase 7:
 
 ```
 Usuario: "dame todo lo que tengo que hacer"
@@ -727,21 +799,21 @@ Todo el contenido pasa por un ciclo de confirmación antes de persistirse:
 ```
 1. Usuario manda input
 2. Bot procesa y propone: tipo, destino (proyecto/área), frontmatter completo
-3a. LLM encontró destino claro:
-       preview del frontmatter (bloque YAML en código)
-       [Confirmar]  [Reubicar]  [Cancelar]
+3. Preview (líneas HTML etiquetadas) con el mismo teclado en todos los casos,
+   con o sin destino y para nota o tarea:
+       fila 1: [Cancelar]  [Corregir]  [Reubicar]
+       fila 2: [Confirmar]
+   Si el LLM no asignó proyecto ni área, el preview muestra
+   "Destino: 00-Inbox" — no se pregunta nada.
            │
+       [Corregir] → activa el modo corrección por texto (con lock)
+           │        → preview actualizado, mismo teclado
        [Reubicar] → cambia solo el destino:
-                    [Elegir área]  [Elegir proyecto]  [Inbox]
-           │
-       preview actualizado → [Confirmar]  [Reubicar]  [Cancelar]
-
-3b. LLM no encontró destino:
-       [Elegir área]  [Elegir proyecto]  [Inbox]
-           │
-       preview del frontmatter → [Confirmar]  [Reubicar]  [Cancelar]
-
-4. Bot escribe la nota
+                    fila 1: [Inbox]
+                    fila 2: [Elegir área]  [Elegir proyecto]
+                    fila 3: [Cancelar]
+           │        → preview actualizado, mismo teclado
+4. [Confirmar] → el bot escribe la nota
 ```
 
 #### Formato del preview
@@ -771,7 +843,27 @@ Al confirmar, los links se escriben en el `.md` bajo `## Ver también` como list
 - [[dataset-imagenet]] — Dataset ImageNet
 ```
 
-**Correcciones por texto libre:** si antes de confirmar el usuario manda texto ("el título debería ser X", "agregá el tag #python"), el bot interpreta el texto como instrucción, actualiza el frontmatter y regenera el preview. `[Reubicar]` es exclusivamente para cambiar el destino — cualquier otro campo se corrige por texto libre.
+**Modo corrección (texto bloqueado por default):** con un preview pendiente, el texto libre **no** se interpreta como instrucción — está bloqueado. Cualquier mensaje recibe `"Usar botón Corregir para modificar."` y tanto el mensaje del usuario como el aviso se borran al apretar un botón. Solo `[Corregir]` (`_cb_note_correct`) activa el modo corrección: pone un lock sobre el mensaje del preview (`awaiting_correction` + `msg_id`) y, mientras dure, se acepta únicamente texto plano — audio, archivos y comandos quedan bloqueados.
+
+Prefijos reconocidos (`_handle_text_correction` en `capture.py`):
+
+| Entrada | Efecto |
+|---|---|
+| `titulo <texto>` / `título <texto>` | Reemplaza el título (conserva la capitalización original) |
+| `prioridad alta\|media\|baja` (o `high\|medium\|low`) | Cambia `priority` |
+| `tag <nombre>` / `agregar tag <nombre>` | Agrega un tag, normalizado a kebab-case con `_to_kebab` |
+| `tipo reference\|task\|idea` (acepta `referencia`, `nota`, `tarea`) | Cambia el `type` |
+| Expresión de fecha, con o sin el prefijo `fecha` | **Solo para tareas:** actualiza `due_date` |
+| Texto sin prefijo, ≤ 200 chars y de una línea | Fallback: se usa como nuevo título |
+| Texto sin prefijo, largo o multi-línea | Se rechaza sin tocar nada: `"Corrección no reconocida. Usar prefijos: titulo, tag, tipo, prioridad."` El lock se mantiene para reintentar, y ese mensaje de error se borra junto con el del usuario cuando la corrección siguiente es válida |
+
+En tareas los campos se detectan todos en el mismo texto y en cualquier orden; en notas cada prefijo es excluyente (gana el primero que matchea). Tras aplicar la corrección se actualiza `date_modified`, se edita el mismo mensaje del preview y se borra el mensaje del usuario.
+
+`[Reubicar]` es exclusivamente para cambiar el destino.
+
+**Prioridad y fecha inferidas.** El LLM propone `priority` y `due_date` para las tareas, pero `_classify_and_preview` corre después `_parse_date_from_text()` sobre el texto original y **overridea** el `due_date` si encuentra una expresión válida: el parser local es determinístico y más fiable que el LLM para expresiones relativas en español, sobre todo en la aritmética de días de semana. Soporta ISO (`2026-04-15`), `DD/MM/YYYY`, `hoy` / `mañana` / `pasado mañana` (con límites de palabra, para no matchear dentro de otra palabra), días de la semana (`el viernes`, `el próximo lunes`) y hora (`15hs`, `15:30`, `a las 15`, descartando horas o minutos fuera de rango en vez de lanzar `ValueError`).
+
+`_user_tz()` resuelve la zona horaria en orden `ADSO_TIMEZONE` → `TZ` (docker-compose ya la define) → UTC, y "ahora" se computa en esa zona: calcularlo en UTC producía un off-by-one cerca de medianoche local. Requiere el paquete `tzdata` para que `zoneinfo` resuelva nombres IANA en la imagen `python:3.11-slim`. `_parse_date_from_text` acepta un `now` inyectable para tests.
 
 Si el proyecto o área no existe, el bot lo indica explícitamente y pide autorización para crearlo.
 
@@ -779,7 +871,11 @@ Si el proyecto o área no existe, el bot lo indica explícitamente y pide autori
 
 El inbox acumula notas sin destino por dos motivos: modo degradado (API caída) o baja confianza del LLM al clasificar.
 
-**Automático:** un cron reintenta clasificar notas con `status: pending-classification` cada `llm.degraded_retry_minutes` (default 30 min). Cuando la reclasificación tiene éxito, el bot envía un preview al usuario (marcado con ♻️) para confirmación — no escribe al vault sin revisión. El usuario puede confirmar, corregir o cancelar igual que en el flujo normal.
+**Automático (Caso A — la nota ya tiene `project` o `area`):** un cron reintenta clasificar notas con `status: pending-classification` cada `llm.degraded_retry_minutes` (default 30 min), una por ciclo. Cuando la reclasificación tiene éxito **escribe directo** — sin preview ni confirmación — preservando el destino que ya tenía, y notifica: `"✓ Nota clasificada: {título} → {destino}"`. Crea la nota nueva **antes** de borrar la del Inbox (con el orden inverso, un fallo de creación evaporaba la nota). El cron saltea la pasada si hay cualquier flujo interactivo en curso, y vuelve a verificarlo justo antes de escribir, porque `classify()` tarda segundos.
+
+**Automático (Caso B — la nota no tiene destino):** el cron no la toca. Queda para `/clasificar`.
+
+El preview marcado con ♻️ pertenece **solo al flujo manual** de `/clasificar` (`commands.py`), no al cron.
 
 **Manual:**
 
@@ -797,9 +893,11 @@ El inbox acumula notas sin destino por dos motivos: modo degradado (API caída) 
 
 El usuario puede listar primero y luego pedir clasificar un ítem específico por nombre, o ir directo si ya sabe lo que quiere clasificar.
 
-### Flujo de edición de notas existentes
+### Flujo de edición de notas existentes *(diseño — no implementado)*
 
-> **Scope:** aplica a notas `reference` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
+> **Estado:** el modo `edit` es Fase 7 y no está implementado. El prompt del clasificador ni siquiera lo ofrece, y si el LLM devuelve `edit` de todas formas, `_redirect_unimplemented_mode()` lo redirige a `capture` re-validando el payload. Lo mismo vale para el renombrado de notas descrito abajo. Editar una nota existente se hace hoy desde Obsidian: el `VaultWatcher` detecta el cambio y re-embede.
+
+> **Scope previsto:** notas `reference` e `idea`. Las tasks (`type: task`) no se editan via ADSO — ver sección `tasks_client.py`.
 
 ```
 1. Usuario pide editar una nota (por título, búsqueda o link)
@@ -822,7 +920,9 @@ No se permite edición directa sin confirmación — el mismo principio que la c
 6. Re-indexa en ChromaDB las notas que tenían backlinks modificados
 ```
 
-### Sincronización con Google Tasks
+### Sincronización con Google Tasks *(diseño — solo el push está implementado)*
+
+> **Estado:** hoy solo existe el push unidireccional al confirmar una task (`create_task`). No hay cron de reconciliación ni `gtask_id` persistido, así que ninguna de las acciones de la tabla de abajo tiene efecto sobre el vault todavía. Pendiente en §5 de `docs/improvements-2026-07.md`.
 
 Modelo decidido: **lista `ADSO` dedicada + lectura de listas externas**.
 
@@ -855,7 +955,7 @@ El `due_date` de una task va al campo de fecha límite de Google Tasks. Google C
 | Situación | Comportamiento |
 |---|---|
 | Crear proyecto/área con nombre que ya existe | Bot avisa que ya existe, no crea duplicado |
-| PDF protegido con password | `pymupdf` falla → mismo flujo que PDF sin texto extraíble (descripción manual) |
+| PDF protegido con password | `pymupdf` falla → mismo flujo que PDF sin texto extraíble: teclado `[OCR]` `[Gemini Vision]` `[Describir]` `[Cancelar]` |
 | Título muy largo | `python-slugify` trunca el slug a 60 chars. El `title` completo se conserva en frontmatter |
 | Caracteres especiales en título | `python-slugify` los elimina del filename. El `title` original se conserva en frontmatter |
 | Wikilinks circulares en expansión | La dedup por `note_id` evita visitar una nota dos veces |
@@ -867,27 +967,46 @@ El `due_date` de una task va al campo de fecha límite de Google Tasks. Google C
 
 ## Infraestructura Docker
 
+El archivo real es `docker-compose.yml` en la raíz del repo — lo de abajo es un resumen de sus puntos salientes, no una copia:
+
 ```yaml
-# docker-compose.yml
 services:
   adso-bot:
     build: .
-    environment:
-      - TELEGRAM_TOKEN
-      - TELEGRAM_ALLOWED_USER_ID
-      - GEMINI_API_KEY
-      - GROQ_API_KEY             # fallback LLM
-      - ANTHROPIC_API_KEY        # opcional, reservada (sin uso actual)
-      - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
-      - VAULT_PATH               # default: /vault
+    container_name: adso-bot
+    restart: unless-stopped
+    user: "${ADSO_UID:-1000}:${ADSO_GID:-1000}"   # permisos del vault del host
+    security_opt: [no-new-privileges:true]        # hardening: procesa PDFs/imágenes
+    cap_drop: [ALL]                               # no confiables
+    env_file: [.env]                              # secretos, nunca inline
     volumes:
-      - ./vault:/vault           # vault de Obsidian
-      - ./data:/app/data         # ChromaDB (embebido), caché
-      - ./credentials:/credentials  # Google OAuth credentials
-    restart: always
+      - ${VAULT_PATH:-./vault}:/vault
+      - ${GOOGLE_CALENDAR_CREDS:-./credentials}:/credentials
+      - adso-data:/app/data                       # volumen nombrado: ChromaDB, whisper, caché
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=America/Argentina/Buenos_Aires         # zona para fechas relativas
+      - VAULT_PATH=/vault
+      - ANONYMIZED_TELEMETRY=false
+      - HF_HOME=/app/data/hf_cache
+      - GOOGLE_CALENDAR_CREDS=/credentials/google-oauth.json
+    healthcheck:                                  # heartbeat_job toca /tmp/adso_heartbeat
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/adso_heartbeat -mmin -2)\""]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:                                      # rotación: 3 archivos de 10MB
+      driver: "json-file"
+      options: {max-size: "10m", max-file: "3"}
+
+volumes:
+  adso-data:
 ```
 
-> ChromaDB corre embebido como library Python dentro del bot — no necesita contenedor separado. Los datos persisten en `./data/chroma/` via volumen.
+> `find` sale con 0 aunque no matchee nada: sin el `test -n`, un heartbeat congelado nunca se marcaba `unhealthy`. El `$$` escapa la interpolación de compose.
+
+> ChromaDB corre embebido como library Python dentro del bot — no necesita contenedor separado. Los datos persisten en el volumen nombrado `adso-data` (`/app/data/chroma/`).
 
 ### Validación del vault al startup
 
@@ -938,7 +1057,7 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 | 2 | Indexado del vault + links automáticos (embeddings + ChromaDB) |
 | 3 | Audio (faster-whisper) + PDFs (pymupdf) + documentos de texto |
 | 4 | Imágenes y capturas (OCR + Gemini Vision) |
-| 5 | Integraciones externas (arXiv, NASA ADS) |
+| 5 | Integraciones externas (arXiv; NASA ADS no implementado) |
 | 6 | Google Calendar + Google Tasks |
 | 7 | Consultas RAG en lenguaje natural |
 | 8 | Análisis del vault: reporte semanal, scoring de papers, detección de gaps |
@@ -1004,10 +1123,18 @@ Un vault de miles de notas ocupa pocos cientos de MB. ChromaDB no requiere servi
 ### Cuándo se indexa
 
 ```
-Nota nueva confirmada
-    ├─→ Escribe .md al vault          (inmediato)
-    └─→ VaultWatcher detecta on_created → Gemini Embedding API   (< 1s, via inotify)
+Nota nueva confirmada (_cb_confirm)
+    ├─→ Escribe .md al vault                                  (inmediato)
+    ├─→ mark_bot_written(path) → el VaultWatcher saltea el evento inotify
+    │      de esta escritura (bot_written_paths), así que NO hay doble embed
+    └─→ Indexado inline: spawn_tracked(_index_note_safe(...)) → Embedding API
         └─→ Guarda vector ChromaDB (con content_hash en metadata)
+            Reutiliza el vector calculado en el preview (_body_embedding) si el
+            body no cambió; si cambió (links "Ver también", recurso adjunto), lo
+            recomputa
+
+Nota modificada o creada desde Obsidian/Syncthing
+    └─→ VaultWatcher (on_created / on_modified) → on_external_change → re-embed
 
 Cron nocturno (reindex_vault)
     ├─→ Carga hashes existentes en ChromaDB (una sola llamada batch)
@@ -1077,9 +1204,11 @@ Comportamiento configurable:
 
 Funcionalidades que el bot genera activamente a partir de los datos ya indexados. Requiere Fase 7 (RAG) como base.
 
-### Reporte semanal automático
+### Reporte semanal automático *(configurado pero sin job — pendiente)*
 
-ADSO envía el reporte por Telegram como archivo `.md` con el header estándar (logo + versión + fecha). Default: viernes al mediodía.
+> **Estado:** la sección `weekly_report` existe en `config.yaml` y se carga en `config.py`, pero `bot.py` **no registra ningún job** que la use: los únicos crons son heartbeat, `reclassify_inbox` y `reindex_job`. Lo implementado de Fase 8 son los reportes **a pedido** (`/reporte` y `/reporte_full`, ver `reporters.py`). Pendiente en §2.2 de `docs/improvements-2026-07.md`.
+
+Diseño: ADSO envía el reporte por Telegram como archivo `.md` con el header estándar (logo + versión + fecha). Default: viernes al mediodía.
 
 Todo es configurable en `config.yaml` via `weekly_report`: se puede deshabilitar el reporte completo (`enabled: false`) o activar/desactivar secciones individuales.
 
@@ -1101,7 +1230,7 @@ Calcula una puntuación para cada paper no leído combinando:
 
 Genera dos rankings: "refuerza lo que ya sabés" vs "introduce algo nuevo".
 
-### Índice de notas en `_index.md` por proyecto/área
+### Índice de notas en `_index.md` por proyecto/área *(diseño — no implementado)*
 
 Cada `_index.md` tiene una sección `## Notas` generada automáticamente por el reporte semanal, con wikilinks a todas las notas del proyecto/área agrupadas por tipo:
 
@@ -1172,7 +1301,7 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 | Sync del vault | Syncthing bidireccional + Git (backup/DR) | Git como sync / Obsidian Sync | Git no es tiempo real; Syncthing ya configurado. `VaultWatcher` detecta cambios externos y re-embeds automáticamente para mantener ChromaDB sincronizado |
 | Interfaz Obsidian | Escritura directa al filesystem | Obsidian CLI / Local REST API | Ver sección "Alternativa futura: Obsidian CLI" más abajo |
 | Búsqueda | ChromaDB (semántica) + parser propio (estructural) | Solo ChromaDB | ChromaDB no puede seguir wikilinks ni filtrar por frontmatter. El parser propio cubre búsqueda estructural sin dependencias externas |
-| Generación de contenido | LLM con Obsidian Skills como referencia | Spec propia de sintaxis Obsidian | Los Skills de kepano son la referencia oficial para generar markdown, properties, wikilinks, canvas y bases compatibles con Obsidian |
+| Generación de contenido | Schema propio en el system prompt, con los Obsidian Skills de kepano como referencia de diseño (no incorporados al prompt) | Incluir los Skills completos en el prompt | Los Skills son la referencia oficial de la sintaxis, pero meterlos enteros en cada request gasta tokens de un prompt que ya define el formato que el bot necesita |
 | LLM primario | Gemini API | Groq (fallback implementado) / Claude API (reservado) | Free tier disponible para prototipo |
 | Transcripción | faster-whisper local | APIs externas | Privacidad, sin costo por uso, viable en ARM64 |
 | Vector DB | ChromaDB embebido | Pinecone, Weaviate | Sin servidor externo, corre en RPi4 |
@@ -1238,7 +1367,7 @@ ADSO nunca auto-resuelve conflictos. El usuario resuelve manualmente y borra el 
 
 El watcher no agrega presión significativa a la RPi4 (escucha eventos del filesystem vía `inotify`, no polling). En bind mounts Docker con ext4 funciona correctamente. Si `inotify` no está disponible, cae automáticamente a `PollingObserver` (10s de intervalo).
 
-**Stats:** `VaultWatcher.stats` expone `last_event_at`, `last_conflict_at`, `conflicts_detected` y `changes_detected`. Visibles en `/status`.
+**Stats:** `VaultWatcher.stats` expone `debug`, `last_event_at`, `last_conflict_at`, `conflicts_detected`, `changes_detected` y `deletions_detected`. `/status` muestra un subconjunto: si el watcher está activo (y si corre en modo debug), el último evento, los conflictos detectados y —solo en modo debug— los cambios externos.
 
 `on_created` detecta tanto conflictos como `.md` normales. Las notas creadas directamente desde Obsidian se indexan en tiempo real vía `on_external_change`, igual que las modificaciones.
 
@@ -1310,7 +1439,7 @@ Si en el futuro Obsidian lanza un CLI headless real, o se migra ADSO a un servid
 **Lo que NO cambiaría:**
 - ChromaDB sigue siendo necesario para búsqueda semántica (el CLI no hace búsqueda vectorial)
 - El flujo de captura (Telegram → LLM → clasificación → confirmación) es idéntico
-- Los Obsidian Skills siguen siendo útiles para el system prompt del LLM
+- Los Obsidian Skills siguen siendo una referencia útil para el system prompt del LLM (hoy no están incorporados)
 - Syncthing sigue siendo el mecanismo de sync (salvo que se pague Obsidian Sync)
 
 ### Qué probar cuando sea posible
@@ -1347,7 +1476,7 @@ Los [Obsidian Skills](https://github.com/kepano/obsidian-skills) son documentos 
 | `defuddle` | Extracción de contenido limpio desde web (`defuddle parse <url> --md`) | Fase 5: extraer contenido de URLs/papers sin ruido |
 | `obsidian-cli` | Referencia de comandos CLI | Útil solo cuando el CLI sea viable |
 
-Los skills de `obsidian-markdown`, `obsidian-bases` y `json-canvas` se usan hoy. El de `obsidian-cli` queda para cuando se habilite esa ruta.
+**Ninguno de estos skills está incorporado hoy al bot.** `build_system_prompt()` no los incluye ni los referencia: el prompt define su propio schema de frontmatter y sus reglas de formato de Obsidian. Los skills quedan como referencia de diseño — la tabla describe usos posibles, no comportamiento actual.
 
 
 ---
