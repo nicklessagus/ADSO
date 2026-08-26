@@ -1058,6 +1058,60 @@ async def save_resource(
     return dest
 
 
+async def find_resource_by_hash(source_path: Path, vault_path: Path) -> Optional[Path]:
+    """Busca en 03-Resources/ un archivo con el mismo contenido que `source_path`.
+
+    Es el mismo criterio que usa `save_resource` para reutilizar un adjunto ya
+    guardado (SHA-256 con short-circuit por tamaño), pero mirando toda la
+    carpeta en vez de solo los candidatos del nombre: el mismo archivo puede
+    haber llegado con otro nombre. `save_resource` ya sabía que era el mismo
+    binario y ese dato se descartaba, así que el mismo PDF terminaba en dos
+    notas (issue #53).
+
+    Args:
+        source_path: Archivo a buscar (típicamente el temporal de la descarga).
+        vault_path: Raíz del vault.
+
+    Returns:
+        Path al archivo existente en 03-Resources/, o None si no hay ninguno con
+        ese contenido (o si la carpeta todavía no existe).
+    """
+
+    def _scan() -> Optional[Path]:
+        resources_dir = vault_path / "03-Resources"
+        if not resources_dir.is_dir():
+            return None
+        try:
+            source_size = source_path.stat().st_size
+        except OSError:
+            return None
+
+        source_hash: Optional[str] = None
+        for candidate in sorted(resources_dir.rglob("*")):
+            try:
+                if not candidate.is_file() or candidate.stat().st_size != source_size:
+                    continue
+                # El hash del origen se calcula recién cuando hay algún candidato
+                # del mismo tamaño: en la RPi4 con SD lenta, el caso normal
+                # (archivo nuevo) no paga ninguna lectura.
+                if source_hash is None:
+                    source_hash = _file_hash_sync(source_path)
+                if _file_hash_sync(candidate) == source_hash:
+                    return candidate
+            except OSError:
+                # Un archivo borrado o ilegible en medio del scan no puede
+                # tumbar la captura: se saltea.
+                continue
+        return None
+
+    return await asyncio.to_thread(_scan)
+
+
+# ---------------------------------------------------------------------------
+# Git backup
+# ---------------------------------------------------------------------------
+
+
 def backup_label(note_path: Path) -> str:
     """Human-readable label for a note in a vault backup commit message.
 

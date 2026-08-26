@@ -394,12 +394,23 @@ def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_arxiv_duplicate_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para cuando el paper de arXiv ya existe en el vault."""
+def build_duplicate_keyboard(
+    create_callback: str = CB_ARXIV_CREATE_ANYWAY,
+) -> InlineKeyboardMarkup:
+    """Teclado para cuando el contenido recibido ya existe en el vault.
+
+    Lo comparten el duplicado de arXiv (detectado por `source_url`/`doi`) y el
+    de archivo subido (detectado por hash del contenido, issue #53): mismo par
+    [Cancelar]/[Crear igual], y solo cambia el callback del "Crear igual"
+    porque el estado pendiente que hay que retomar es distinto en cada flujo.
+
+    Args:
+        create_callback: callback_data del botón "Crear igual".
+    """
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-            InlineKeyboardButton("Crear igual", callback_data=CB_ARXIV_CREATE_ANYWAY),
+            InlineKeyboardButton("Crear igual", callback_data=create_callback),
         ]
     ])
 

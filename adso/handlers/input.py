@@ -283,7 +283,7 @@ async def _handle_arxiv(
         existing = await find_by_property("doi", metadata["doi"], vault_path)
 
     if existing:
-        from adso.keyboards import build_arxiv_duplicate_keyboard
+        from adso.keyboards import build_duplicate_keyboard
         note = existing[0]
         rel_path = note.path.relative_to(vault_path)
         context.user_data["pending_arxiv"] = {
@@ -293,7 +293,7 @@ async def _handle_arxiv(
         await status_msg.edit_text(
             f"Este paper ya existe en el vault:\n<code>{rel_path}</code>\n\n"
             "¿Crear una nota igual de todas formas?",
-            reply_markup=build_arxiv_duplicate_keyboard(),
+            reply_markup=build_duplicate_keyboard(),
             parse_mode="HTML",
         )
         context.user_data.pop("pending_raw_content", None)
@@ -401,6 +401,174 @@ async def handle_audio(
             tmp_path.unlink(missing_ok=True)
 
 
+_MAX_NOTAS_DUPLICADAS = 5  # tope de notas listadas en el aviso (límite de 4096 chars de Telegram)
+
+
+async def _aviso_de_duplicado(tmp_path: Path, vault_path: Path) -> Optional[str]:
+    """Mensaje de aviso si el archivo recibido ya está en el vault, o None.
+
+    Deduplica por **hash del contenido**, no por nombre: dos archivos distintos
+    pueden llamarse igual y el mismo archivo puede llegar con nombres distintos.
+    `save_resource` ya calculaba ese hash y lo descartaba, así que el mismo PDF
+    subido dos veces producía dos notas (issue #53) — la detección de la Fase 5
+    solo mira `source_url` y `doi`, que un PDF de Telegram no tiene.
+
+    Solo avisa si alguna nota referencia el archivo: un recurso huérfano en
+    03-Resources/ no duplica ninguna nota, y bloquear ahí sería fricción pura.
+    Un mismo binario puede tener varias notas dueñas (el dedup de
+    `save_resource` las hace compartir el archivo), así que se listan todas.
+    05-Archive queda afuera del scan, mismo criterio que el duplicado de arXiv.
+
+    Args:
+        tmp_path: Temporal ya descargado del documento recibido.
+        vault_path: Raíz del vault.
+
+    Returns:
+        Texto HTML del aviso, o None si el archivo no está duplicado.
+    """
+    from adso.vault_search import find_by_property, get_backlinks
+    from adso.vault_writer import find_resource_by_hash
+
+    existente = await find_resource_by_hash(tmp_path, vault_path)
+    if existente is None:
+        return None
+
+    nombre = existente.name
+    notas = await find_by_property("source_file", f"[[{nombre}]]", vault_path)
+    vistas = {n.path for n in notas}
+    # El adjunto puede estar solo embebido en el body (`![[archivo]]`), sin
+    # `source_file` en el frontmatter: `_cb_confirm` escribe las dos formas,
+    # pero una nota editada a mano puede conservar una sola.
+    notas += [n for n in await get_backlinks(nombre, vault_path) if n.path not in vistas]
+    if not notas:
+        return None
+
+    lineas = [
+        f"<code>{_esc(str(n.path.relative_to(vault_path)))}</code>"
+        for n in notas[:_MAX_NOTAS_DUPLICADAS]
+    ]
+    if len(notas) > _MAX_NOTAS_DUPLICADAS:
+        lineas.append(f"(y {len(notas) - _MAX_NOTAS_DUPLICADAS} más)")
+
+    return (
+        "Este archivo ya está en el vault como "
+        f"<code>{_esc(str(existente.relative_to(vault_path)))}</code>.\n\n"
+        "Notas que lo referencian:\n"
+        + "\n".join(lineas)
+        + "\n\n¿Crear una nota igual de todas formas?"
+    )
+
+
+async def _dispatch_document(
+    msg,
+    context: ContextTypes.DEFAULT_TYPE,
+    tmp_path: Path,
+    filename: str,
+    caption: Optional[str],
+) -> bool:
+    """Deriva un documento ya descargado al flujo que le corresponde por tipo.
+
+    Extraído de `handle_document` para que el `[Crear igual]` del aviso de
+    duplicado (issue #53) retome exactamente el mismo flujo, sin restricciones.
+
+    Args:
+        msg: Mensaje sobre el que responder (`update.message`, o el del callback).
+        context: Bot context.
+        tmp_path: Temporal descargado.
+        filename: Nombre original del archivo.
+        caption: Caption del usuario, si lo hubo (contexto para el LLM).
+
+    Returns:
+        True si el temporal quedó a cargo de un estado pendiente — el caller no
+        debe borrarlo. False si el flujo terminó y el temporal es descartable.
+    """
+    if is_pdf(filename):
+        context.user_data["pending_read_status"] = {
+            "temp_path": str(tmp_path),
+            "original_filename": filename,
+            "media_type": "document",
+            "user_context": caption,
+        }
+        try:
+            await msg.reply_text(
+                f"PDF recibido: <b>{_esc(filename)}</b>",
+                reply_markup=build_read_status_keyboard(),
+                parse_mode="HTML",
+            )
+        except Exception:
+            # El estado se setea antes del reply que dibuja los botones: si
+            # el envío falla (TimedOut/NetworkError, lo más común en PTB),
+            # queda un `pending_*` sin teclado y todo input posterior se
+            # rechaza con "Hay una acción pendiente" hasta `/reset`. Se
+            # limpia el estado y se devuelve False para que el caller borre
+            # el temporal (en la RPi4 /tmp es tmpfs: RAM filtrada hasta el
+            # reinicio). Mismo modo de falla que cerró E9 para `handle_audio`.
+            context.user_data.pop("pending_read_status", None)
+            raise
+        return True
+
+    if is_text_file(filename):
+        try:
+            text = await extract_text_file(tmp_path, max_chars=50000)
+            if not text.strip():
+                await msg.reply_text("El archivo está vacío.")
+                return False
+
+            context.user_data["pending_extraction"] = {
+                "text": text,
+                "classify_content": build_classify_content(text, {}, is_paper=False),
+                "temp_path": str(tmp_path),
+                "original_filename": filename,
+                "media_type": "document",
+                "metadata": {},
+                "user_context": caption,
+                "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
+            }
+
+            snippet = text[:500]
+            if len(text) > 500:
+                snippet += "..."
+            try:
+                await msg.reply_text(
+                    f"<b>Contenido de {_esc(filename)}:</b>\n\n"
+                    f"<code>{_esc(snippet)}</code>\n\n"
+                    "Confirmar, o enviar texto corregido.",
+                    reply_markup=build_extraction_keyboard(),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                # Ver el comentario del PDF: estado colgado sin teclado.
+                context.user_data.pop("pending_extraction", None)
+                raise
+            return True
+
+        except Exception as e:
+            logger.error("Error leyendo archivo de texto: %s", e)
+            await msg.reply_text(f"Error leyendo archivo: {e}")
+            return False
+
+    context.user_data["pending_description"] = {
+        "temp_path": str(tmp_path),
+        "original_filename": filename,
+        "media_type": "document",
+    }
+    try:
+        await msg.reply_text(
+            f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
+            "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
+            ]),
+            parse_mode="HTML",
+        )
+    except Exception:
+        # Ver el comentario del PDF. `pending_description` espera texto,
+        # así que el que bloquea acá es `_is_awaiting_text_input`.
+        context.user_data.pop("pending_description", None)
+        raise
+    return True
+
+
 @authorized
 @_solo_mensajes_nuevos
 async def handle_document(
@@ -450,95 +618,35 @@ async def handle_document(
             )
             return
 
-        if is_pdf(filename):
-            context.user_data["pending_read_status"] = {
+        caption = msg.caption or None
+
+        # Antes de gastar extracción, LLM y quota: si este mismo contenido ya
+        # está en el vault y alguna nota lo referencia, es un duplicado (#53).
+        aviso = await _aviso_de_duplicado(tmp_path, settings.vault_path)
+        if aviso:
+            from adso.constants import CB_DOC_CREATE_ANYWAY
+            from adso.keyboards import build_duplicate_keyboard
+
+            context.user_data["pending_duplicate_doc"] = {
                 "temp_path": str(tmp_path),
                 "original_filename": filename,
-                "media_type": "document",
-                "user_context": msg.caption or None,
+                "user_context": caption,
             }
             transferred = True
             try:
                 await msg.reply_text(
-                    f"PDF recibido: <b>{_esc(filename)}</b>",
-                    reply_markup=build_read_status_keyboard(),
+                    aviso,
+                    reply_markup=build_duplicate_keyboard(CB_DOC_CREATE_ANYWAY),
                     parse_mode="HTML",
                 )
             except Exception:
-                # El estado se setea antes del reply que dibuja los botones: si
-                # el envío falla (TimedOut/NetworkError, lo más común en PTB),
-                # queda un `pending_*` sin teclado y todo input posterior se
-                # rechaza con "Hay una acción pendiente" hasta `/reset`. Se
-                # limpia el estado y se repone `transferred` para que el
-                # `finally` borre el temporal (en la RPi4 /tmp es tmpfs: RAM
-                # filtrada hasta el reinicio). Mismo modo de falla que cerró E9
-                # para `handle_audio`.
-                context.user_data.pop("pending_read_status", None)
+                # Ver `_dispatch_document`: estado colgado sin teclado.
+                context.user_data.pop("pending_duplicate_doc", None)
                 transferred = False
                 raise
+            return
 
-        elif is_text_file(filename):
-            try:
-                text = await extract_text_file(tmp_path, max_chars=50000)
-                if not text.strip():
-                    await msg.reply_text("El archivo está vacío.")
-                    return
-
-                context.user_data["pending_extraction"] = {
-                    "text": text,
-                    "classify_content": build_classify_content(text, {}, is_paper=False),
-                    "temp_path": str(tmp_path),
-                    "original_filename": filename,
-                    "media_type": "document",
-                    "metadata": {},
-                    "user_context": msg.caption or None,
-                    "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
-                }
-                transferred = True
-
-                snippet = text[:500]
-                if len(text) > 500:
-                    snippet += "..."
-                try:
-                    await msg.reply_text(
-                        f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                        f"<code>{_esc(snippet)}</code>\n\n"
-                        "Confirmar, o enviar texto corregido.",
-                        reply_markup=build_extraction_keyboard(),
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    # Ver el comentario del PDF: estado colgado sin teclado.
-                    context.user_data.pop("pending_extraction", None)
-                    transferred = False
-                    raise
-
-            except Exception as e:
-                logger.error("Error leyendo archivo de texto: %s", e)
-                await msg.reply_text(f"Error leyendo archivo: {e}")
-
-        else:
-            context.user_data["pending_description"] = {
-                "temp_path": str(tmp_path),
-                "original_filename": filename,
-                "media_type": "document",
-            }
-            transferred = True
-            try:
-                await msg.reply_text(
-                    f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
-                    "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
-                    ]),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                # Ver el comentario del PDF. `pending_description` espera texto,
-                # así que el que bloquea acá es `_is_awaiting_text_input`.
-                context.user_data.pop("pending_description", None)
-                transferred = False
-                raise
+        transferred = await _dispatch_document(msg, context, tmp_path, filename, caption)
     except Exception as e:
         logger.error("Error procesando documento: %s", e)
         await msg.reply_text(f"Error al procesar documento: {e}")

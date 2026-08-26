@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes
 from adso.config import Settings
 from adso.constants import (
     CB_ARXIV_CREATE_ANYWAY,
+    CB_DOC_CREATE_ANYWAY,
     CB_BACK,
     CB_CANCEL,
     CB_CHOOSE_AREA,
@@ -346,6 +347,9 @@ async def handle_callback(
     elif data == CB_ARXIV_CREATE_ANYWAY:
         await _cb_arxiv_create_anyway(update, context)
 
+    elif data == CB_DOC_CREATE_ANYWAY:
+        await _cb_doc_create_anyway(update, context)
+
     elif data in (
         CB_REPORT_MENU, CB_REPORT_SCOPE, CB_REPORT_IDEAS, CB_REPORT_HEALTH, CB_REPORT_READING,
         CB_REPORT_SCOPE_SHOW_P, CB_REPORT_SCOPE_SHOW_A,
@@ -661,6 +665,48 @@ async def _cb_arxiv_create_anyway(update: Update, context: ContextTypes.DEFAULT_
         url=pending["url"],
         reply_msg=query.message,
     )
+
+
+async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """El usuario eligió crear la nota aunque el archivo ya esté en el vault.
+
+    Lee el estado guardado en ``pending_duplicate_doc`` y retoma el flujo normal
+    del documento (PDF / texto / binario) sin ninguna restricción, igual que
+    `[Crear igual]` en el duplicado de arXiv. Issue #53.
+    """
+    query = update.callback_query
+    pending = context.user_data.pop("pending_duplicate_doc", None)
+    if not pending:
+        await query.answer("No hay archivo pendiente.", show_alert=True)
+        return
+
+    from adso.handlers.input import _dispatch_document
+
+    tmp_path = Path(pending["temp_path"])
+    filename = pending.get("original_filename", "documento")
+
+    # Se retira el teclado del aviso antes de dibujar el del flujo normal: si
+    # no, quedan dos teclados vivos y un segundo [Crear igual] cae en el
+    # "No hay archivo pendiente".
+    await query.edit_message_text(
+        f"Duplicado: <b>{_esc(filename)}</b>. Creando la nota igual.",
+        parse_mode="HTML",
+    )
+
+    transferred = False
+    try:
+        transferred = await _dispatch_document(
+            query.message, context, tmp_path, filename, pending.get("user_context")
+        )
+    except Exception as e:
+        logger.error("Error procesando documento duplicado: %s", e)
+        await query.message.reply_text(f"Error al procesar documento: {e}")
+    finally:
+        # Mismo contrato que el `finally` de `handle_document`: si ningún estado
+        # pendiente se quedó con el temporal, se borra (en la RPi4 /tmp es
+        # tmpfs).
+        if not transferred:
+            tmp_path.unlink(missing_ok=True)
 
 
 def _build_fallback_keyboard_without_ocr():

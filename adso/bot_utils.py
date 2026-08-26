@@ -159,6 +159,8 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     if ud.get("pending_arxiv"):
         return True
+    if ud.get("pending_duplicate_doc"):
+        return True
     if ud.get("pending_operation"):
         return True
     return False
@@ -252,7 +254,8 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_raw_content", "pending_capture_ctx", "pending_transcript",
             "pending_extraction", "pending_description",
             "pending_read_status", "pending_fallback_pdf",
-            "pending_arxiv", "manage_missing_fields", "pending_report",
+            "pending_arxiv", "pending_duplicate_doc",
+            "manage_missing_fields", "pending_report",
             "block_msg_ids", "clasificar_inbox_path",
         )
 

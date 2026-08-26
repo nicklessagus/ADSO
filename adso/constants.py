@@ -39,6 +39,10 @@ CB_VISION = "vision"
 # arXiv
 CB_ARXIV_CREATE_ANYWAY = "arxiv:create_anyway"
 
+# Documento subido que ya está en el vault (mismo contenido en 03-Resources/).
+# Callback propio y no el de arXiv porque el estado a retomar es otro.
+CB_DOC_CREATE_ANYWAY = "doc:create_anyway"
+
 # Corrección de nota (tarea)
 CB_NOTE_CORRECT = "note:correct"
 

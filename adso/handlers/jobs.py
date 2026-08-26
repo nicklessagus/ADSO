@@ -29,7 +29,7 @@ _PENDING_FLOW_KEYS = {
     "pending_note", "pending_operation", "pending_raw_content",
     "pending_extraction", "pending_transcript", "pending_description",
     "manage_missing_fields", "pending_fallback_pdf", "pending_read_status",
-    "pending_arxiv", "pending_report",
+    "pending_arxiv", "pending_duplicate_doc", "pending_report",
 }
 
 _STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
