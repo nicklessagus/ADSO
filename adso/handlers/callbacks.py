@@ -516,7 +516,9 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=build_ocr_result_keyboard(),
         parse_mode="HTML",
     )
-    context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
+    # `getattr` en vez de `sent.message_id`: un `edit_message_text` puede
+    # devolver `True` (mensaje inline) y ahí el acceso directo lanzaría.
+    context.user_data["pending_transcript"]["msg_id"] = getattr(sent, "message_id", None)
 
 
 async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -630,7 +632,9 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         reply_markup=build_transcript_keyboard(),
         parse_mode="HTML",
     )
-    context.user_data["pending_transcript"]["msg_id"] = sent.message_id if sent else None
+    # `getattr` en vez de `sent.message_id`: un `edit_message_text` puede
+    # devolver `True` (mensaje inline) y ahí el acceso directo lanzaría.
+    context.user_data["pending_transcript"]["msg_id"] = getattr(sent, "message_id", None)
 
 
 async def _cb_arxiv_create_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

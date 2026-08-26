@@ -228,7 +228,7 @@ Los mensajes que el bot envía al usuario por Telegram usan **infinitivo imperso
 El bot funciona en un único chat de Telegram. No hay estado de contexto persistente. Toda la interacción se basa en **lenguaje natural + inline keyboards**.
 
 ### Estado default: captura
-El usuario manda contenido (texto, audio, link, imagen, documento). Para texto y audio el bot pregunta primero `[Tarea]` o `[Nota]` — el LLM nunca decide el type en estos casos. Para PDFs, imágenes y links el type se infiere del contenido. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
+El usuario manda contenido (texto, audio, link, imagen, documento). Para texto y audio el bot pregunta primero `[Tarea]` o `[Nota]`. Los dos botones no son simétricos: `[Tarea]` **fija** `type: task` (`forced_type`), mientras que `[Nota]` solo **impide** `task` (`prevent_task`, que convierte `task` → `reference`) y deja en pie la elección del LLM entre `reference` e `idea`. Para PDFs, imágenes y links el type se infiere del contenido. El bot propone clasificación y el usuario confirma, edita o cancela con inline keyboards.
 
 ### Estado transiente: consulta
 El usuario pregunta algo sobre el vault. El bot resuelve la consulta, devuelve el resultado (inline o como archivo `.md` con links `obsidian://`) y vuelve al estado default.

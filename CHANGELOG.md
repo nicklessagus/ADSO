@@ -11,7 +11,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [1.5.0] — 2026-08-26
 
-Auditoría funcional completa: **39 bugs encontrados y arreglados**, cada uno con un test que primero falló reproduciéndolo. Siete pasadas de revisión (captura, medios, LLM/config, vault, embeddings, comandos/reportes/jobs, y docs), más una auditoría del **vault real de producción** que destapó cinco defectos que leyendo código no se veían.
+Auditoría funcional completa: **40 bugs encontrados, 39 arreglados**, cada uno con un test que primero falló reproduciéndolo. El que queda abierto es #53 (la dedup no cubre archivos subidos), que necesita una decisión de diseño y va como issue en vez de un fix apurado. Siete pasadas de revisión (captura, medios, LLM/config, vault, embeddings, comandos/reportes/jobs, y docs), más una auditoría del **vault real de producción** que destapó cinco defectos que leyendo código no se veían.
 
 La regla que ordenó todo el trabajo: ningún bug se reporta sin un test que lo reproduzca, verificado con `--runxfail` para que un mock mal armado no se confunda con un defecto real. Salió **un falso positivo de 40 candidatos**, y lo atrapó la propia suite (ver más abajo).
 
@@ -54,7 +54,7 @@ Detalle completo en `docs/audit-2026-08-26.md`. Suite: 770 → 897 tests. Cobert
 - **El adjunto se escribía *dentro* de `## Ver también`** (#52) — 6 de las 8 notas con `source_file` lo tienen así
 - **Los 7 `_index.md` colapsaban en una sola entrada** en `get_note_index` (#55): el dict keyeaba por stem y ganaba el último de `rglob`
 - **`description: ""` se aceptaba al crear proyecto/área** (#56) porque se chequeaba la presencia de la clave, no su contenido. No es cosmético: 3 de 7 índices del vault están vacíos, y ese campo es el contexto que el LLM usa para elegir destino — explica parte de las misclasificaciones
-- **El mismo PDF creó dos notas** (#53): la dedup mira `source_url` y `doi`, y un archivo subido no tiene ninguno — aunque `save_resource` ya calculó su SHA-256 y detectó que era el mismo
+- **El mismo PDF creó dos notas** (#53): la dedup mira `source_url` y `doi`, y un archivo subido no tiene ninguno — aunque `save_resource` ya calculó su SHA-256 y detectó que era el mismo. **Queda abierto**: falta decidir sobre qué clave deduplicar y cómo se combina con la búsqueda existente
 
 ### Added
 
@@ -69,6 +69,9 @@ Detalle completo en `docs/audit-2026-08-26.md`. Suite: 770 → 897 tests. Cobert
 - `docs/testing.md`: cifras remedidas (623 → 897 tests, 76% → 84%) y secciones nuevas sobre el harness de regresión de modelo y la convención de reproductores
 
 ### Known
+
+- **#53 sigue abierto** — es el único bug confirmado de la auditoría que no se arregló en esta tanda (ver arriba)
+- **#62 — `tipo` sobre una tarea** (encontrado en la pasada de verificación post-fixes, ya arreglado): `_apply_task_corrections` no tenía rama de `tipo`, así que `"tipo nota"` sobre una tarea caía al fallback de título y **la tarea pasaba a llamarse "tipo nota"**, sin cambiar de tipo y sin aviso. Era la única vía para sacar una nota de `task`
 
 - **#61 — `find_tasks`**: se reportó como bug de duplicación, se escribió el fix, y **rompió un test existente** cuyo fixture y comentario documentan que la duplicación es deliberada (los checkboxes de una tarea son sus subtareas). Se revirtió y quedó como pregunta de diseño, con tests de caracterización que fijan el comportamiento actual. La inconsistencia real es que las dos fuentes de `find_tasks` filtran distinto
 - Quedan abiertas **19 mejoras** (#36–#51, #57, #58, #60) con propuesta de implementación y tests propuestos, incluida la limpieza de datos del vault y las decisiones de taxonomía que la auditoría dejó a la vista

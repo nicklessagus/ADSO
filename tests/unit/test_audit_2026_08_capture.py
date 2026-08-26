@@ -695,3 +695,68 @@ class TestC11DestinoInexistenteConservaElSelector:
             await callbacks.handle_callback(update, mock_context)
 
         assert mock_context.user_data.get("pending_note")
+
+
+# ---------------------------------------------------------------------------
+# C12 — `tipo` no funciona sobre una tarea y le pisa el título
+# ---------------------------------------------------------------------------
+#
+# `_handle_text_correction` bifurca por el type vigente: si es `task` despacha a
+# `_apply_task_corrections`, que maneja fecha/prioridad/tag/título pero **no
+# tiene rama de `tipo`**. Así `"tipo nota"` devuelve handled=False, cae al
+# fallback de título (texto corto de una línea) y el título de la tarea pasa a
+# ser literalmente "tipo nota", sin aviso.
+#
+# Doble daño: el cambio de tipo nunca ocurre —y es la única vía para sacar una
+# nota de `task`, así que `_resync_status_with_type` jamás corre en esa
+# dirección— y encima se pierde el título que el usuario tenía. Detectado en la
+# pasada de verificación de documentación. Issue #62.
+
+
+class TestC12CambiarElTipoDeUnaTarea:
+    def _pending(self) -> dict:
+        return {
+            "payload": {
+                "frontmatter": {
+                    "title": "Comprar filamento",
+                    "type": "task",
+                    "status": "pending",
+                    "due_date": "2026-09-01",
+                },
+                "body": "Comprar filamento",
+            }
+        }
+
+    def test_tipo_nota_convierte_la_tarea(self) -> None:
+        from adso.handlers.capture import _apply_task_corrections
+
+        fm = self._pending()["payload"]["frontmatter"]
+
+        handled = _apply_task_corrections(fm, "tipo nota", "tipo nota")
+
+        assert handled, "sin rama de `tipo`, el texto cae al fallback de título"
+        assert fm["type"] == "reference"
+        assert fm["title"] == "Comprar filamento", "el título no se toca"
+        assert fm["status"] == "active", "el status se realinea con el type nuevo"
+        assert "due_date" not in fm, "due_date solo aplica a tareas"
+
+    def test_el_titulo_de_la_tarea_sobrevive(self) -> None:
+        """El síntoma visible: la tarea terminaba llamándose 'tipo nota'."""
+        from adso.handlers.capture import _apply_task_corrections
+
+        fm = self._pending()["payload"]["frontmatter"]
+        _apply_task_corrections(fm, "tipo idea", "tipo idea")
+
+        assert fm["title"] != "tipo idea"
+        assert fm["type"] == "idea"
+
+    def test_una_correccion_de_titulo_real_sigue_funcionando(self) -> None:
+        """Contra-caso: el fallback de título no puede romperse con el fix."""
+        from adso.handlers.capture import _apply_task_corrections
+
+        fm = self._pending()["payload"]["frontmatter"]
+        handled = _apply_task_corrections(fm, "titulo Comprar PLA negro", "titulo comprar pla negro")
+
+        assert handled
+        assert fm["title"] == "Comprar PLA negro"
+        assert fm["type"] == "task"

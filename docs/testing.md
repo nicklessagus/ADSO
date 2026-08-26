@@ -506,9 +506,15 @@ del proyecto. Con los handlers omitidos, **un test nuevo sobre un handler no
 movía el gate**, que es justo donde la regla test-first más hace falta. Detalle
 en I3 de `docs/audit-2026-07-31.md`.
 
-Cobertura actual de handlers (el terreno a ganar): `query.py` 93%, `callbacks.py`
-82%, `capture.py` 82%, `commands.py` 75%, `manage.py` 75%, `jobs.py` 70%,
-`input.py` 67%, `reports.py` 38%.
+Cobertura actual de handlers (el terreno a ganar): `query.py` 94%, `callbacks.py`
+82%, `capture.py` 83%, `commands.py` 75%, `manage.py` 75%, `input.py` 75%,
+`jobs.py` 71%, `reports.py` 40%.
+
+Módulos que hoy **no llegan** a su target de la tabla de arriba: `llm_client.py`
+72% (target ≥ 85%), `tasks_client.py` 73% (≥ 80%), `transcriber.py` 56% (≥ 70%)
+y `security.py` 94% (target 100%). El resto está en target o por encima:
+`document_extractor.py` 97%, `config.py` 96%, `llm_schema.py` 95%,
+`embeddings.py` 92%, `vault_writer.py` 90%, `vault_search.py` 87%.
 
 ### Qué NO se mide en CI
 
@@ -609,9 +615,12 @@ El `reason` es obligatorio y nombra el bug (`"BUG E1: ..."`), así que el report
 de la suite es la lista viva de defectos conocidos. Un issue está cerrado cuando
 su `xfail` desapareció y su test pasa.
 
-Los seis archivos `tests/unit/test_audit_2026_08_*.py` siguen esta convención;
-conviven en ellos tests ya sin marca (bugs arreglados) y tests con marca (bugs
-abiertos).
+Los siete archivos `tests/unit/test_audit_2026_08_*.py` siguen esta convención.
+**Hoy ninguno lleva la marca puesta:** los 39 bugs de la auditoría se arreglaron
+en el mismo commit que sacó sus `xfail`, así que los 897 tests pasan (`0 xfailed`,
+`0 xpassed`) y todos esos reproductores quedaron como guards de regresión — el
+paso 4 del ciclo. La convención sigue vigente para el próximo bug que se
+documente antes de arreglarse.
 
 ---
 

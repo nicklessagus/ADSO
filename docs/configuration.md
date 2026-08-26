@@ -139,7 +139,45 @@ clave se descartaba en silencio (I2 de `docs/audit-2026-07-31.md`). Los tests
 Para inspeccionarlo desde código: `load_settings(...).unknown_keys`.
 
 Una sección que no sea un mapa de claves (ej: una lista) sí es `ConfigError` —
-ahí no hay ambigüedad sobre la intención.
+ahí no hay ambigüedad sobre la intención. Eso incluye a `vault_seed`, que tiene
+su propio constructor: escribirla como lista es la confusión natural (sus hijos
+`projects` y `areas` **sí** son listas), y antes llegaba al `data.get()` y mataba
+el arranque con un `AttributeError` crudo que no nombraba la clave. Hoy da
+`ConfigError` diciendo qué se esperaba y qué se recibió.
+
+## Las horas van entre comillas
+
+`reindex.time` y `weekly_report.time` deben escribirse **entre comillas**:
+
+```yaml
+reindex:
+  time: "03:00"     # ✅
+weekly_report:
+  time: "12:00"     # ✅
+  # time: 12:00     # ❌ el YAML lo lee como el número 720
+```
+
+Es una trampa real del formato, no una convención de estilo. PyYAML resuelve un
+escalar sin comillas que contiene dos puntos como **sexagesimal** (YAML 1.1), así
+que `12:00` no llega al bot como el string `"12:00"` sino como el entero `720`
+(12 × 60). Lo insidioso es que **el bug es intermitente por hora**: un cero
+inicial rompe el resolver sexagesimal, así que `03:00` sin comillas funciona
+igual y solo fallan las horas de `10:00` en adelante. El ejemplo de la doc
+andaba y el valor del usuario no.
+
+El loader lo rechaza —adivinar la intención de un número es peor que fallar—
+pero nombrando la causa real en vez de reportar un valor que no aparece en el
+archivo:
+
+```
+reindex.time: el YAML leyó la hora como el número 720.
+Falta escribirla entre comillas: time: "12:00"
+```
+
+Ambas horas se validan al cargar la config, no al programar el job: así un valor
+mal escrito da `ConfigError` como el resto de la config en vez de matar el
+arranque con un traceback crudo de `strptime` (G9 de
+`docs/audit-2026-07-31.md`).
 
 ## Campos declarados pero aún sin consumir
 

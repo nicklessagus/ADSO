@@ -172,6 +172,27 @@ class TestV3CodeFences:
         assert "## Ver también" in body
         assert "- [[nota-a]] — ejemplo" in body
 
+    async def test_un_fence_no_cuenta_como_item_del_bloque(self, vault: Path) -> None:
+        """El escaneo de items también saltea los bloques de código.
+
+        Si un `## Ver también` real queda sin links y más abajo hay un bloque de
+        código con una línea `- algo`, esa línea no es un item del bloque: el
+        header debe borrarse igual. Hueco que dejó la primera versión del fix
+        (chequeaba el header contra los fences pero no el escaneo interno).
+        """
+        nota = await create_note(
+            {"title": "Doc3", "type": "reference", "status": "active", "area": "docencia"},
+            "Texto.\n\n## Ver también\n\n- [[nota-c]] — link\n\n## Ejemplo\n\n"
+            "```yaml\n- item de una lista yaml\n```\n",
+            vault,
+        )
+
+        await remove_broken_wikilinks(vault, vault / "nota-c.md")
+
+        body = (await read_note(nota)).body
+        assert "## Ver también" not in body, "el bloque quedó sin items: el header se va"
+        assert "- item de una lista yaml" in body, "el bloque de código no se toca"
+
     async def test_items_de_texto_plano_sobreviven_al_borrar_el_header(self, vault: Path) -> None:
         # Un bloque real de "Ver también" con un link roto y un item de texto
         # plano: al irse el link, el header se borra y el item queda huérfano.

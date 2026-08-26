@@ -138,9 +138,10 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 
 ### Notas sobre archivar
 
-- `05-Archive` está en `vault.exclude_dirs` (`config.yaml`), así que **queda fuera del índice de embeddings**. El reindex nocturno (`reindex_vault`) borra como huérfano todo ID que ya no aparezca en el scan: archivar una nota elimina su embedding, y desarchivarla lo recalcula desde cero. No se conserva metadata `status: archived` en ChromaDB.
+- `05-Archive` está en `vault.exclude_dirs` (`config.yaml`), así que **queda fuera del índice de embeddings**. Archivar una nota elimina su embedding, y desarchivarla lo recalcula desde cero. No se conserva metadata `status: archived` en ChromaDB.
+- El sweep de huérfanos del reindex nocturno (`reindex_vault`) ya **no** borra sin más todo ID ausente del scan: re-verifica cada candidato en disco antes de eliminarlo, para no borrar una nota creada mientras el reindex corría. Pero repite los filtros del scan a propósito —`should_index()`— así que un ID que cayó bajo `exclude_dirs` **sí** se borra aunque el archivo exista. Es exactamente el caso de archivar: la nota sigue en el filesystem, bajo `05-Archive/`, y su embedding se va igual.
 - Por lo mismo, las búsquedas semánticas **no pueden** incluir archivados: no hay vectores que consultar ni opción de "buscar también en archivados".
-- Los wikilinks que apunten a notas archivadas siguen funcionando (Obsidian resuelve por nombre de archivo, no por ruta)
+- Los wikilinks que apunten a notas archivadas siguen funcionando (Obsidian resuelve por nombre de archivo, no por ruta). **Y ahora la limpieza automática lo respeta:** ante el movimiento de un archivo `.md`, `VaultWatcher.on_moved` emite un *delete* para el origen (su embedding queda huérfano) y un *change* para el destino. Ese delete disparaba el mismo camino que borrar la nota, y le borraba los `[[wikilinks]]` a todas las demás. Hoy `remove_broken_wikilinks()` verifica primero si otra nota del vault conserva ese stem y, si la hay, no toca nada. Renombrar una nota —que sí cambia el stem— sigue limpiando los links que quedaron rotos
 - Archivar es reversible; borrar no lo es — pero en ambos casos los embeddings se eliminan
 
 ---
@@ -208,7 +209,8 @@ Política:
 - `VaultWatcher` (`watchdog`) corre en background y detecta archivos `.sync-conflict-*` en tiempo real via `inotify`
 - Al detectar uno, envía un mensaje por Telegram indicando el archivo y la carpeta afectada
 - El usuario resuelve manualmente y borra el archivo de conflicto
-- Los cambios externos normales (sin conflicto) se re-embeds automáticamente sin notificación (salvo `watcher.debug: true`)
+- Los cambios externos normales (sin conflicto) se re-embeds automáticamente sin notificación (salvo `watcher.debug: true`) — **pero solo si la nota es indexable**: el callback aplica el mismo predicado `should_index()` que el reindex nocturno, así que editar desde Obsidian una nota de `05-Archive/` o un `_index.md` ya no la mete al índice. Antes el watcher no filtraba nada y esa noche el reindex la borraba como huérfana: un ciclo diario de embed + delete que gastaba quota de la Embedding API. El backup git **no** se saltea en esos casos — el cambio existe en el vault aunque la nota no vaya a ChromaDB
+- Vaciar una nota desde Obsidian (dejar el body en blanco) **borra su embedding**, tanto por el watcher como en el reindex nocturno: si no, `/buscar` seguía devolviéndola con un snippet del contenido que el usuario ya había borrado
 
 ---
 

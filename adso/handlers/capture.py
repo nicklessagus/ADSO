@@ -592,17 +592,38 @@ def _apply_note_corrections(fm: dict, text: str, text_lower: str) -> bool:
     if text_lower.startswith("tag ") or text_lower.startswith("agregar tag "):
         _add_tag(fm, text_lower.split("tag ", 1)[1].strip())
         return True
-    if text_lower.startswith("tipo ") or text_lower.startswith("type "):
-        new_type = text_lower.split(" ", 1)[1].strip()
-        if new_type in ("reference", "referencia", "note", "nota"):
-            fm["type"] = "reference"
-        elif new_type in ("task", "tarea"):
-            fm["type"] = "task"
-        elif new_type in ("idea",):
-            fm["type"] = "idea"
-        _resync_status_with_type(fm)
-        return True
-    return False
+    return _apply_type_correction(fm, text_lower)
+
+
+def _apply_type_correction(fm: dict, text_lower: str) -> bool:
+    """Aplica el prefijo `tipo`/`type`, sea cual sea el tipo vigente.
+
+    Vive aparte porque `tipo` es la única corrección **agnóstica del tipo**: es
+    la vía para convertir una tarea en nota y viceversa. Estaba solo en
+    `_apply_note_corrections`, así que sobre una tarea el texto no se reconocía,
+    caía al fallback de título y la tarea terminaba llamándose "tipo nota" —
+    perdiendo el título y sin cambiar nunca de tipo. C12 de la auditoría 2026-08.
+
+    Args:
+        fm: Frontmatter a mutar.
+        text_lower: Texto de la corrección, en minúsculas y sin espacios al borde.
+
+    Returns:
+        True si el texto era una corrección de tipo (aunque el valor no se
+        reconozca: el prefijo ya indica la intención y no debe caer al fallback
+        de título).
+    """
+    if not (text_lower.startswith("tipo ") or text_lower.startswith("type ")):
+        return False
+    new_type = text_lower.split(" ", 1)[1].strip()
+    if new_type in ("reference", "referencia", "note", "nota"):
+        fm["type"] = "reference"
+    elif new_type in ("task", "tarea"):
+        fm["type"] = "task"
+    elif new_type in ("idea",):
+        fm["type"] = "idea"
+    _resync_status_with_type(fm)
+    return True
 
 
 def _resync_status_with_type(fm: dict) -> None:
@@ -639,6 +660,12 @@ def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
     Detecta fecha, prioridad, tags y título en el mismo texto, en cualquier orden.
     Retorna True si se modificó al menos un campo.
     """
+    # `tipo` primero: es agnóstico del tipo vigente y su prefijo es inequívoco.
+    # Además tiene que ganarle al parser de fecha, que sobre "tipo nota" podría
+    # encontrar una expresión temporal por casualidad.
+    if _apply_type_correction(fm, text_lower):
+        return True
+
     changed = False
 
     # Fecha: "fecha X" o texto que contiene expresión de fecha
@@ -1131,7 +1158,7 @@ async def _cb_note_correct(query: Any, context: ContextTypes.DEFAULT_TYPE) -> No
     """
     pending = context.user_data.get("pending_note")
     if not pending:
-        await query.answer("No hay nota pendiente.")
+        await query.answer("No hay nota pendiente.", show_alert=True)
         return
     pending["awaiting_correction"] = True
     pending["msg_id"] = query.message.message_id

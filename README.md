@@ -44,7 +44,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |
 | OCR / Visión | `pytesseract` (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | PDF | `pymupdf` — extracción de texto, metadata académica y detección de papers |
-| Extracción web | arXiv API (papers) / Gemini nativo |
+| Extracción web | arXiv API (papers). **No hay extracción de web genérica:** un link que no sea de arxiv.org sigue el flujo de texto y la URL queda en el body |
 | Knowledge base | Obsidian vault (Markdown + YAML Frontmatter) |
 | Embeddings | Gemini Embedding API (remoto) |
 | Búsqueda semántica | ChromaDB (local) |
@@ -52,7 +52,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Infraestructura | Docker + docker-compose en Raspberry Pi 4 (4GB RAM) |
 | Calendar / Tasks | Google Tasks API (implementado) + Google Calendar API v3 *(diferido)* |
 | Backup | Git (repo privado en GitHub) |
-| Sync | Syncthing bidireccional + Git (backup/DR). `VaultWatcher` re-embeds cambios externos automáticamente |
+| Sync | Syncthing bidireccional + Git (backup/DR). `VaultWatcher` re-embeds cambios externos automáticamente, con el mismo filtro que el reindex nocturno (`should_index`: fuera `05-Archive`, los `_index.md` y las carpetas de `vault.exclude_dirs`) |
 
 ## Documentación
 

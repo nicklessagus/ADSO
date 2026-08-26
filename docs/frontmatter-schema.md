@@ -92,7 +92,13 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 `pending-classification` está disponible para todos los tipos: indica que el LLM no respondió (modo degradado). El bot intentará reclasificar automáticamente.
 
-> **Normalización de aliases:** si el LLM devuelve un status no canónico, `STATUS_ALIASES` (`llm_schema.py`) lo coacciona antes de validar: `todo`/`open`/`new` → `pending`, `draft` → `raw`, `published` → `active`.
+> **Normalización de enums (`_norm_enum` en `llm_schema.py`).** Antes de validar `type`/`status`/`priority` contra su enum, el valor se stringifica, se hace `strip`, se pasa a minúsculas **y se colapsan los espacios internos a guión**: `"In Progress"` → `in-progress`. Un modelo chico devuelve la forma con espacio tan seguido como la canónica, y sin esa normalización tiraba *toda* la respuesta a modo degradado. Acepta cualquier tipo sin lanzar (incluidos `dict`/`list` no hasheables del fallback de Groq).
+>
+> **Aliases de status:** si el valor normalizado sigue sin ser canónico, `STATUS_ALIASES` lo mapea antes de rechazar: `todo`/`open`/`new` → `pending`, `draft` → `raw`, `published` → `active`.
+>
+> **Enum vacío = sin valor:** un `status` o `priority` que llega como string vacío (`""`) se **descarta** (queda `None`) en vez de hacer fallar la validación. `""` es "sin valor", igual que `None` —que ya se aceptaba—, y el default aguas abajo completa el campo; antes un campo opcional vacío mandaba la captura entera a modo degradado.
+>
+> **Último recurso en el writer:** `create_note()` (`vault_writer.py`) revalida `type`/`status` contra sus enums y **coacciona** lo que no pasa — `type` inválido → `idea` + `pending-classification`; `status` inválido para su type → el fallback del type. Cubre a los escritores que no pasan por el validador del LLM (índices de `manage.py`, callers directos). Ver `docs/vault-interface.md` § `create_note()`.
 
 ---
 
@@ -270,6 +276,8 @@ source: system
 
 > Las áreas usan el mismo campo `description` — no hay diferencia estructural entre el `_index.md` de proyecto y de área, excepto que los proyectos tienen `status` y `sections`.
 
+> **`description` se valida por contenido, no por presencia.** `_validate_manage_payload` (`llm_schema.py`) rechaza con `LLMResponseError` una operación de crear proyecto o área cuya `description` sea `""`, solo espacios o `null` — antes solo se chequeaba que la clave existiera, así que un `_index.md` podía nacer con la descripción vacía. No es cosmético: la `description` es lo que el LLM lee para decidir en qué proyecto o área clasificar cada nota nueva. Un índice sin ella deja al destino invisible para la clasificación.
+
 ---
 
 ## `read_status`
@@ -325,6 +333,10 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 - **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar. Solo aplica a tipos accionables: `task`, `idea`.
 - **Extracción de papers:** `document_extractor.py` detecta heurísticamente si un PDF es un paper académico (≥ 2 señales: abstract, DOI, references, etc.) y extrae localmente secciones clave (abstract, keywords, methods, conclusions). Solo ese extracto compacto (~3000 chars) se envía al LLM. El título se extrae del metadata del PDF; si está vacío (común en arXiv), se infiere de las primeras líneas del texto. Fórmulas matemáticas: bloques detectados por número de ecuación `(1)`, `(2)` y reemplazados por `> [mathematical content — see PDF]`. `tags` y `keywords` son distintos: `keywords` = palabras clave del paper en idioma original; `tags` = etiquetas ADSO en inglés.
 - **Embeddings de papers:** ChromaDB indexa el body completo generado por el LLM (AI Summary + Abstract + Methods + Conclusions). Gemini Embedding API es multilingüe y maneja búsqueda cross-lingual.
+- **`due_date` / `scheduled` se coaccionan a `str`, no solo se validan.** Groq (sin schema constrained) devuelve a veces `due_date: 20260101` como **int**: `datetime.fromisoformat(str(val))` lo acepta, pero después rompía el slice `due_date[:10]` de `tasks_client` al pushear la tarea. `_validate_capture_payload` reescribe el campo con su forma string tras validarlo; lo que no parsea como ISO 8601 se descarta (`None`).
+- **`summary` no-string se descarta.** El `summary` del payload (nivel superior, el que usa el flujo de arXiv para el callout `> [!summary] AI Summary`) puede venir como dict o lista del fallback de Groq. Se coacciona a `None` con log a `warning`, para que el `(payload.get("summary") or "").strip()` del flujo de arXiv no lance `AttributeError`.
+- **`type` inválido en `text`/`audio` no degrada la captura** (`coerce_discarded_type` en `llm_schema.py`, aplicado a los `media_type` de `BUTTON_CHOSEN_TYPE_MEDIA` = `{text, audio}`). En esos dos medios el usuario ya acotó el tipo con los botones `[Tarea]`/`[Nota]` antes de clasificar, así que hacer fallar la validación por ese campo quemaba los 3 reintentos y mandaba a modo degradado una nota por un valor que el flujo iba a acotar igual. La coerción mapea un puñado de aliases (`note`/`nota`/`referencia` → `reference`; `tarea`/`todo`/`recordatorio` → `task`) y cualquier otro valor cae a `idea`; si el `status` que venía atado al type descartado no aplica al nuevo, se descarta también (el default aguas abajo lo completa). **En `document`/`image`/`link` no se aplica:** ahí el `type` sí lo decide el LLM y un valor inválido debe seguir cayendo a modo degradado.
+  - Cuánto se descarta después depende del botón: `[Tarea]` pasa `forced_type="task"` y **pisa** el type del LLM (más `status: pending`); `[Nota]` **no** fuerza type — pasa `prevent_task=True`, que solo convierte un `task` en `reference` + `status: active` y deja en pie la elección del LLM entre `reference` e `idea` (`_classify_and_preview`, `capture.py`). Es decir: con `[Nota]`, el `idea` de la coerción sí llega al preview.
 
 ---
 

@@ -102,8 +102,9 @@ La pregunta `[Ya lo leí]` / `[Lo quiero leer]` existe **solo para PDFs** (`hand
   - `manage.py` — gestión de proyectos y áreas. Implementadas: `create_project`, `create_area`, `create_section`. Archivar, borrar y renombrar están en el diseño pero el handler responde `"Operación '…' todavía no está disponible."`
   - `query.py` — `/buscar` (retrieval semántico, Fase 7.0)
   - `reports.py` — `/reporte` y `/reporte_full`
-  - `jobs.py` — crons. `bot.py` registra tres: `heartbeat_job` (cada 60s), `reclassify_inbox` (cada `llm.degraded_retry_minutes`) y `reindex_job` (diario, a `reindex.time`). El **reporte semanal está configurado** en `config.yaml` (`weekly_report`) **pero todavía no tiene job registrado** — pendiente (§2.2 de `docs/improvements-2026-07.md`)
-- Entry point sincrónico (`run_bot()`); el setup async del vault se ejecuta via `post_init` de PTB antes de arrancar el polling — PTB gestiona su propio event loop
+  - `jobs.py` — crons. `bot.py` registra hasta tres: `heartbeat_job` (cada 60s, siempre), `reclassify_inbox` (cada `llm.degraded_retry_minutes`, solo si ese valor es > 0) y `reindex_job` (diario a `reindex.time`, solo si `reindex.enabled`). El **reporte semanal está configurado** en `config.yaml` (`weekly_report`) **pero todavía no tiene job registrado** — pendiente (§2.2 de `docs/improvements-2026-07.md`)
+- Entry point sincrónico (`run_bot()`); el setup async del vault se ejecuta via `post_init` de PTB antes de arrancar el polling — PTB gestiona su propio event loop. Ese `_post_init` también hace el **warm-up de ChromaDB** (`embeddings._ensure_initialized` en `asyncio.to_thread`): la inicialización importa `chromadb` y abre sqlite, medido en 4,4 s en la RPi4, y sin el warm-up la disparaba el primer mensaje del usuario desde `query_similar`, congelando el event loop entero (callbacks, heartbeat y watcher incluidos) y ensuciando la etapa `links` del `Stopwatch`. Si el warm-up falla, se loguea y la inicialización queda lazy — el arranque no se cae
+- **Los mensajes editados se ignoran.** Los cuatro `MessageHandler` se registran con `& filters.UpdateType.MESSAGE` y los handlers de entrada llevan además el decorador `@_solo_mensajes_nuevos` (`input.py`) como red de seguridad. Sin eso, un `edited_message` (corregir un typo, editar el caption de una foto o un PDF) llega con `update.message = None` y mata al handler con `AttributeError`. Una edición no es contenido nuevo: no hay flujo de re-procesamiento
 - Inline keyboards (`InlineKeyboardMarkup`, construidos en `keyboards.py`) para confirmación, desambiguación y navegación de resultados
 - Middleware de autenticación por `user_id` (gate global + decorador por handler)
 - Gestiona el flujo de confirmación con el usuario antes de escribir
@@ -119,11 +120,12 @@ La pregunta `[Ya lo leí]` / `[Lo quiero leer]` existe **solo para PDFs** (`hand
 ```
 1. Usuario manda audio
 2. Bot transcribe con Whisper y muestra el texto (tap-to-copy)
-   [Confirmar]  [Corregir]  [Cancelar]
+   [Cancelar]  [Corregir]  [Confirmar]
 3a. [Confirmar] → entra al flujo normal de clasificación
-3b. [Corregir]  → el bot edita el mismo mensaje a "Enviá el texto corregido:"
+3b. [Corregir]  → el bot edita el mismo mensaje agregando el pie
+                   "Texto corregido (escribir a continuación):"
                    Usuario manda la corrección → bot edita el mensaje con texto nuevo
-                   [Confirmar]  [Corregir]  [Cancelar]  (puede corregir de nuevo)
+                   [Cancelar]  [Corregir]  [Confirmar]  (puede corregir de nuevo)
 3c. [Cancelar]  → descarta el audio, no queda estado pendiente
 4. El texto confirmado entra al flujo normal (clasificación → preview → confirmación → vault)
 ```
@@ -142,7 +144,7 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
   - **Cuota diaria agotada** (`PerDay` en el error): degradado inmediato, sin reintentos — no tiene sentido esperar.
   - **Rate limit RPM**: espera el `retryDelay` sugerido por la API (máx 70s) antes de reintentar.
   - **Otros errores** (red, timeout, parse): backoff fijo (1s, 2s, 4s).
-  En cada reintento el bot muestra al usuario: `"⏳ Servicio caído, reintento 2/3..."`. Después del tercer fallo → modo degradado.
+  En cada reintento el bot muestra al usuario: `"Servicio caído, reintento 2/3..."`. Después del tercer fallo → modo degradado.
 - **Modo degradado:** el input se guarda en `00-Inbox/` con `status: pending-classification`. El body queda envuelto en un callout de warning colapsable (`> [!warning]-`) para que sea visible en Obsidian. Si el usuario mandó texto junto con el archivo (caption), ese texto se guarda en el campo `user_context` del frontmatter para que el cron lo use al reclasificar. Un cron reintenta cada `llm.degraded_retry_minutes` (default 30 min) según el siguiente esquema:
 
   **Caso A — nota con destino ya asignado** (`project` o `area` en frontmatter): el cron llama al LLM silenciosamente, preserva el destino del usuario (nunca lo sobreescribe), genera tags/summary/body limpio, mueve la nota al directorio correcto y manda una notificación breve: `"✓ Nota clasificada: {título} → {destino}"`. No hay preview — la escritura es directa.
@@ -196,6 +198,7 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Escritura directa al filesystem via volumen Docker
 - Crea carpetas de proyecto/sección si no existen (previa confirmación)
 - Maneja conflictos de nombres y actualización de notas existentes
+- **Valida `type` y `status` al crear** (`create_note`): un `type` fuera de `VALID_TYPES` se **coacciona** a `idea` + `status: pending-classification` con log a `warning`, y un `status` que no pertenezca al tipo se degrada a `pending-classification` (o `active` si el tipo no lo admite). Se coacciona en vez de lanzar porque el caller típico es `_cb_confirm` — el usuario ya apretó `[Confirmar]` y el texto de audio/OCR/Vision no existe en ningún otro lado. Antes `create_note` escribía cualquier cosa: los índices de `manage.py` y todo escritor que no venga del LLM no pasan por `_validate_capture_payload`, y un `type` inválido además rompía el routing (`_resolve_dest_dir` cae a Inbox) y desactivaba en silencio la validación de status de `set_property`
 - Después de cada escritura confirmada, acumula cambios y hace `git commit + push` al repo de backup del vault con debounce configurable (`backup.debounce_seconds` en `config.yaml`, default 30s). Si llegan varias notas seguidas, se consolidan en un solo commit+push
 - Mensaje de commit generado automáticamente por `_build_message()`: `"Add note: {título}"` con un solo título, o `"Add {N} notes: {t1}, {t2}, … (+{K} más)"` cuando el debounce agrupa varias (lista hasta 5 títulos). No existe un mensaje `"Update note:"` — toda escritura acumulada se commitea como `Add`
 - El vault es un repo git independiente de ADSO, hosteado en GitHub (privado)
@@ -214,8 +217,8 @@ La corrección es no destructiva: siempre se edita el mismo mensaje (no se crean
 - Genera embeddings via Gemini Embedding API (remoto, no local)
 - Almacena y consulta vectores en ChromaDB embebido
 - Indexa notas nuevas inmediatamente después de confirmación (async)
-- Cron nocturno re-indexa notas modificadas o sin embedding; también limpia huérfanos (notas en ChromaDB que ya no existen en el vault)
-- Excluye carpetas en `vault.exclude_dirs`
+- Cron nocturno re-indexa notas modificadas o sin embedding; también limpia huérfanos (notas en ChromaDB que ya no existen en el vault). El sweep de huérfanos re-verifica el disco antes de borrar: el snapshot de `rglob` se toma al principio y el reindex tarda minutos, así que una nota confirmada en esa ventana se borraba como huérfana
+- **`should_index(md_path, vault_path, exclude_dirs)`** es el predicado único de "qué entra al índice semántico", y lo usan tanto el reindex nocturno como el reindex externo del watcher. Devuelve `False` para lo que no sea `.md`, para paths fuera del vault, para lo que caiga bajo `vault.exclude_dirs` (default: `05-Archive`, `.obsidian`, `.trash`), para los `_index.md` y para los `.sync-conflict-*`. Existe porque los dos caminos tenían criterios distintos: el watcher no filtraba nada, así que editar desde Obsidian una nota de `05-Archive` (o un `_index.md`) la metía al índice y esa misma noche el reindex la borraba como huérfana — un ciclo diario de embed + delete que gastaba quota de la Embedding API
 
 ### `vault_watcher.py` — Watcher de cambios externos
 Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Obsidian/Syncthing sin pasar por el bot.
@@ -223,12 +226,12 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 | Evento | Siempre | Solo con `watcher.debug: true` |
 |---|---|---|
 | `.sync-conflict-*` creado | Notifica por Telegram | — |
-| `.md` creado externamente (ej: desde Obsidian) | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
-| `.md` modificado externamente | Re-embed (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
+| `.md` creado externamente (ej: desde Obsidian) | Re-embed si `should_index` lo acepta (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
+| `.md` modificado externamente | Re-embed si `should_index` lo acepta; si la nota quedó **vacía**, se borra su embedding (`on_external_change`) | Notifica `📝 [debug]` por Telegram |
 | `.md` borrado externamente | Elimina embedding de ChromaDB + limpia wikilinks rotos en otras notas (`on_external_delete`) — notifica por Telegram si hubo notas modificadas | Notifica `🗑 [debug]` por Telegram |
 
-- **`on_external_change`** → `_index_note_safe` (recalcula embedding)
-- **`on_external_delete`** → `embeddings.remove_note(note_id)` (limpia ChromaDB reactivamente) + `remove_broken_wikilinks()` (elimina referencias en bloques `## Ver también` de otras notas; notifica por Telegram si modificó alguna)
+- **`on_external_change`** → filtra con `should_index` (ver `embeddings.py`) y, si pasa, `_index_note_safe` (recalcula embedding). Tres desenlaces posibles: nota ilegible (YAML roto, archivo a medio sincronizar) → no se reindexa y **no** se borra el embedding; nota vaciada desde Obsidian → se **elimina** su embedding, porque el vector viejo hacía que `/buscar` la devolviera con un snippet que el usuario ya había borrado; nota normal → re-embed. El backup git se dispara igual, aunque la nota no vaya al índice
+- **`on_external_delete`** → `embeddings.remove_note(note_id)` (limpia ChromaDB reactivamente) + `remove_broken_wikilinks()` (elimina referencias en bloques `## Ver también` de otras notas; notifica por Telegram si modificó alguna). La limpieza se **saltea** si otra nota del vault conserva el mismo stem: los wikilinks de Obsidian resuelven por stem, así que ahí el link no está roto y borrarlo sería pérdida de datos — es exactamente lo que pasa al **mover** una nota, porque el watcher emite un delete del origen
 - Fallback a `PollingObserver` si `inotify` no está disponible (algunos bind mounts de Docker)
 - Stats en `/status`: `conflicts_detected`, `changes_detected`, `deletions_detected`, `last_event_at`
 
@@ -241,6 +244,7 @@ Monitorea el vault via `inotify` (Linux) para detectar cambios producidos por Ob
 - **`health_report(stale_days)`** — proyectos/áreas sin actividad en N días, tareas vencidas, ideas `raw`, inbox acumulado.
 - **`reading_queue(project, area)`** — papers con `read_status: unread` ordenados por prioridad (high → medium → low), agrupados por proyecto/área.
 - Cada reporte incluye header ASCII estándar + síntesis LLM de 2-3 oraciones (no bloqueante — si Gemini falla, el reporte se genera igual).
+- **Reporte vacío:** los cuatro reporters devuelven `ReportBytes`, una subclase de `bytes` que además lleva `item_count` (cuántas notas del scope entraron). Si es `0`, `_send_report` (`handlers/reports.py`) responde `"No se encontraron notas para este scope."` en el chat en vez de mandar un `.md` con secciones vacías. El conteo viaja aparte porque medirlo en bytes no funcionaba: el header ASCII solo pesa ~650 bytes (caracteres de bloque UTF-8) contra un umbral de 400, así que esa rama era código muerto.
 - Links `obsidian://` a cada nota para apertura directa en Obsidian.
 - Trigger: `/reporte` command → teclado inline con los 4 tipos.
 
@@ -373,15 +377,20 @@ Usuario manda imagen
   │
   [OCR]  [Gemini Vision]  [Describir]  [Cancelar]
   │
-  ├─ [OCR] → pytesseract → texto en código (tap-to-copy) → [Confirmar][Corregir][Cancelar]
-  ├─ [Gemini Vision] → Gemini Vision API → descripción en código → [Confirmar][Corregir][Cancelar]
+  ├─ [OCR] → pytesseract → texto en código (tap-to-copy)
+  │     → [Cancelar][Corregir] / [Gemini Vision][Confirmar]
+  ├─ [Gemini Vision] → Gemini Vision API → descripción en código
+  │     → [Cancelar][Corregir][Confirmar]
   └─ [Describir] → usuario escribe descripción → LLM clasifica → flujo de confirmación
   │
   Si [OCR] corre bien pero no encuentra texto → teclado sin botón OCR:
       fila 1: [Gemini Vision]   fila 2: [Cancelar] [Describir]
-  Si [OCR] o [Gemini Vision] fallan con error → no hay teclado de fallback:
-      el bot limpia el estado, borra el temporal y pide reenviar la imagen
-      (sin esa limpieza el bot quedaba trabado hasta /reset)
+  Si [OCR] o [Gemini Vision] fallan con error desde la imagen recién recibida →
+      no hay teclado de fallback: el bot limpia el estado, borra el temporal y
+      pide reenviar la imagen (sin esa limpieza quedaba trabado hasta /reset)
+  Si el error es de [Gemini Vision] pedido DESDE el resultado de OCR → el texto
+      del OCR se conserva: el bot muestra el error junto al texto extraído y
+      repone build_ocr_result_keyboard() para confirmar, corregir o reintentar
   → LLM clasifica → flujo de confirmación → vault
 ```
 Sin pregunta de read_status — la imagen se manda para guardar algo, no como contenido a leer.
@@ -547,8 +556,8 @@ Cuando un componente falla, el bot ofrece alternativas en vez de fallar silencio
 
 ```
 Error genérico:
-  Intento 1 falla → "⏳ Servicio caído, reintento 2/3..." (espera 1s)
-  Intento 2 falla → "⏳ Servicio caído, reintento 3/3..." (espera 2s)
+  Intento 1 falla → "Servicio caído, reintento 2/3..." (espera 1s)
+  Intento 2 falla → "Servicio caído, reintento 3/3..." (espera 2s)
   Intento 3 falla → modo degradado (inbox + aviso)
 
 Error 429 RPM:
@@ -568,13 +577,20 @@ Para embeddings: la nota se escribe igual al vault — el embedding queda pendie
   → "OCR no encontró texto. Intentar con Gemini Vision o describir el contenido."
   → fila 1: [Gemini Vision]   fila 2: [Cancelar] [Describir]
 
-[OCR] o [Gemini Vision] lanzan un error
+[OCR] o [Gemini Vision] lanzan un error sobre la imagen recién recibida
   → "Error en OCR: {e}" + "Reenviar la imagen para reintentar."
     (o el equivalente de Gemini Vision)
   → sin teclado: el bot limpia `pending_fallback_pdf` y borra el temporal.
     Dejar el estado colgado hacía que `_has_pending_keyboard` siguiera en True
     y todo input posterior recibiera "Hay una acción pendiente" sin botones a
     la vista — el bot quedaba muerto hasta /reset.
+
+[Gemini Vision] pedido desde el resultado de OCR lanza un error
+  → "Error consultando Gemini Vision: {e}" + el texto del OCR
+  → se CONSERVA `pending_transcript` y se repone `build_ocr_result_keyboard()`.
+    Acá el estado vivo es la transcripción del OCR, no `pending_fallback_pdf`:
+    limpiarla y borrar el temporal tiraba un texto ya pago y dejaba el flujo
+    sin botones (dead-end hasta /reset). C4 de la auditoría 2026-08.
 ```
 
 ### Extracción web (links)
@@ -633,6 +649,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 |---|---|
 | **Texto recibido** | `[Cancelar]` `[Tarea]` `[Nota]` / `[🔎 Buscar en el vault]` — dos filas |
 | **Texto con keywords de gestión** | `[Crear proyecto]` `[Crear área]` / `[Cancelar]` `[Tarea]` `[Nota]` |
+| **Texto con patrón de inyección** | `[Cancelar]` `[Tarea]` `[Nota]` bajo `"Contenido con patrón sospechoso. ¿Guardar de todas formas?"` — sin la fila de `[🔎 Buscar en el vault]` |
 | **PDF recibido** | `[Cancelar]` `[Ya lo leí]` `[Lo quiero leer]` |
 | **Imagen recibida** (o PDF sin texto extraíble) | `[OCR]` `[Gemini Vision]` / `[Cancelar]` `[Describir]` — dos filas |
 | **Audio transcripto** | `[Cancelar]` `[Corregir]` `[Confirmar]` → al confirmar: `[Cancelar]` `[Tarea]` `[Nota]` / `[🔎 Buscar en el vault]` |
@@ -641,22 +658,26 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **Texto extraído de un documento** | `[Cancelar]` `[Corregir]` `[Confirmar]` |
 | **Captura** (nota o tarea, con o sin destino) | `[Cancelar]` `[Corregir]` `[Reubicar]` / `[Confirmar]` — dos filas |
 | **Reubicar destino** | `[Inbox]` / `[Elegir área]` `[Elegir proyecto]` / `[Cancelar]` — tres filas |
-| **Selector de área / proyecto** | los ítems existentes en pares / `[Cancelar]` `[← Volver]` |
+| **Selector de área / proyecto** | los ítems existentes en pares / `[Cancelar]` `[← Volver]`. Si el ítem elegido se borró entre que se dibujó el teclado y el tap (`resolve_item_token` devuelve `None`), el bot avisa `"Esa área / Ese proyecto ya no existe. Elegir otro destino."` y **repone el selector actualizado** — la nota sigue pendiente, así que dejarlo sin botones era un dead-end hasta `/reset` |
 | **Paper de arXiv ya existente** | `[Cancelar]` `[Crear igual]` |
 | **Gestión** (crear proyecto/área) | `[Cancelar]` `[Confirmar]` |
-| **Resultado de consulta** | `[Generar informe .md]` |
+| **Resultado de consulta** | `[Generar informe .md]` — el botón vale solo para la consulta vigente: pedido desde una consulta vieja del historial responde `"La consulta expiró."` como alerta efímera, en vez de mandar el informe de la última consulta |
 | **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
 | **OCR sin texto encontrado** | `[Gemini Vision]` / `[Cancelar]` `[Describir]` |
 | **`/status` con inbox pendiente sin destino** | `[Clasificar inbox]` |
-| **`/reporte`** | tres teclados encadenados: tipo → categoría → lista de ítems (ver `reports.py`) |
+| **`/reporte`** | tres teclados encadenados: tipo → categoría → lista de ítems (ver `reports.py`). Si el proyecto/área elegido ya no existe, el bot avisa y repone el menú de tipos en vez de degradar el pedido a un reporte de todo el vault |
 
 *(Diseño, no implementado: `[Todo]` `[Proyecto1]` … para refinar el scope de una consulta, `[Ver referencias completas]` y `[Solo relaciones directas]` / `[Expandir un grado más]` para la expansión desde nodo — Fase 7.)*
 
-Ante un **error** de OCR o de Gemini Vision no hay teclado de fallback: el bot limpia el estado y pide reenviar la imagen. El teclado alternativo aparece solo cuando el OCR corre bien y no encuentra texto.
+Ante un **error** de OCR o de Gemini Vision sobre la imagen recién recibida no hay teclado de fallback: el bot limpia el estado y pide reenviar la imagen. El teclado alternativo aparece solo cuando el OCR corre bien y no encuentra texto. La excepción es el error de Gemini Vision pedido **desde el resultado de OCR**: ahí el texto del OCR se conserva y el bot repone el teclado de resultado de OCR.
+
+**Doble tap y previews viejos.** Cuando un callback llega y ya no hay estado detrás (`pending_note`, `pending_transcript`, `pending_extraction`, `pending_arxiv`), el bot responde con una **alerta efímera** (`query.answer(..., show_alert=True)`) en vez de editar el mensaje: con lag de red, el segundo tap llega cuando el primero ya dejó el preview nuevo —con su teclado— en ese mismo mensaje, y editarlo lo destruía. Por el mismo motivo, `_cb_confirm` compara el `message_id` del callback contra el del preview vigente (registrado por `_remember_preview_msg` en cada render) y rechaza un `[Confirmar]` disparado desde un preview anterior del historial con `"Este preview ya no está vigente. Usar los botones del último mensaje."`
 
 **Convención de orden:** en teclados con `[Cancelar]` y `[Confirmar]` en la misma fila, `[Cancelar]` siempre va a la izquierda (más alejado del pulgar) y `[Confirmar]` a la derecha. Las acciones intermedias (Reubicar, Corregir) van en el centro.
 
-**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución, el bot rechaza cualquier nuevo mensaje (texto, audio, documento) y los comandos que arrancan flujos nuevos (`/clasificar`) con un aviso. `_has_pending_keyboard` cubre `pending_note`, `pending_raw_content`, `pending_transcript` y `pending_extraction` (ambos sin `awaiting_correction`), `pending_fallback_pdf`, `pending_report`, `pending_read_status`, `pending_arxiv` y `pending_operation`. Los estados que esperan texto a propósito (`awaiting_correction`, `pending_description`, `manage_missing_fields`) no bloquean texto, pero sí bloquean audio, fotos, documentos y comandos vía `_is_awaiting_text_input`. Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat. Comandos de solo lectura (`/status`) no se bloquean.
+**Bloqueo de input:** mientras haya un teclado inline pendiente de resolución, el bot rechaza cualquier nuevo mensaje (texto, audio, documento) y los comandos que arrancan flujos nuevos (`/clasificar`) con un aviso. `_has_pending_keyboard` cubre `pending_note`, `pending_raw_content`, `pending_transcript` y `pending_extraction` (ambos sin `awaiting_correction`), `pending_fallback_pdf`, `pending_report`, `pending_read_status`, `pending_arxiv` y `pending_operation`. Los estados que esperan texto a propósito (`awaiting_correction`, `pending_description`, `manage_missing_fields`) no bloquean texto, pero sí bloquean audio, fotos, documentos y comandos: los dos primeros vía `_is_awaiting_text_input`; `manage_missing_fields` vía el `pending_operation` que lo acompaña, que ya está en `_has_pending_keyboard` (`handle_text` lo chequea antes de ese guard, y por eso el texto sí pasa). Al presionar cualquier botón, el aviso y el mensaje bloqueado se borran del chat.
+
+Los guards por comando no son uniformes: `/clasificar` y `/buscar` chequean los dos (`_is_awaiting_text_input` y `_has_pending_keyboard`); `/status`, `/reporte` y `/reporte_full` solo chequean el primero, así que se pueden invocar con un teclado pendiente pero no en medio de una corrección; `/start`, `/help` y `/reset` no se bloquean nunca — `/reset` es justamente el failsafe.
 
 ### Desambiguación de intención
 
@@ -689,26 +710,21 @@ Bot: lista directa (el LLM ya parseó el scope)
 
 ### Output de consultas
 
-**Formato de cada ítem** (igual en inline y en informe `.md`):
+**Respuesta inline** (hasta `_INLINE_MAX` = 3 ítems): los ítems van directamente en el chat de Telegram, con el botón `[Generar informe .md]`. Formato de cada ítem (`_format_inline` en `handlers/query.py`) — sin link `obsidian://`, porque Telegram no lo hace clicable:
 ```
-📄 Baseline CNN — experimento inicial de tesis
-Estado: active | Área: investigacion
-"Los resultados del primer experimento muestran una accuracy de 0.87..."
-obsidian://open?vault=ADSO&file=2026-01-10-baseline-cnn-results
+1. Baseline CNN — experimento inicial · 📁 tesis · active · 87%
+Los resultados del primer experimento muestran una accuracy de 0.87...
 ```
+Si ninguna nota superó el umbral, encabeza la lista un aviso de baja confianza y se muestran igual las más cercanas.
 
-**Respuesta inline** (2-3 ítems): ítems directamente en el chat de Telegram + botones de acción.
-
-**Informe `.md`** (resultado largo o cuando el usuario lo pide): archivo generado y enviado como documento en Telegram. El usuario lo abre en Obsidian donde tiene links clicables.
+**Informe `.md`** (más de 3 ítems, o cuando el usuario aprieta el botón): archivo generado y enviado como documento en Telegram. El usuario lo abre en Obsidian, donde los links `obsidian://` sí son clicables. Ahí cada ítem lleva similitud, ubicación, estado, snippet y el link.
 
 #### Estructura del informe `.md`
 
-Todo informe generado por ADSO incluye un header estándar:
+Todo informe generado por ADSO arranca con el mismo header (`_report_header` en `reporters.py`), que lo comparten los reportes de `/reporte` y el informe de una consulta:
 
-```markdown
-# Informe: {título de la consulta}
-Generado por ADSO v{version} · {fecha y hora}
-
+````markdown
+```
       ,
      /|
     / |   █████     ██████      █████     █████
@@ -720,26 +736,34 @@ Generado por ADSO v{version} · {fecha y hora}
 /   \    Autonomous Data Structuring Orchestrator
 |>_ |
 \___/    𝘴𝘤𝘳𝘪𝘱𝘵𝘰𝘳𝘪𝘶𝘮 𝘥𝘪𝘨𝘪𝘵𝘢𝘭𝘦
-
----
-
-## Síntesis
-{respuesta generada por el LLM a partir de las notas recuperadas — presente en consultas RAG y temáticas; omitida en filtros estructurales puros}
-
-## Resultados ({N} notas)
-
-### {Título de la nota}
-**Estado:** {status} | **Área/Proyecto:** {area o project}
-**Tipo:** {type}
-> {snippet relevante del contenido}
-obsidian://open?vault=ADSO&file={path}
-
----
-{se repite por cada nota}
-
-## Notas relacionadas (si aplica)
-{backlinks y conexiones expandidas, si el usuario eligió expandir}
 ```
+
+---
+
+# {Título del reporte o "Consulta: {texto}"}
+
+**Fecha:** {DD/MM/YYYY}  |  **ADSO** v{version}  [|  **reporte full**]
+````
+
+El logo va dentro de un bloque de código para que Obsidian respete el monoespaciado; el `|  **reporte full**` aparece solo en `/reporte_full`.
+
+Debajo del header cada reporte arma su propio cuerpo. En los de `/reporte`, la síntesis LLM (2-3 oraciones) es un **blockquote suelto** justo después del header, no una sección `## Síntesis`, y se omite si Gemini no responde. El informe de una consulta (`_build_report` en `handlers/query.py`) todavía **no tiene síntesis** — Fase 7.0 es retrieval puro — y usa este cuerpo:
+
+```markdown
+> [!warning] Baja confianza
+> Ningún resultado superó el umbral de similitud. Se muestran las notas más cercanas.
+
+## Resultados ({N})
+
+### {i}. {Título de la nota}
+- **Similitud:** {NN}%  |  **Ubicación:** {project o area o Inbox}  |  **Estado:** {status}
+
+> {snippet}
+
+- [Abrir en Obsidian]({obsidian://...})
+```
+
+El callout de baja confianza aparece solo cuando ninguna nota superó `rag.similarity_threshold`. *(La sección de notas relacionadas por backlinks es diseño de Fase 7, no está implementada.)*
 
 Se asume que las máquinas donde se usa tienen Obsidian instalado y sincronizado con el vault.
 
@@ -843,6 +867,8 @@ Al confirmar, los links se escriben en el `.md` bajo `## Ver también` como list
 - [[dataset-imagenet]] — Dataset ImageNet
 ```
 
+El bloque de links va **al final de la nota**, después del embed `![[archivo]]` del adjunto. Con el orden inverso el embed quedaba estructuralmente dentro de `## Ver también`: Obsidian lo renderizaba bajo el header equivocado y, si los links se rompían y el header se borraba, el embed quedaba flotando (B4 de la auditoría 2026-08 — 6 de 8 notas afectadas en el vault real).
+
 **Modo corrección (texto bloqueado por default):** con un preview pendiente, el texto libre **no** se interpreta como instrucción — está bloqueado. Cualquier mensaje recibe `"Usar botón Corregir para modificar."` y tanto el mensaje del usuario como el aviso se borran al apretar un botón. Solo `[Corregir]` (`_cb_note_correct`) activa el modo corrección: pone un lock sobre el mensaje del preview (`awaiting_correction` + `msg_id`) y, mientras dure, se acepta únicamente texto plano — audio, archivos y comandos quedan bloqueados.
 
 Prefijos reconocidos (`_handle_text_correction` en `capture.py`):
@@ -852,12 +878,14 @@ Prefijos reconocidos (`_handle_text_correction` en `capture.py`):
 | `titulo <texto>` / `título <texto>` | Reemplaza el título (conserva la capitalización original) |
 | `prioridad alta\|media\|baja` (o `high\|medium\|low`) | Cambia `priority` |
 | `tag <nombre>` / `agregar tag <nombre>` | Agrega un tag, normalizado a kebab-case con `_to_kebab` |
-| `tipo reference\|task\|idea` (acepta `referencia`, `nota`, `tarea`) | Cambia el `type` |
+| `tipo reference\|task\|idea` (acepta `referencia`, `nota`, `tarea`) | Cambia el `type` **y re-sincroniza el `status`** con `_resync_status_with_type`. Solo se reconoce cuando el preview vigente **no** es una tarea — `_apply_task_corrections` no tiene rama de `tipo` |
 | Expresión de fecha, con o sin el prefijo `fecha` | **Solo para tareas:** actualiza `due_date` |
 | Texto sin prefijo, ≤ 200 chars y de una línea | Fallback: se usa como nuevo título |
 | Texto sin prefijo, largo o multi-línea | Se rechaza sin tocar nada: `"Corrección no reconocida. Usar prefijos: titulo, tag, tipo, prioridad."` El lock se mantiene para reintentar, y ese mensaje de error se borra junto con el del usuario cuando la corrección siguiente es válida |
 
 En tareas los campos se detectan todos en el mismo texto y en cualquier orden; en notas cada prefijo es excluyente (gana el primero que matchea). Tras aplicar la corrección se actualiza `date_modified`, se edita el mismo mensaje del preview y se borra el mensaje del usuario.
+
+**Cambiar el `type` arrastra el `status`.** `VALID_STATUS` (`llm_schema.py`) define conjuntos disjuntos por tipo, así que dejar el status del tipo anterior escribía al vault un frontmatter inválido — una `task` en `active`, invisible para los filtros y reportes por status. `_resync_status_with_type` (`capture.py`) reemplaza un status que no pertenezca al tipo nuevo por el de `STATUS_ON_CONFIRM` (`reference → active`, `task → pending`, `idea → raw`) y, al salir de `task`, popea `due_date` y `scheduled` — espejo del descarte que ya hacía `_classify_and_preview`. Un status ausente no se toca: el default lo resuelve el resto del pipeline. `STATUS_ON_CONFIRM` se usa también al confirmar una nota de `/clasificar` que venía en `pending-classification` y al reubicarla a un proyecto o área.
 
 `[Reubicar]` es exclusivamente para cambiar el destino.
 
@@ -961,7 +989,9 @@ El `due_date` de una task va al campo de fecha límite de Google Tasks. Google C
 | Wikilinks circulares en expansión | La dedup por `note_id` evita visitar una nota dos veces |
 | Renombrado de sección | Se renombra la carpeta y se actualiza `section` en el frontmatter de las notas internas + metadata en ChromaDB |
 | Nota referenciada que no existe | Wikilink queda como texto — Obsidian lo muestra como link roto (gris). No es un error |
-| Disco lleno al escribir nota | `vault_writer` propaga `OSError` → bot avisa al usuario, nota no se pierde (el contenido está en el mensaje de Telegram) |
+| Disco lleno al escribir nota | `vault_writer` propaga `OSError` → el bot responde `"Error al guardar: {e}\n\nReintentar con [Confirmar]."` **reponiendo el teclado de captura** (`_aviso_error_al_guardar` en `callbacks.py`). `_cb_confirm` no descarta el estado pendiente hasta que `create_note` retorna, así que el segundo `[Confirmar]` reintenta de verdad. Editar el mensaje sin `reply_markup` borraba los botones (Telegram interpreta la ausencia como "sacar el teclado") y ese reintento quedaba inalcanzable, con `_has_pending_keyboard` bloqueando todo input nuevo |
+| Usuario edita un mensaje ya enviado (o el caption de una foto/PDF) | Se ignora: no hay flujo de re-procesamiento. Doble filtro — `filters.UpdateType.MESSAGE` en el registro de los cuatro `MessageHandler` y el decorador `@_solo_mensajes_nuevos` en los handlers |
+| Crear proyecto/área sin descripción | Se rechaza: el bot pide la descripción y retoma la operación con el texto que escriba el usuario. Vale para las dos vías — el LLM (`_handle_manage`, que la lista en `manage_missing_fields`) y el botón `[Crear proyecto]`/`[Crear área]`, que antes confirmaba con `description=""` y creaba el `_index.md` vacío. `description` es el contexto que el LLM usa para enrutar capturas futuras |
 
 ---
 

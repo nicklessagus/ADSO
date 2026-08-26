@@ -577,13 +577,20 @@ async def scan_notes(
 
 
 async def get_note_index(vault_path: Path) -> dict[str, Path]:
-    """Construye índice {stem → path} de todos los .md del vault.
+    """Construye un índice de los .md del vault, direccionable por stem.
+
+    Los stems repetidos (los `_index.md`, uno por proyecto y área) no se pisan:
+    el primero conserva su clave por stem y **todos** los homónimos se exponen
+    además bajo su ruta relativa sin extensión — el mismo `note_id` que usa el
+    índice de embeddings. B7 de la auditoría 2026-08.
 
     Args:
         vault_path: Raíz del vault.
 
     Returns:
-        Dict {stem: Path}.
+        Dict con dos clases de clave: `{stem: Path}` para los stems únicos y
+        `{ruta/relativa/sin-extension: Path}` para los que colisionan. Iterar
+        las claves **no** equivale a iterar las notas: usar `.values()`.
     """
 
     def _scan() -> dict[str, Path]:

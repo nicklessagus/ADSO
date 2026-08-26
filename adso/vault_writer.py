@@ -785,6 +785,11 @@ def _remove_empty_ver_tambien(content: str) -> str:
             j = i + 1
             has_items = False
             while j < len(lines):
+                # El escaneo también saltea los fences: un `- algo` dentro de un
+                # bloque de código no es un item del bloque "Ver también".
+                if fence_lines[j]:
+                    j += 1
+                    continue
                 if lines[j].startswith("- "):
                     has_items = True
                     break

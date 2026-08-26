@@ -163,9 +163,16 @@ async def create_note(
 6. Si `dry_run=True`: retorna el path calculado sin escribir nada al disco (usado para el preview al usuario).
 7. Si `dry_run=False`: escribe el archivo y retorna el path.
 
+**Coacción de `type`/`status` (defensa en profundidad):** antes de resolver el destino, `create_note()` valida el frontmatter contra `VALID_TYPES`/`VALID_STATUS`:
+
+- `type` fuera de `VALID_TYPES` → se **degrada** a `type: idea` + `status: pending-classification`, con log a `warning`.
+- `status` que no pertenece al conjunto válido de su `type` → cae al fallback del type: `pending-classification` si ese type lo admite, si no `active`. También con log a `warning`. `area-index` declara el conjunto vacío a propósito (no tiene ciclo de vida) y ahí no se valida nada.
+
+Se **coacciona en vez de lanzar** a propósito: el caller típico es `_cb_confirm`, o sea el usuario ya apretó `[Confirmar]`, y el texto de audio/OCR/Vision no existe en ningún otro lado (regla de oro: sin pérdida de datos). El guard existe porque hasta acá estos enums solo se aplicaban en `set_property()`: los escritores que no vienen del LLM (el flujo de índices de `manage.py`, cualquier caller directo) no pasan por `_validate_capture_payload`, y un `type` inválido rompía el routing de `_resolve_dest_dir` (cae a Inbox) y además desactivaba en silencio la validación de status de `set_property()`.
+
 **Errores:**
 - `PermissionError` si el vault_path no tiene permisos de escritura → propagar con mensaje claro.
-- `ValueError` si el frontmatter no contiene `title` o `type` → propagar antes de intentar escribir.
+- `ValueError` si el frontmatter no contiene `title` o `type` → propagar antes de intentar escribir. Un `type` **presente pero inválido** no lanza: se coacciona (ver arriba).
 
 ---
 
@@ -236,7 +243,7 @@ async def set_property(
 
 | Campo | Validación |
 |---|---|
-| `status` | Debe pertenecer al conjunto válido para el `type` de la nota |
+| `status` | Debe pertenecer al conjunto válido para el `type` de la nota. Si el `type` **de la nota** no está en `VALID_TYPES`, lanza `ValueError` en vez de validar: sin ese guard, un type fuera del enum devolvía un conjunto vacío y desactivaba la validación en silencio — justo en las notas que ya están malformadas |
 | `type` | Debe ser uno de: `reference`, `task`, `idea`, `project-index`, `area-index` |
 | `priority` | Debe ser: `low`, `medium`, `high` |
 | `media_type` | Debe ser: `text`, `audio`, `image`, `link`, `document` |
@@ -355,13 +362,17 @@ async def remove_broken_wikilinks(
 **Comportamiento:**
 
 1. Extrae el stem del archivo borrado (ej: `2026-04-08-mi-nota`).
-2. Recorre todos los `.md` del vault (salvo `_index.md`).
-3. En cada archivo que contenga `[[stem]]`, elimina las líneas de lista que lo referencian en el bloque `## Ver también`.
-4. Si el bloque queda sin items, elimina también el header `## Ver también`.
-5. Retorna el número de archivos modificados.
+2. Materializa la lista de `.md` del vault en un hilo (`rglob` bloquea, y esto corre en el callback de delete del watcher).
+3. **Si alguna otra nota del vault tiene el mismo stem, no hace nada y retorna `0`.** Los wikilinks de Obsidian resuelven por stem, no por path: si `[[stem]]` sigue resolviendo a otra nota, el link **no** está roto y borrarlo sería pérdida de datos. Pasa siempre que el usuario **mueve** una nota (el watcher emite un delete del origen) y también con stems duplicados en carpetas distintas.
+4. En cada archivo restante que contenga `[[stem]]`, elimina las líneas de lista que lo referencian en el bloque `## Ver también` (salvo el propio borrado y los `_index.md`).
+5. Si el bloque queda sin items, elimina también el header `## Ver también`.
+6. Retorna el número de archivos modificados.
 
 **Notas:**
-- Los wikilinks en ADSO usan solo el stem (no el path completo), por lo que mover una nota dentro del vault **no rompe links**.
+- Los wikilinks en ADSO usan solo el stem (no el path completo), por lo que mover una nota dentro del vault **no rompe links** — y el paso 3 es lo que impide que el delete del origen los borre igual.
+- **Los bloques de código se respetan.** Las dos pasadas llevan estado de fence (los delimitadores de tres backticks) — `_strip_broken_links_in_ver_tambien()` lo trackea mientras recorre, `_remove_empty_ver_tambien()` lo precalcula con el helper `_fence_line_flags()`. Un `## Ver también` que aparece dentro de un ejemplo de código es texto del usuario y no se toca.
+- El header vacío se elimina solo si no queda **ningún** item de lista debajo, contando cualquier `- ` y no solo wikilinks: un bloque con un link roto y un item de texto plano del usuario conserva su header en vez de dejar el item huérfano.
+- La comparación contra el contenido original va **antes** de normalizar el newline final: sin eso, una nota que menciona el link fuera de `## Ver también` y cuyo newline final difiere se reescribía sin cambio real → bump de `mtime` → evento del watcher → re-embed espurio + churn del backup, por cada delete externo.
 - Se llama desde `_remove_external_note` en `bot.py` al detectar un borrado via `VaultWatcher`. Si retorna `> 0`, el bot notifica por Telegram.
 - Solo actúa sobre el bloque `## Ver también` (links sugeridos por ADSO). No toca wikilinks en el body libre del usuario.
 
@@ -546,9 +557,9 @@ async def find_tasks(
 
 **Retorna** lista combinada de `NoteRef`. Para los checkboxes inline, el `snippet` contiene el texto del checkbox.
 
-> **Comportamiento actual — hay solapamiento entre las dos fuentes.** Una nota `type: task` que pasa los filtros se agrega **una vez como nota** (fuente 1) **y además una vez por cada checkbox** de su body (fuente 2). El set `seen_paths` que existe en `_scan` se puebla en la fuente 1 pero **nunca se consulta**, así que no deduplica nada (`vault_search.py`, `find_tasks._scan`).
+> **Las dos fuentes se solapan a propósito.** Una nota `type: task` que pasa los filtros se agrega **una vez como nota** (fuente 1) **y además una vez por cada checkbox** de su body (fuente 2): los checkboxes de una tarea son sus subtareas y se listan como ítems propios (cubierto por `test_inline_checkboxes_included`). El set `seen_paths` que existe en `_scan` se puebla en la fuente 1 pero **nunca se consulta** — es residuo de un diseño anterior que sí deduplicaba (`vault_search.py`, `find_tasks._scan`).
 >
-> Efecto colateral del mismo bloque: una nota `type: task` que **no** pasa un filtro (`status`/`area`/`project`) hace `continue` antes de la fuente 2, así que sus checkboxes tampoco se listan — mientras que los de una nota que no es `type: task` sí se listan aunque su frontmatter diga otra cosa.
+> **La asimetría real entre las fuentes** (issue #61) es otra: la fuente 1 filtra por `status` + `area` + `project`, la fuente 2 solo por `area` + `project`. De ahí dos consecuencias — el `status` del frontmatter de una nota que no es `type: task` no se mira al listar sus checkboxes, y una nota `type: task` que **no** pasa un filtro hace `continue` antes de la fuente 2, así que sus checkboxes quedan silenciados aunque coincidan con el `status` pedido.
 
 ---
 
@@ -581,16 +592,24 @@ async def get_note_index(vault_path: Path) -> dict[str, Path]:
 
 **Comportamiento:**
 
-Recorre el vault y construye `{stem → path}` para todos los `.md`. Se usa internamente en `get_backlinks()` y en la validación de wikilinks.
+Recorre el vault y construye `{stem → path}` para todos los `.md`.
+
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. `get_backlinks()` **no** la usa: hace su propio escaneo aplicando un regex por nota. Queda como helper disponible para la resolución de wikilinks.
+
+**Stems repetidos.** La firma sigue siendo `dict[str, Path]`, pero el dict ya no es solo `{stem: path}`: cuando dos o más archivos comparten stem, el **primero** conserva la clave por stem y **todos** los involucrados (el primero incluido) se exponen además bajo su **ruta relativa sin extensión** — el mismo `note_id` que usa el índice de embeddings. Antes se hacía `index[stem] = path` en cada colisión: ganaba el último que devolviera `rglob` y los demás desaparecían del índice. En un vault real las colisiones son los `_index.md`, uno por proyecto y por área, todos con el mismo stem.
 
 ```python
-# Ejemplo:
+# Ejemplo (dos proyectos con _index.md):
 {
     "2025-01-15-baseline-cnn": Path("/vault/01-Projects/tesis/experimentos/2025-01-15-baseline-cnn.md"),
-    "_index": Path("/vault/01-Projects/tesis/_index.md"),
+    "_index": Path("/vault/01-Projects/tesis/_index.md"),                    # primer stem visto
+    "01-Projects/tesis/_index": Path("/vault/01-Projects/tesis/_index.md"),  # ídem, desambiguado
+    "01-Projects/otro/_index": Path("/vault/01-Projects/otro/_index.md"),
     ...
 }
 ```
+
+**Consecuencia para los callers:** iterar las claves del dict ya no equivale a iterar las notas del vault (las notas con stem duplicado aparecen dos veces, bajo dos claves). Iterar `.values()` tampoco deduplica. Para "todas las notas del vault" usar `set(index.values())` o `_scan_vault()` directamente.
 
 No se cachea entre llamadas. Si el vault crece y el tiempo de escaneo se convierte en problema, se puede agregar un cache invalidado por `inotify` (watchdog) sin cambiar la interfaz.
 
@@ -654,7 +673,7 @@ Si el vault crece y los tiempos se vuelven perceptibles, el siguiente paso es un
 
 Responsabilidad única: **gestión de embeddings y ChromaDB**. No escribe archivos al vault ni llama a LLMs de clasificación — solo calcula embeddings (via Gemini Embedding API, modelo `gemini-embedding-001`) y opera sobre la colección de ChromaDB.
 
-Toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`** — no hay funciones a nivel de módulo. La instancia se crea en el arranque del bot y se comparte via `bot_data["embeddings"]`.
+Casi toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`**; a nivel de módulo solo viven los helpers puros `should_index()`, `distance_to_similarity()` y `similarity_to_distance()`, más la constante `DEFAULT_EXCLUDE_DIRS`. La instancia del cliente se crea en el arranque del bot y se comparte via `bot_data["embeddings"]`.
 
 ### Dependencias
 
@@ -662,6 +681,34 @@ Toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`** — n
 chromadb        # vector store embebido (PersistentClient, sin servidor separado)
 google-genai    # SDK nuevo de Gemini (from google import genai) — Embedding API
 ```
+
+---
+
+### `should_index()`
+
+```python
+DEFAULT_EXCLUDE_DIRS = ["05-Archive", ".obsidian", ".trash"]
+
+def should_index(
+    md_path: Path,
+    vault_path: Path,
+    exclude_dirs: Optional[list[str]] = None,
+) -> bool:
+```
+
+**Función a nivel de módulo, síncrona y pura** (no toca el disco: decide solo con el path). Es el **predicado único de "qué entra al índice semántico"**.
+
+Retorna `False` — o sea, el archivo **no** se indexa — cuando:
+
+1. El path no es relativo a `vault_path` (queda fuera del vault).
+2. La extensión no es `.md`.
+3. Alguna componente de la ruta relativa está en `exclude_dirs` (`None` → `DEFAULT_EXCLUDE_DIRS`).
+4. El stem es `_index` (los índices de proyecto/área no son notas de contenido).
+5. El nombre contiene `.sync-conflict-` (conflicto de Syncthing).
+
+**Por qué existe:** los dos caminos que indexan tenían criterios distintos. El reindex nocturno (`reindex_vault()`) filtraba; el re-embed externo que dispara el `VaultWatcher` (callback en `bot.py`) **no filtraba nada**. Editar desde Obsidian una nota de `05-Archive` —o un `_index.md`— la metía al índice contra el diseño, y esa misma noche `reindex_vault()` la borraba como huérfana: un ciclo diario de embed + delete que gastaba quota de la Embedding API y ensuciaba `/buscar` hasta las 3 AM (E2 de `docs/audit-2026-08-26.md`).
+
+**Callers:** `reindex_vault()` (scan y sweep de huérfanos) y el callback de cambio externo en `bot.py`. Este último aplica el predicado **solo al índice**: el backup git no se saltea, porque el cambio existe en el vault aunque la nota no vaya a ChromaDB.
 
 ### `EmbeddingsClient`
 
@@ -834,10 +881,12 @@ async def reindex_vault(
 
 **Comportamiento:**
 
-1. Recorre todos los `.md` del vault (excluyendo `exclude_dirs`; default `["05-Archive", ".obsidian", ".trash"]`). Ignora archivos `.sync-conflict-*` de Syncthing.
-2. **Incremental:** solo re-embede notas cuyo contenido cambió (compara `content_hash` almacenado en metadata contra el hash actual). Las notas sin cambios se cuentan como `skipped`.
-3. Detecta notas en ChromaDB que ya no existen en el vault → las elimina.
-4. Retorna estadísticas: `{"indexed": N, "skipped": M, "removed": K, "errors": J}`.
+1. Recorre todos los `.md` del vault y filtra cada uno con **`should_index()`** (excluyendo `exclude_dirs` — default `DEFAULT_EXCLUDE_DIRS` = `["05-Archive", ".obsidian", ".trash"]` —, los `_index.md` y los `.sync-conflict-*` de Syncthing). Es el mismo predicado que aplica el re-embed externo del watcher.
+2. **Nota ilegible** (sin frontmatter, YAML inválido): cuenta como **viva** a propósito y se salta. Un YAML roto transitorio —editado a mano, a mitad de sync— no debe borrar el embedding (ver `docs/decisions-log.md`).
+3. **Nota vaciada** (body en blanco): **borra su embedding** con `remove_note()`. El embedding almacenado es del texto *anterior*, así que `/buscar` seguía devolviéndola por contenido que ya no existe en el archivo (E3). No alcanza con omitirla del set de vivas: el sweep del paso 5 re-verifica el disco y el `.md` sí existe, así que hay que borrarla explícitamente.
+4. **Incremental:** solo re-embede notas cuyo contenido cambió (compara `content_hash` almacenado en metadata contra el hash actual). Las notas sin cambios se cuentan como `skipped`.
+5. **Sweep de huérfanos:** los IDs de ChromaDB que no quedaron en el set de vivas son solo *candidatos* — antes de borrar, cada uno se **re-verifica en disco** (`should_index()` sobre el path reconstruido **y** `is_file()`, en un hilo). El snapshot de `rglob` se toma al principio y el reindex tarda minutos (0,2 s de rate limiting por nota + latencia de la API): una captura confirmada en esa ventana entra a ChromaDB pero no al snapshot, y el sweep la borraba como huérfana — la nota existía en el vault y quedaba invisible para `/buscar` hasta el reindex de la noche siguiente (E4). Los filtros del scan se repiten a propósito en esa re-verificación: un ID bajo `exclude_dirs`, un `_index.md` o un conflicto de Syncthing **sí** deben borrarse del índice aunque el archivo exista.
+6. Retorna estadísticas: `{"indexed": N, "skipped": M, "removed": K, "errors": J}`.
 
 **Uso:** cron nocturno (`reindex.time` en `config.yaml`). Reconcilia ChromaDB con el vault ante cualquier drift.
 

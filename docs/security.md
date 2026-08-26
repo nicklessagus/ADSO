@@ -236,6 +236,12 @@ def validate_llm_response(response_json: dict) -> dict:
 
 Esto convierte cualquier inyección que corrompa los campos en un fallo controlado, no en una nota inválida persistida.
 
+**El writer también valida, no solo el validador del LLM.** `create_note()` (`vault_writer.py`) revalida `type`/`status` contra sus propios `VALID_TYPES`/`VALID_STATUS` justo antes de resolver el destino. Hasta la auditoría 2026-08-26 esos enums solo se aplicaban en `set_property()`: `create_note()` escribía al vault lo que le llegara, y los escritores que **no** pasan por `_validate_capture_payload` —el flujo de índices de `manage.py`, cualquier caller directo— eran un camino sin validar. Un `type` fuera del enum rompe el routing de `_resolve_dest_dir` (la nota cae a Inbox) y además desactivaba en silencio la validación de status de `set_property()` sobre esa misma nota.
+
+En el writer la respuesta es **coaccionar, no rechazar** (`type` inválido → `idea` + `pending-classification`; `status` inválido para su type → el fallback del type), las dos cosas con log a `warning`. Es deliberado y no debilita la validación aguas arriba: el caller típico es `_cb_confirm`, o sea el usuario ya apretó `[Confirmar]`, y el texto de audio/OCR/Vision no existe en ningún otro lado. Rechazar ahí sería pérdida de datos por una respuesta corrupta del LLM. El contenido no confiable ya fue filtrado por las capas 3, 4 y 4b; lo que queda acá es la última red del path de escritura.
+
+Complemento en el otro extremo: `set_property()` ahora **lanza `ValueError`** si el `type` de la nota que va a modificar no está en `VALID_TYPES`, en vez de resolver a un conjunto vacío de status válidos y saltearse la validación — justo en las notas que ya están malformadas.
+
 ### 4b. Whitelist de claves del frontmatter
 
 La validación de arriba comprueba **valores**. La whitelist comprueba **claves**: `_validate_capture_payload` descarta, antes que nada, cualquier clave del frontmatter que no esté en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), y loguea cada descarte a `warning`.
@@ -518,8 +524,8 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 
 | Operación | Params | Validado en `_validate_manage_payload` | Ejecutado en `manage.py` |
 |---|---|---|---|
-| `create_project` | `name`, `description` | sí (ambos requeridos) | ✅ |
-| `create_area` | `name`, `description` | sí (ambos requeridos) | ✅ |
+| `create_project` | `name`, `description` | sí — `name` por presencia, `description` **por contenido** | ✅ |
+| `create_area` | `name`, `description` | sí — `name` por presencia, `description` **por contenido** | ✅ |
 | `create_section` | `project`, `name` | sí (ambos requeridos) | ✅ |
 | `archive_project` | `name` | no | ❌ *(no implementado)* |
 | `unarchive_project` | `name` | no | ❌ *(no implementado)* |
@@ -529,6 +535,8 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 | `rename_area` | `old_name`, `new_name` | sí (ambos requeridos) | ❌ *(no implementado)* |
 | `convert_idea_to_project` | `note`, `project_name`, `description` | no | ❌ *(no implementado)* |
 | `reclassify_inbox` | — | no | ❌ *(no implementado como operación de gestión — existe solo como cron, `jobs.reclassify_inbox`; tampoco está en la lista de operaciones del prompt)* |
+
+**`description` se valida por contenido, no por presencia.** El schema la declara `nullable`, así que `description: ""` o `null` tenían la clave y pasaban el chequeo anterior: el `_index.md` nacía con la descripción vacía. Hoy `_validate_manage_payload` hace `str(params.get("description") or "").strip()` y lanza `LLMResponseError` si queda vacío. No es cosmético — la `description` es el scope que `_get_existing_items` le pasa al prompt por cada destino, así que un proyecto sin ella se le presenta al LLM sin contexto y degrada el routing de **todas** las capturas siguientes.
 
 Los nombres de params son los declarados en `_GEMINI_RESPONSE_SCHEMA["...params"].properties` y en el prompt de `llm_client.build_system_prompt`. Una clave que no esté en `properties` **no la puede emitir el constrained decoding** — agregar una operación implica tocar el schema, el prompt y la validación juntos.
 
