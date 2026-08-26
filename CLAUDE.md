@@ -376,6 +376,10 @@ Ninguna funcionalidad nueva ni fix entra sin test que lo cubra, y **el test se e
 
 Escribir el test después produce tests que confirman lo implementado en vez de especificar el comportamiento buscado. Un cambio que llega sin test se devuelve al paso 2.
 
+**Bug encontrado → reproductor primero, siempre.** Antes de tocar `adso/`, escribir el test que reproduce el bug y verlo fallar. No es solo higiene de proceso: **es lo que valida que el bug existe**. En la auditoría 2026-08-26, de 41 mecanismos auditados uno resultó falso — `find_tasks` "duplicaba" tareas según una lectura del código, pero el fix rompió un test existente cuyo fixture documenta que la duplicación es deliberada. Sin el ciclo test-primero, ese "fix" se habría commiteado como mejora.
+
+Vale para bugs propios y, sobre todo, para bugs que reporta otro (una revisión, un agente, un issue): un mecanismo descrito en prosa que nadie ejecutó es una hipótesis, no un hallazgo.
+
 **Bugs conocidos sin arreglar todavía: reproductor con `xfail(strict=True)`.** Un bug que se detecta pero no se arregla en el momento se documenta con un test que **especifica el comportamiento correcto** y lleva `@pytest.mark.xfail(strict=True, reason="BUG <id>: <causa>")`. La suite queda verde, y el día que alguien arregla el bug el test pasa a XPASS — que con `strict` es un **fallo**, así que obliga a sacar la marca en el mismo commit del fix. Es lo que hace cumplir el ciclo test-first para bugs: el test existe y falla *antes* de que exista el fix.
 
 Dos reglas que hacen que el mecanismo sirva: (1) verificar con `--runxfail` que el test falla por el mecanismo descrito y no por un mock mal armado — un reproductor que "falla" por una fixture rota documenta un bug inexistente; (2) acompañarlo de **contra-casos sin marca** que fijen el comportamiento vecino correcto, porque casi todos estos fixes son guards de una línea fáciles de aplicar de más (no borrar *ningún* wikilink en vez de solo los válidos, degradar *todo* type inválido en vez de solo los que el usuario ya eligió).
