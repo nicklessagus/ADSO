@@ -40,3 +40,25 @@ Response time: best-effort within 7 days for critical issues.
 - Operations are restricted to an enumerated set (no arbitrary command execution).
 - File uploads are saved to a sandboxed `03-Resources/` directory with sanitized filenames.
 - See `docs/security.md` for the full threat model and mitigation checklist.
+
+## Accepted Dependency Risks
+
+Vulnerabilities that `pip-audit` reports but that are **not reachable in ADSO's
+usage**, suppressed by ID in `.github/workflows/security.yml`. The suppression is
+per-ID on purpose: a newly disclosed CVE is not hidden by it.
+
+### chromadb 0.6.3 — CVE-2026-45830, CVE-2026-45831, CVE-2026-45833
+
+All three require the ChromaDB **HTTP server** with authenticated, multi-tenant
+users: a cross-tenant authorization bypass, a scope-blind
+`SimpleRBACAuthorizationProvider`, and code injection through
+`POST /api/v2/.../collections/{id}` with `trust_remote_code`.
+
+ADSO embeds ChromaDB via `PersistentClient` against a local sqlite file
+(`adso/embeddings.py`). There is no HTTP API, no tenants, no authorization
+provider, and `docker-compose.yml` exposes no ports. None of the three attack
+paths exists here.
+
+No fixed version was published at the time of writing, so the pin cannot be
+moved. **Revisit when a fixed chromadb ships:** drop the `--ignore-vuln` flags
+and bump the pin.

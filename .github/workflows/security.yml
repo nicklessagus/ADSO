@@ -25,8 +25,26 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
+      # Las tres CVEs ignoradas son del **modo servidor** de ChromaDB y no son
+      # alcanzables acá: ADSO usa `PersistentClient` embebido (sqlite local, ver
+      # `adso/embeddings.py`), no expone puertos (`docker-compose.yml`) y no hay
+      # tenants, proveedor de auth ni API HTTP en el repo. Ninguna tiene versión
+      # con fix publicada, así que el pin no se puede mover.
+      #
+      #   CVE-2026-45830  bypass de autorización entre tenants (requiere servidor)
+      #   CVE-2026-45831  SimpleRBACAuthorizationProvider ignora el scope del permiso
+      #   CVE-2026-45833  code injection vía POST /api/v2/.../collections/{id}
+      #                   con trust_remote_code (requiere la API REST)
+      #
+      # REVISAR cuando salga un chromadb con fix: sacar los --ignore-vuln y
+      # bumpear el pin. Si aparece una CVE nueva, este flag NO la tapa: la
+      # supresión es por ID, a propósito.
       - name: Audit dependencies
-        run: pip-audit -r requirements.txt --format=markdown
+        run: |
+          pip-audit -r requirements.txt --format=markdown \
+            --ignore-vuln CVE-2026-45830 \
+            --ignore-vuln CVE-2026-45831 \
+            --ignore-vuln CVE-2026-45833
 
   secret-scan:
     name: Secret scan (trufflehog)
