@@ -260,6 +260,34 @@ class VaultWatcher:
 
         task.add_done_callback(_done)
 
+    def _spawn_notification(self, coro, path: Path, kind: str) -> None:
+        """Despacha una notificación de Telegram sin frenar el drenado de la cola.
+
+        Antes se esperaba `send_message` **dentro** del loop que consume la
+        cola: un envío lento o con timeout (~5 s de PTB) congelaba el drenado
+        justo en el peor momento, una ráfaga de Syncthing, que es cuando más
+        eventos llegan y cuando el re-embed más necesita ir al día (#38).
+
+        La tarea queda en `_bg_tasks`, así que `stop()` la espera: lanzar en
+        background no puede degenerar en "Task was destroyed but it is
+        pending", que además se lleva puesto el flush del git backup.
+
+        Args:
+            coro: Corrutina de notificación ya construida.
+            path: Path del evento, solo para el log de error.
+            kind: Etiqueta del evento para el log ("conflicto", "cambio"…).
+        """
+
+        async def _runner() -> None:
+            try:
+                await coro
+            except Exception as exc:
+                logger.error(
+                    "VaultWatcher: error notificando %s %s: %s", kind, path, exc
+                )
+
+        self._spawn(_runner())
+
     def _is_duplicate(self, path: Path) -> bool:
         """Devuelve True si el path fue procesado hace menos de dedup_window."""
         now = datetime.now()
@@ -328,34 +356,25 @@ class VaultWatcher:
             if event.is_conflict:
                 self._stats.last_conflict_at = now
                 self._stats.conflicts_detected += 1
-                try:
-                    await self._notify_conflict(event.path)
-                except Exception as exc:
-                    logger.error(
-                        "VaultWatcher: error notificando conflicto %s: %s", event.path, exc
-                    )
+                self._spawn_notification(
+                    self._notify_conflict(event.path), event.path, "conflicto"
+                )
             elif event.is_delete:
                 self._stats.deletions_detected += 1
                 if self._on_external_delete:
                     self._spawn(self._on_external_delete(event.path))
                 if self._debug:
-                    try:
-                        await self._notify_delete(event.path)
-                    except Exception as exc:
-                        logger.error(
-                            "VaultWatcher: error notificando borrado %s: %s", event.path, exc
-                        )
+                    self._spawn_notification(
+                        self._notify_delete(event.path), event.path, "borrado"
+                    )
             else:
                 self._stats.changes_detected += 1
                 if self._on_external_change:
                     self._spawn(self._on_external_change(event.path))
                 if self._debug:
-                    try:
-                        await self._notify_change(event.path)
-                    except Exception as exc:
-                        logger.error(
-                            "VaultWatcher: error notificando cambio %s: %s", event.path, exc
-                        )
+                    self._spawn_notification(
+                        self._notify_change(event.path), event.path, "cambio"
+                    )
 
     async def _notify_conflict(self, path: Path) -> None:
         """Notifica al usuario sobre un conflicto de Syncthing."""

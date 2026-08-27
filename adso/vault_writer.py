@@ -13,10 +13,12 @@ import os
 import stat
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote
 
 import frontmatter
 from slugify import slugify
@@ -74,6 +76,10 @@ VALID_PRIORITY = {"low", "medium", "high"}
 VALID_MEDIA = {"text", "audio", "image", "link", "document"}
 VALID_SOURCE = {"telegram", "system"}
 
+# Un adjunto más nuevo que esto no se archiva aunque parezca huérfano: puede ser
+# una captura a medio confirmar (ver la barrida en `reconcile_vault`).
+_ORPHAN_MIN_AGE_SECONDS = 600
+
 VAULT_DIRS = ["00-Inbox", "01-Projects", "02-Areas", "03-Resources", "05-Archive"]
 
 MAX_SLUG_LENGTH = 60
@@ -87,6 +93,33 @@ MAX_SLUG_LENGTH = 60
 def _now_iso() -> str:
     """Retorna timestamp actual en ISO 8601."""
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _fsync_dir_sync(directory: Path) -> None:
+    """Sincroniza a disco la entrada de directorio de ``directory``.
+
+    El ``fsync`` del archivo garantiza que su contenido llegó al disco, pero no
+    que el *rename* que lo publicó haya llegado: la entrada de directorio vive
+    en otro bloque. Un corte de luz pocos segundos después de "Nota guardada"
+    podía evaporar el rename y dejar el vault sin la nota — y la RPi4 no tiene
+    UPS, así que es el modo de fallo más probable de todos (#37B).
+
+    El fallo es no fatal a propósito: acá el contenido ya está publicado, y
+    propagar el error haría que el caller borrara una nota buena (hay
+    filesystems que ni siquiera permiten ``fsync`` sobre un directorio).
+    Regla de oro: sin pérdida de datos.
+    """
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+    except OSError as exc:
+        logger.debug("No se pudo abrir %s para sincronizar: %s", directory, exc)
+        return
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        logger.debug("No se pudo sincronizar el directorio %s: %s", directory, exc)
+    finally:
+        os.close(fd)
 
 
 def _atomic_write_sync(path: Path, content: str) -> None:
@@ -120,6 +153,11 @@ def _atomic_write_sync(path: Path, content: str) -> None:
             modo = 0o644
         os.chmod(tmp, modo)
         os.replace(tmp, path)
+        # El fsync del directorio vive acá, en el helper compartido, y no en
+        # `create_note`: así lo heredan `append_to_note`, `set_property` y la
+        # actualización de wikilinks, que renombran sobre el vault igual que la
+        # creación y tenían la misma ventana de pérdida abierta (#37B).
+        _fsync_dir_sync(path.parent)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -324,7 +362,21 @@ def _reserve_and_write_sync(dest_dir: Path, filename: str, content: str) -> Path
     # El contenido se escribe con el mismo write atómico de siempre: el
     # placeholder vacío que dejó la reserva se reemplaza de una. Un crash entre
     # medio deja una nota vacía, nunca una nota pisada.
-    _atomic_write_sync(candidate, content)
+    try:
+        _atomic_write_sync(candidate, content)
+    except BaseException:
+        # La reserva se deshace si la escritura falla (#37A): sin esto el
+        # placeholder vacío quedaba en el vault para siempre —se commiteaba al
+        # backup, disparaba el watcher y aparecía como nota en blanco— y encima
+        # ocupaba el nombre, así que el reintento del usuario escribía `-2`.
+        # Solo se borra el archivo que ESTA llamada reservó con O_EXCL: nunca
+        # puede llevarse puesta una nota ajena. El caso del crash (proceso
+        # muerto de golpe) sigue siendo el documentado en decisions-log.md.
+        try:
+            os.unlink(candidate)
+        except OSError:
+            pass
+        raise
     return candidate
 
 
@@ -919,6 +971,256 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Vault reconciliation (nightly maintenance)
+# ---------------------------------------------------------------------------
+
+# Cualquier wikilink del documento, incluidos los embeds `![[archivo.pdf]]` y
+# los que viven en el frontmatter (`source_file: "[[paper.pdf]]"`).
+_ANY_WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
+
+# Item de lista del bloque "## Ver también" (misma forma que limpia
+# `remove_broken_wikilinks`: anclado en el margen izquierdo).
+_VER_TAMBIEN_ITEM_RE = re.compile(r"^- \[\[([^\]\n]+)\]\]")
+
+# Link markdown `[texto](ruta)`. El bot siempre escribe wikilinks, pero Obsidian
+# puede estar configurado para escribir links markdown: una nota editada a mano
+# referencia su adjunto así, y la barrida de huérfanos no puede ignorarlo.
+_MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)")
+
+
+def _link_target_key(raw_target: str) -> str:
+    """Normaliza el target de un wikilink a la clave con la que se resuelve.
+
+    Descarta el alias (``|``), el anchor (``#``) y cualquier componente de
+    directorio: Obsidian resuelve por nombre de archivo, no por ruta.
+    """
+    target = raw_target.split("|", 1)[0].split("#", 1)[0].strip()
+    return target.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _ver_tambien_link_targets(content: str) -> list[str]:
+    """Devuelve los targets de los items de wikilink del bloque '## Ver también'.
+
+    Espeja el recorrido de `_strip_broken_links_in_ver_tambien`: fuera del
+    bloque no hay nada que reconciliar, y dentro de un bloque de código tampoco
+    (es un ejemplo del usuario, no un link — #5).
+    """
+    targets: list[str] = []
+    in_block = False
+    in_fence = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped == "## Ver también":
+            in_block = True
+            continue
+        if in_block and stripped.startswith("## "):
+            in_block = False
+        if not in_block:
+            continue
+        match = _VER_TAMBIEN_ITEM_RE.match(line)
+        if match:
+            targets.append(match.group(1))
+    return targets
+
+
+def _vault_files_sync(vault_path: Path) -> list[Path]:
+    """Lista los archivos visibles del vault (sin dotfiles ni carpetas ocultas)."""
+    files: list[Path] = []
+    for path in vault_path.rglob("*"):
+        try:
+            rel_parts = path.relative_to(vault_path).parts
+        except ValueError:
+            continue
+        # `.obsidian/`, `.trash/`, los temporales `.adso-tmp-*`: nada de eso es
+        # una nota ni un adjunto del usuario.
+        if any(part.startswith(".") for part in rel_parts):
+            continue
+        try:
+            if path.is_file():
+                files.append(path)
+        except OSError:
+            continue
+    return files
+
+
+def _archive_orphan_sync(path: Path, archive_dir: Path) -> Path:
+    """Mueve un adjunto huérfano a ``archive_dir`` sin pisar nada.
+
+    El nombre se reserva con ``O_EXCL`` y se desambigua con sufijo numérico
+    (misma convención que `save_resource`): dos huérfanos homónimos archivados
+    en noches distintas conviven. Pisar el primero sería perder el binario justo
+    en el paso que existe para no perderlo.
+    """
+    import shutil
+
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stem, suffix = path.stem, path.suffix
+    candidate = archive_dir / path.name
+    counter = 1
+    while True:
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            candidate = archive_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+            continue
+        os.close(fd)
+        break
+    # `shutil.move` sobre el placeholder que acaba de reservar el nombre: un
+    # rename si es el mismo filesystem, copy2+unlink si no.
+    shutil.move(str(path), str(candidate))
+    _fsync_dir_sync(archive_dir)
+    return candidate
+
+
+def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
+    """Reconciliación local del vault: links rotos y adjuntos sin dueño.
+
+    Corre entera en un thread y en un solo recorrido del vault. No usa red ni
+    ChromaDB a propósito: es mantenimiento del vault, no del índice.
+
+    Returns:
+        (notas_modificadas, adjuntos_archivados).
+    """
+    files = _vault_files_sync(vault_path)
+
+    # Criterio de resolución: **existencia en disco**, nunca pertenencia al
+    # índice semántico. Una nota en `05-Archive/` está excluida del índice pero
+    # Obsidian abre su link; borrarlo sería pérdida de datos (archivar no es
+    # borrar). Ídem los adjuntos de `03-Resources/`. Es el mismo criterio de #3:
+    # mover una nota no rompe sus links, porque resuelven por stem.
+    existing_names = {p.name for p in files}
+    existing_stems = {p.stem for p in files}
+
+    modified: list[Path] = []
+    referenced: set[str] = set()
+    unreadable = False
+
+    for md_path in files:
+        if md_path.suffix != ".md":
+            continue
+        try:
+            raw = md_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("No se pudo leer %s en la reconciliación: %s", md_path, exc)
+            unreadable = True
+            continue
+
+        for match in _ANY_WIKILINK_RE.finditer(raw):
+            referenced.add(_link_target_key(match.group(1)))
+        for match in _MARKDOWN_LINK_RE.finditer(raw):
+            destino = _link_target_key(match.group(1))
+            referenced.add(destino)
+            # Obsidian escapa los espacios como %20 al insertar el link.
+            referenced.add(unquote(destino))
+
+        # Los índices se dejan como están: los mantiene el flujo de gestión.
+        if md_path.stem == "_index":
+            continue
+
+        broken = {
+            _link_target_key(target)
+            for target in _ver_tambien_link_targets(raw)
+            if _link_target_key(target) not in existing_names
+            and _link_target_key(target) not in existing_stems
+        }
+        if not broken:
+            continue
+
+        new_content = raw
+        for stem in sorted(broken):
+            link_re = re.compile(
+                r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*$"
+            )
+            new_content = _strip_broken_links_in_ver_tambien(new_content, link_re)
+        new_content = _remove_empty_ver_tambien(new_content)
+
+        # Sin cambio real no se reescribe: bumpear el mtime dispara un evento
+        # del watcher → re-embed espurio (llamada a Gemini) + churn del backup,
+        # por cada nota y cada noche (F11).
+        if new_content == raw:
+            continue
+        new_content = new_content.rstrip("\n") + "\n"
+
+        try:
+            _atomic_write_sync(md_path, new_content)
+        except OSError as exc:
+            logger.warning(
+                "No se pudo escribir %s al reconciliar wikilinks: %s", md_path, exc
+            )
+            continue
+        modified.append(md_path)
+        logger.info(
+            "Wikilinks rotos reconciliados en %s: %s", md_path.name, sorted(broken)
+        )
+
+    archived: list[Path] = []
+    if unreadable:
+        # Una sola nota ilegible ya alcanza para que un adjunto parezca huérfano
+        # sin serlo. Se saltea la barrida entera: mover un binario referenciado
+        # es justo el error que la regla de oro prohíbe.
+        logger.warning(
+            "Barrida de adjuntos huérfanos omitida: hubo notas ilegibles en el vault."
+        )
+        return modified, archived
+
+    resources_dir = vault_path / "03-Resources"
+    archive_dir = vault_path / "05-Archive" / "03-Resources"
+    for path in files:
+        if resources_dir not in path.parents:
+            continue
+        # Solo adjuntos binarios: un `.md` en 03-Resources/ es material de
+        # referencia permanente, no basura — moverlo sería perder una nota.
+        if path.suffix == ".md":
+            continue
+        if path.name in referenced or path.stem in referenced:
+            continue
+        # Un adjunto recién escrito es indistinguible de una captura en vuelo:
+        # `_cb_confirm` guarda el binario con `save_resource` y recién después
+        # escribe la nota que lo referencia. Si la barrida cae en ese hueco, se
+        # lleva un adjunto cuya nota está por nacer y deja el embed roto. Los
+        # huérfanos reales son viejos (los del vault de producción tenían
+        # meses), así que la espera no cuesta nada.
+        try:
+            if time.time() - path.stat().st_mtime < _ORPHAN_MIN_AGE_SECONDS:
+                continue
+        except OSError:
+            continue
+        try:
+            destino = _archive_orphan_sync(path, archive_dir)
+        except OSError as exc:
+            logger.warning("No se pudo archivar el adjunto huérfano %s: %s", path, exc)
+            continue
+        archived.append(destino)
+        logger.info("Adjunto huérfano archivado: %s → %s", path.name, destino)
+
+    return modified, archived
+
+
+async def reconcile_vault(vault_path: Path) -> tuple[list[Path], list[Path]]:
+    """Reconcilia el vault: wikilinks rotos y adjuntos que nadie referencia.
+
+    Pensada para el trabajo nocturno. La limpieza de wikilinks corría solo desde
+    el evento de borrado del watcher: una nota borrada con el contenedor parado
+    (o desde otro dispositivo mientras ADSO estaba caído) nunca disparaba
+    inotify y el link quedaba roto para siempre (#57).
+
+    Args:
+        vault_path: Raíz del vault.
+
+    Returns:
+        (notas_modificadas, adjuntos_archivados) — los adjuntos se **mueven** a
+        `05-Archive/03-Resources/`, nunca se borran.
+    """
+    return await asyncio.to_thread(_reconcile_vault_sync, vault_path)
+
+
+# ---------------------------------------------------------------------------
 # Vault structure
 # ---------------------------------------------------------------------------
 
@@ -991,6 +1293,111 @@ async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _save_resource_sync(
+    source_path: Path,
+    safe_name: str,
+    resources_dir: Path,
+) -> Path:
+    """Copia un adjunto a ``resources_dir`` reservando el nombre y sin dejar parciales.
+
+    Corre entero en un thread (I/O bloqueante). Tres garantías:
+
+    1. La reserva del nombre usa ``O_EXCL`` (atómico a nivel kernel), así que
+       dos guardados concurrentes de contenido distinto nunca ganan el mismo
+       nombre — antes el segundo pisaba al primero y el ``![[...]]`` de la
+       primera nota apuntaba a otro binario.
+    2. El dedup por SHA-256 (con short-circuit por tamaño) se mantiene: si el
+       nombre está tomado por un archivo de contenido idéntico, se reutiliza.
+    3. La copia se hace a un temporal y se publica con ``os.replace``: un corte
+       a mitad (OOM, ``docker stop``, corte de luz) nunca deja un adjunto
+       truncado visible en ``03-Resources/``.
+
+    Args:
+        source_path: Archivo a copiar.
+        safe_name: Nombre destino, ya saneado (sin componentes de path).
+        resources_dir: Carpeta ``03-Resources/`` del vault.
+
+    Returns:
+        Path del archivo en el vault (nuevo o reutilizado por dedup).
+
+    Raises:
+        FileNotFoundError: Si ``source_path`` no existe.
+        OSError: Si la copia falla; en ese caso no queda ningún parcial.
+    """
+    import shutil
+
+    if not source_path.exists():
+        raise FileNotFoundError(f"Archivo fuente no encontrado: {source_path}")
+
+    resources_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = Path(safe_name).stem
+    suffix = Path(safe_name).suffix
+    source_size = source_path.stat().st_size
+    source_hash: Optional[str] = None
+
+    candidate = resources_dir / safe_name
+    counter = 1
+    while True:
+        try:
+            # La reserva deja un archivo de 0 bytes hasta el `os.replace` de
+            # abajo. Es una ventana corta y solo afecta al dedup: dos guardados
+            # *simultáneos* del mismo binario pueden terminar en dos archivos
+            # (uno de más), nunca en uno pisado (pérdida de datos).
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            # El nombre está tomado: si el contenido es el mismo, se reutiliza
+            # (dedup por hash; comparar solo tamaño confundía archivos distintos
+            # y descartaba el nuevo en silencio).
+            try:
+                if candidate.stat().st_size == source_size:
+                    if source_hash is None:
+                        source_hash = _file_hash_sync(source_path)
+                    if _file_hash_sync(candidate) == source_hash:
+                        logger.info(
+                            "Recurso ya existe (mismo contenido), reutilizando: %s",
+                            candidate,
+                        )
+                        return candidate
+            except OSError:
+                # Un archivo ilegible o borrado en medio del scan no puede
+                # tumbar la captura: se prueba el siguiente nombre.
+                pass
+            candidate = resources_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+            continue
+        os.close(fd)
+        break
+
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(resources_dir), prefix=".adso-tmp-", suffix=".tmp"
+    )
+    os.close(tmp_fd)
+    tmp = Path(tmp_name)
+    try:
+        shutil.copy2(str(source_path), str(tmp))
+        # `copy2` preserva el modo del origen, y el origen es el temporal de la
+        # descarga que `tempfile` crea en 0600: sin este chmod todo PDF o imagen
+        # de 03-Resources/ quedaba ilegible para cualquier otro usuario o
+        # proceso (Syncthing corre con otro UID). G4 de audit-2026-07-31.md.
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, candidate)
+        _fsync_dir_sync(resources_dir)
+    except BaseException:
+        # Ni el temporal ni el placeholder de la reserva pueden sobrevivir a un
+        # fallo: un PDF truncado en 03-Resources/ es peor que no tenerlo, porque
+        # Obsidian lo lista como si estuviera bien y nadie se entera.
+        for leftover in (tmp, candidate):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
+        raise
+
+    logger.info("Recurso guardado: %s", candidate)
+    return candidate
+
+
 async def save_resource(
     source_path: Path,
     original_filename: str,
@@ -998,7 +1405,13 @@ async def save_resource(
 ) -> Path:
     """Copia un archivo a 03-Resources/ en el vault.
 
-    Si ya existe un archivo con el mismo nombre, agrega sufijo numérico.
+    Si ya existe un archivo con el mismo nombre y contenido distinto, agrega
+    sufijo numérico; si el contenido es idéntico, reutiliza el existente.
+
+    Todo el I/O corre en un solo thread: en la RPi4 con SD lenta, el `stat` y el
+    bucle de nombres bloqueaban el event loop en cada captura con adjunto, y
+    además cualquier `await` entre elegir el nombre y escribirlo abría una
+    ventana TOCTOU (#36).
 
     Args:
         source_path: Path al archivo temporal a copiar.
@@ -1010,52 +1423,16 @@ async def save_resource(
 
     Raises:
         FileNotFoundError: Si source_path no existe.
+        OSError: Si la copia falla (el caller debe avisar al usuario: no queda
+            ningún archivo parcial en el vault).
     """
-    import shutil
-
-    if not source_path.exists():
-        raise FileNotFoundError(f"Archivo fuente no encontrado: {source_path}")
-
-    resources_dir = vault_path / "03-Resources"
-    resources_dir.mkdir(parents=True, exist_ok=True)
-
     # Strip directory components to prevent path traversal (e.g. "../../.env").
     # Path(...).name keeps only the final component regardless of separators.
     safe_name = Path(original_filename).name or "resource"
-    stem = Path(safe_name).stem
-    suffix = Path(safe_name).suffix
 
-    source_size = source_path.stat().st_size
-    source_hash = await asyncio.to_thread(_file_hash_sync, source_path)
-
-    # Buscar un nombre libre. Si en el camino aparece un archivo con el MISMO
-    # contenido (comparado por hash, no solo por tamaño), reutilizarlo — así dos
-    # archivos distintos del mismo tamaño ya no se confunden ni se descarta el
-    # nuevo silenciosamente (era pérdida de datos).
-    candidate = resources_dir / safe_name
-    counter = 1
-    while candidate.exists():
-        if candidate.stat().st_size == source_size:
-            existing_hash = await asyncio.to_thread(_file_hash_sync, candidate)
-            if existing_hash == source_hash:
-                logger.info(
-                    "Recurso ya existe (mismo contenido), reutilizando: %s",
-                    candidate.relative_to(vault_path),
-                )
-                return candidate
-        candidate = resources_dir / f"{stem}_{counter}{suffix}"
-        counter += 1
-
-    dest = candidate
-    await asyncio.to_thread(shutil.copy2, str(source_path), str(dest))
-    # `copy2` preserva el modo del origen, y el origen es el temporal de la
-    # descarga que `tempfile` crea en 0600: sin este chmod todo PDF o imagen de
-    # 03-Resources/ quedaba ilegible para cualquier otro usuario o proceso.
-    # Mismo problema que G4 en las notas, por otro camino — el fix original
-    # solo cubrió `_atomic_write_sync`. Ver docs/audit-2026-07-31.md.
-    await asyncio.to_thread(os.chmod, str(dest), 0o644)
-    logger.info("Recurso guardado: %s", dest.relative_to(vault_path))
-    return dest
+    return await asyncio.to_thread(
+        _save_resource_sync, source_path, safe_name, vault_path / "03-Resources"
+    )
 
 
 async def find_resource_by_hash(source_path: Path, vault_path: Path) -> Optional[Path]:

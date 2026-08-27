@@ -16,7 +16,13 @@ from adso.handlers.capture import _index_note_safe, _redirect_unimplemented_mode
 from adso.keyboards import _esc
 from adso.llm_client import classify, extract_original_from_degraded
 from adso.vault_search import find_by_property
-from adso.vault_writer import GitBackup, create_note, delete_note, read_note
+from adso.vault_writer import (
+    GitBackup,
+    create_note,
+    delete_note,
+    read_note,
+    reconcile_vault,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,21 +224,59 @@ async def heartbeat_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     Path("/tmp/adso_heartbeat").touch()
 
 
+async def _reconcile_vault_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mantenimiento local del vault dentro del trabajo nocturno.
+
+    Reconcilia los wikilinks rotos que el watcher nunca vio (nota borrada con el
+    contenedor parado o desde otro dispositivo) y archiva los adjuntos de
+    `03-Resources/` que ninguna nota referencia. Es trabajo local: no usa red ni
+    ChromaDB, así que corre aunque el índice esté caído (#57).
+    """
+    settings: Settings = context.bot_data["settings"]
+    modified, archived = await reconcile_vault(settings.vault_path)
+
+    for path in modified:
+        # El watcher vería estas escrituras como cambios externos y dispararía
+        # un re-embed por nota; el reindex de abajo ya las cubre.
+        mark_bot_written(context.bot_data, path)
+
+    if not modified and not archived:
+        return
+
+    logger.info(
+        "Reconciliación del vault: %d nota(s) con links rotos, %d adjunto(s) archivado(s)",
+        len(modified), len(archived),
+    )
+
+    git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
+    if git_backup:
+        await git_backup.notify("Mantenimiento del vault")
+
+
 async def reindex_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job nocturno: reindexar vault completo en ChromaDB."""
+    """Job nocturno: reconciliar el vault y reindexar los embeddings."""
     settings: Settings = context.bot_data["settings"]
     embeddings: Optional[EmbeddingsClient] = context.bot_data.get("embeddings")
 
-    if not embeddings:
-        return
-
     logger.info("Reindex nocturno iniciando...")
-    try:
-        async with _vault_heavy_lock:
+    async with _vault_heavy_lock:
+        # La reconciliación va primero y NO depende del cliente de embeddings:
+        # con el índice caído o mal configurado, el vault igual sigue acumulando
+        # links rotos y adjuntos huérfanos noche tras noche (#57). Además, así
+        # el reindex de abajo ya ve las notas corregidas.
+        try:
+            await _reconcile_vault_job(context)
+        except Exception as e:
+            logger.error("Error reconciliando el vault: %s", e)
+
+        if not embeddings:
+            return
+
+        try:
             stats = await embeddings.reindex_vault(
                 vault_path=settings.vault_path,
                 exclude_dirs=settings.vault.exclude_dirs,
             )
-        logger.info("Reindex completo: %s", stats)
-    except Exception as e:
-        logger.error("Error en reindex nocturno: %s", e)
+            logger.info("Reindex completo: %s", stats)
+        except Exception as e:
+            logger.error("Error en reindex nocturno: %s", e)
