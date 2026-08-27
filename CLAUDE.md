@@ -414,6 +414,23 @@ Cada test que especifica comportamiento nuevo nace con
 `@pytest.mark.xfail(strict=True)`; los contra-casos nacen sin marca y deben
 pasar desde ya.
 
+**Verificar por qué falla cada test — son dos casos distintos y confundirlos es
+el error más fácil de cometer:**
+
+- *El símbolo todavía no existe* (una función, un atributo nuevo): un
+  `ImportError`/`AttributeError` sobre ese símbolo **es la razón correcta**. No
+  hay nada más que verificar.
+- *El flujo ya existe y hoy hace lo incorrecto*: el test tiene que fallar **en la
+  aserción**, no al armar el escenario. Si falla con
+  `AttributeError: Mock object has no attribute 'document'`, ese test no
+  especifica nada — va a seguir fallando después de implementado y le hace perder
+  horas al que implementa persiguiendo un fantasma que era el mock.
+
+En una frase: **el test falla por la ausencia del comportamiento, no por un
+defecto del andamiaje del test.** Es el espejo de la regla para reproducir bugs
+(donde un mock roto documenta un bug inexistente); acá un andamiaje roto hace
+parecer que se especificó algo cuando no se especificó nada.
+
 **3. El árbitro contesta las preguntas abiertas** antes de lanzar la
 implementación, en un addendum a la spec. Este paso no es opcional: sin él los
 dos agentes divergen. Los agentes **nunca se comunican entre sí** — todo pasa por
