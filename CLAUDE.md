@@ -386,6 +386,68 @@ Dos reglas que hacen que el mecanismo sirva: (1) verificar con `--runxfail` que 
 
 Los reproductores de la auditoría 2026-08-26 viven en `tests/unit/test_audit_2026_08_*.py`; el índice de qué cubre cada uno está en `docs/audit-2026-08-26.md`.
 
+### Spec → tests → implementación, con agentes separados
+
+Para trabajo de varios ítems (un lote de mejoras, una tanda de fixes), el ciclo
+test-first se ejecuta con **roles separados**. El motivo es concreto: cuando la
+misma cabeza escribe el test y el código, el test tiende a confirmar lo que el
+código hace en vez de especificar lo que debería hacer, y nadie lo nota porque
+está verde.
+
+**1. Spec (el árbitro).** Un documento de comportamiento: qué DEBE pasar, los
+**contra-casos** de lo que no puede romperse, y la **superficie de API que los
+tests pueden tocar** (nombres concretos de símbolos y firmas). Esto último no es
+burocracia: sin eso, el que escribe los tests y el que implementa eligen nombres
+distintos para lo mismo y el trabajo se tira.
+
+La escribe quien tiene el contexto completo —los issues, el código, la evidencia
+de producción—, porque un error acá se propaga a los dos agentes siguientes. Se
+puede delegar, pero vuelve para revisión antes de soltarla.
+
+**2. Tests (agente A).** Recibe **solo la spec**. Puede leer `adso/` para saber
+*cómo* montar un test (qué handler invocar, cómo mockear), pero **el
+comportamiento esperado sale de la spec, no del código**. Prohibido tocar
+`adso/`. Lo que la spec no cubra se anota como **pregunta abierta en el informe
+final** — no se inventa.
+
+Cada test que especifica comportamiento nuevo nace con
+`@pytest.mark.xfail(strict=True)`; los contra-casos nacen sin marca y deben
+pasar desde ya.
+
+**3. El árbitro contesta las preguntas abiertas** antes de lanzar la
+implementación, en un addendum a la spec. Este paso no es opcional: sin él los
+dos agentes divergen. Los agentes **nunca se comunican entre sí** — todo pasa por
+el árbitro, asincrónico. Si se hablan, se contaminan.
+
+**4. Implementación (agente B).** Recibe la spec + los tests. **No puede
+modificar ningún test.** La única edición permitida es sacar una marca `xfail`
+de un test que su fix hizo pasar. Si un test le parece mal —contradice la spec,
+mock roto, imposible de satisfacer— **escala y sigue con el resto**.
+
+**5. Verificación (el árbitro):** que los tests no se hayan aflojado (contar
+tests y asserts, buscar `assert True` / `skip` / marcas nuevas), suite completa,
+`ruff`, commit, deploy.
+
+**Quién decide sobre un test que parece mal.** El implementador nunca: tiene
+conflicto de interés directo, el test es justo lo que le bloquea. El autor del
+test tiene el sesgo opuesto —lo defiende— y eso sirve de contrapeso, pero
+también puede estar equivocado. **Decide el árbitro.** El criterio de fondo:
+quien decide sobre un test no puede ser quien se beneficia de que sea más débil.
+
+El árbitro sí puede editar un test, con un límite: solo para **aumentar su
+fidelidad** (arreglar un mock que hacía pasar el test por accidente), nunca para
+debilitar una aserción.
+
+**Qué destapó en su primera corrida** (lote 1, 2026-08-26), que es la razón de
+mantenerlo: 10 contra-casos pasaban **sin ejecutar nada** (a sus updates les
+faltaba `effective_user` y `@authorized` los descartaba en silencio), y un test
+e2e preexistente pasaba por accidente porque nunca seteaba `doc.mime_type` y el
+`MagicMock` era truthy. Además, tener que *decidir* un contrato ambiguo en vez de
+copiar lo que hacía el código destapó un bug que nadie buscaba (#63).
+
+**Cuándo NO usarlo:** un fix puntual de un solo ítem. Ahí el ciclo test-first de
+arriba alcanza y montar tres roles es puro overhead.
+
 ### Harness de regresión de modelo
 
 Antes de tocar `GEMINI_MODEL` hay que correr `scripts/llm_regression.py`, que verifica contra la API real que el modelo respete el **contrato estructural** que el resto del bot asume. No mide calidad de redacción ni de resumen: eso lo valida el usuario en el preview antes de confirmar cada nota. Mide lo que el usuario no ve — sobre todo que `validate_llm_response` no lance (si lanza, *toda* captura cae a modo degradado) y que el modelo no obedezca prompt injection.
