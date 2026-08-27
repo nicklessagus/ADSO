@@ -302,6 +302,12 @@ class TestArxivConservaElTextoDelMensaje:
         assert "Leer" in ctx
         assert "antes del viernes" in ctx
         assert "arxiv.org" not in ctx, "la URL ya viaja como source_url; no es contexto"
+        # Addendum §1: los fragmentos se unen con UN espacio y sin bordes. Es
+        # texto que va a un prompt: el hueco que deja la URL al salir no puede
+        # quedar como espacio doble ni como salto de línea suelto.
+        assert "  " not in ctx, f"quedó whitespace sin colapsar: {ctx!r}"
+        assert ctx == ctx.strip()
+        assert "\n" not in ctx
 
     @AUTH
     async def test_bare_arxiv_url_gives_none_not_empty_string(
@@ -768,8 +774,13 @@ class TestMetadataDePdfEscaneado:
         fm = mock_context.user_data["pending_note"]["payload"]["frontmatter"]
         autores = fm.get("authors")
         assert autores, "la metadata traía author y el frontmatter quedó sin authors"
-        # La spec no fija si `authors` es lista o string: se acepta cualquiera.
-        assert "M. Pérez" in (autores if isinstance(autores, str) else " ".join(autores))
+        # El addendum §3 lo fija: **lista de strings**. Lo respaldan el schema
+        # (`docs/frontmatter-schema.md`) y las 6 notas con `authors` del vault
+        # real, todas listas. Dos formas para el mismo campo hacen que las
+        # queries de Dataview pierdan filas en silencio.
+        assert isinstance(autores, list), f"`authors` debe ser lista, llegó {type(autores).__name__}"
+        assert all(isinstance(a, str) for a in autores)
+        assert "M. Pérez" in autores
 
     @pytest.mark.parametrize(
         "titulo_basura",

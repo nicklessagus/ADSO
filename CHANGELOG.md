@@ -9,6 +9,47 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.6.0] — 2026-08-26
+
+Primeras dos tandas de mejoras de la auditoría (9 issues), implementadas con un **método de trabajo nuevo**: la spec, los tests y la implementación las hacen roles separados que no se comunican entre sí. El motivo es concreto — cuando la misma cabeza escribe el test y el código, el test tiende a confirmar lo que el código hace en vez de especificar lo que debería hacer, y nadie lo nota porque está verde. Documentado en `CLAUDE.md` § "Spec → tests → implementación".
+
+Suite: 925 → **1009 tests**. Cobertura 85%.
+
+### Added
+
+**Lote 1 — captura y medios** (#39, #40, #41, #42, #50):
+- **El texto que acompaña un link de arXiv ya no se descarta.** "Para el cap. 4 de la tesis: `<url>`" ahora usa esa frase como contexto de clasificación, que es lo que decide a qué proyecto va la nota. Se reconoce también `export.arxiv.org`, con el subdominio enumerado y no un comodín, para que `notarxiv.org` siga sin matchear
+- **Los documentos rutean por `mime_type`** cuando la extensión no dice nada: un PDF **reenviado** llega sin nombre de archivo y caía en "formato no compatible" pese a declarar `application/pdf`
+- **Un `.txt` en Latin-1 ya no se convierte en mojibake permanente** en el vault: la lectura intenta UTF-8 estricto y recién ahí cae al fallback, en vez de reemplazar bytes en silencio. Y el recorte a 50.000 caracteres ahora es **visible para el usuario** en vez de solo quedar en el log
+- **La metadata de PDFs escaneados se usa**: título y autores llegan al frontmatter, filtrando basura (vacíos y títulos que en realidad son nombres de archivo — el PDF típico generado por Word)
+- **Un render de preview fallido ya no deja al bot mudo**: el preview se reenvía como mensaje nuevo con su teclado, y el `msg_id` pendiente lo sigue para que el guard G14 no rechace después el `[Confirmar]` legítimo del usuario. El aviso de inyección ahora sobrevive a una corrección, que es justo cuando el usuario está por confirmar
+
+**Lote 2 — durabilidad del vault y reconciliación nocturna** (#36, #37, #38, #57):
+- **Los adjuntos ya no pueden quedar truncados.** `save_resource` hace todo su I/O en un thread en vez de en el event loop, reserva el nombre con `O_EXCL` —dos guardados concurrentes de contenido distinto ya no pueden resolver al mismo archivo— y publica la copia con un rename. Una copia interrumpida dejaba en `03-Resources/` un PDF que parece válido y no lo es
+- **Una escritura fallida ya no deja notas vacías fantasma**, y ahora se sincroniza la entrada de directorio. El `fsync` vive en el helper de escritura atómica compartido, no en `create_note`, así que lo heredan `append_to_note`, `set_property` y la actualización de wikilinks — la ventana de pérdida ante corte de luz era la misma en todos, y la RPi no tiene UPS
+- **El watcher no se frena esperando un envío de Telegram** dentro de su loop de despacho: un envío lento dejaba de drenar la cola justo durante una ráfaga de Syncthing, que es cuando más eventos llegan
+- **El trabajo nocturno reconcilia el vault**: limpia wikilinks rotos aunque el borrado haya ocurrido con el bot apagado, y archiva adjuntos que ninguna nota referencia. Es exactamente por qué el vault real había juntado 14 links rotos y 1,5 MB de huérfanos — la limpieza solo corría desde el evento de borrado del watcher. Corre también **sin cliente de embeddings**: es trabajo local, y el escenario del índice caído es justo donde los links se pudren sin que nadie mire
+
+### Fixed
+
+- **`find_resource_by_hash` cierra el bug de duplicados de la auditoría** (#53, el único que había quedado abierto): la deduplicación ahora usa el SHA-256 que `save_resource` ya calculaba y descartaba, chequeado **antes** de la extracción y del LLM para que un duplicado no gaste quota. Busca la nota dueña tanto por `source_file` como por el embed en el body. Deduplica por hash, no por nombre: dos archivos distintos pueden llamarse igual
+- **La corrección `tipo` no funcionaba sobre tareas** (#62) y encima **le pisaba el título**: `_apply_task_corrections` no tenía rama de `tipo`, así que "tipo nota" caía al fallback de título y la tarea pasaba a llamarse "tipo nota". Era la única vía para sacar una nota de `task`
+- **Los commits del backup del vault dicen qué proyecto cambió**: los siete `_index.md` comparten stem, así que editar cualquiera producía `Add note: _index`
+
+### Notes
+
+Dos decisiones tomadas como árbitro, ambas para evitar pérdida de datos:
+
+- **Un wikilink resuelve si el archivo existe en disco, nunca consultando el índice.** La lectura obvia —"apunta a algo que no está indexado"— habría borrado de una pasada **todos los links a notas archivadas**: `05-Archive` está fuera del índice semántico pero los archivos existen y Obsidian los abre. Archivar no es borrar
+- **La barrida de huérfanos saltea adjuntos de menos de 10 minutos.** `_cb_confirm` guarda el binario y **después** escribe la nota que lo referencia: una confirmación que cayera durante la barrida nocturna perdía su adjunto al Archive con el embed roto
+
+### Known
+
+- Queda abierto #63: `authors` se escribe como **string** en el flujo de papers y como **lista** en todo el resto. Hoy no rompe porque el sanitizador lo coacciona, pero contradice el schema y las 6 notas del vault. Encontrado al tener que *decidir* el contrato en vez de copiar lo que hacía el código
+- Quedan 12 mejoras abiertas y las decisiones de taxonomía del vault (#58, #60, #61)
+
+---
+
 ## [1.5.0] — 2026-08-26
 
 Auditoría funcional completa: **40 bugs encontrados, 39 arreglados**, cada uno con un test que primero falló reproduciéndolo. El que queda abierto es #53 (la dedup no cubre archivos subidos), que necesita una decisión de diseño y va como issue en vez de un fix apurado. Siete pasadas de revisión (captura, medios, LLM/config, vault, embeddings, comandos/reportes/jobs, y docs), más una auditoría del **vault real de producción** que destapó cinco defectos que leyendo código no se veían.

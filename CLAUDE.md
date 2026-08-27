@@ -431,8 +431,19 @@ defecto del andamiaje del test.** Es el espejo de la regla para reproducir bugs
 (donde un mock roto documenta un bug inexistente); acá un andamiaje roto hace
 parecer que se especificó algo cuando no se especificó nada.
 
+**2b. El agente de tests audita su propia cobertura contra la spec** y reporta
+**qué requisitos quedaron sin test que los verifique**. No es opcional: un
+requisito que ningún test ejecuta es un deseo, no un contrato — el implementador
+puede dejar la suite en verde sin cumplirlo, que es justo la fuga que el método
+existe para tapar. En el lote 2 aparecieron tres así (uno de ellos, "la
+reconciliación corre sin cliente de embeddings", era el escenario donde el fix
+más falta hacía). En el lote 1 nadie lo auditó y el hueco pasó desapercibido.
+
 **3. El árbitro contesta las preguntas abiertas** antes de lanzar la
-implementación, en un addendum a la spec. Este paso no es opcional: sin él los
+implementación, en un addendum a la spec. **Si una respuesta crea un requisito
+nuevo, vuelve al agente de tests** — no lo cubre el implementador, que estaría
+escribiendo el test de su propio código. Pasó en el lote 2: definir qué es un
+"wikilink roto" obligó a agregar contra-casos que ningún test tenía. Este paso no es opcional: sin él los
 dos agentes divergen. Los agentes **nunca se comunican entre sí** — todo pasa por
 el árbitro, asincrónico. Si se hablan, se contaminan.
 
@@ -442,8 +453,18 @@ de un test que su fix hizo pasar. Si un test le parece mal —contradice la spec
 mock roto, imposible de satisfacer— **escala y sigue con el resto**.
 
 **5. Verificación (el árbitro):** que los tests no se hayan aflojado (contar
-tests y asserts, buscar `assert True` / `skip` / marcas nuevas), suite completa,
-`ruff`, commit, deploy.
+tests y asserts, buscar `assert True` / `skip` / marcas nuevas), **y recorrer la
+spec requisito por requisito confirmando que cada uno tiene un test que lo
+ejecuta** — sobre todo los del addendum, que son los que nacieron después de
+escritos los tests. Después: suite completa, `ruff`, commit, deploy.
+
+Ese recorrido no es redundante con el paso 2b: son dos redes distintas. En el
+lote 1 nadie auditó cobertura —ni el agente ni yo— y quedaron **dos requisitos
+del addendum sin verificar**: que `authors` fuera lista (el test decía
+explícitamente "la spec no fija la forma: se acepta cualquiera", escrito antes
+de que la fijara) y que el whitespace quedara colapsado. La implementación
+resultó correcta en los dos casos, pero eso fue suerte: nada lo exigía. Contar
+tests y ver la suite verde **no** detecta un requisito que ningún test ejecuta.
 
 **Quién decide sobre un test que parece mal.** El implementador nunca: tiene
 conflicto de interés directo, el test es justo lo que le bloquea. El autor del
