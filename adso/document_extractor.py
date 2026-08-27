@@ -491,18 +491,55 @@ async def extract_pdf(file_path: Path) -> tuple[str, dict]:
     return await asyncio.to_thread(_do_extract)
 
 
+class ExtractedText(str):
+    """Text read from a file, carrying how it was read.
+
+    A plain ``str`` in every respect (concatenation, slicing, ``len()``,
+    ``isinstance``) — every existing consumer keeps working — plus two facts the
+    caller needs to tell the user and that were lost until now:
+
+    Attributes:
+        truncated: True if the content was cut down to ``max_chars``.
+        encoding: Encoding the file was successfully decoded with
+            (``"utf-8"`` or ``"latin-1"``).
+    """
+
+    truncated: bool
+    encoding: str
+
+    def __new__(
+        cls,
+        value: str,
+        *,
+        truncated: bool = False,
+        encoding: str = "utf-8",
+    ) -> "ExtractedText":
+        obj = super().__new__(cls, value)
+        obj.truncated = truncated
+        obj.encoding = encoding
+        return obj
+
+
 async def extract_text_file(
     file_path: Path,
     max_chars: Optional[int] = None,
-) -> str:
+) -> ExtractedText:
     """Lee contenido de un archivo de texto plano.
+
+    Intenta UTF-8 estricto y solo cae a Latin-1 si falla. Antes se leía con
+    ``errors="replace"``: un .txt en Latin-1/Windows-1252 —lo más común en
+    español— perdía cada acento como U+FFFD, y ese texto va **verbatim** al
+    vault, así que la corrupción quedaba escrita para siempre. El orden importa:
+    decodificar todo como Latin-1 convertiría un UTF-8 válido en mojibake
+    ("año" → "aÃ±o"), que es peor porque no deja ni rastro del reemplazo.
 
     Args:
         file_path: Path al archivo.
         max_chars: Límite de caracteres (None = sin límite).
 
     Returns:
-        Contenido del archivo como string.
+        ``ExtractedText`` (un ``str``) con el contenido, más ``.truncated`` y
+        ``.encoding``.
 
     Raises:
         FileNotFoundError: Si el archivo no existe.
@@ -510,11 +547,24 @@ async def extract_text_file(
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
 
-    def _do_read() -> str:
-        content = file_path.read_text(encoding="utf-8", errors="replace")
+    def _do_read() -> ExtractedText:
+        raw = file_path.read_bytes()
+        try:
+            content = raw.decode("utf-8")
+            encoding = "utf-8"
+        except UnicodeDecodeError:
+            # Latin-1 decodifica cualquier secuencia de bytes: es el fallback
+            # que garantiza que un archivo raro no tumbe el flujo entero
+            # (perder el flujo es peor que perder un carácter).
+            content = raw.decode("latin-1")
+            encoding = "latin-1"
+            logger.info("Archivo leído como latin-1: %s", file_path.name)
+
+        truncated = False
         if max_chars and len(content) > max_chars:
             content = content[:max_chars]
+            truncated = True
             logger.info("Archivo truncado a %d chars", max_chars)
-        return content
+        return ExtractedText(content, truncated=truncated, encoding=encoding)
 
     return await asyncio.to_thread(_do_read)

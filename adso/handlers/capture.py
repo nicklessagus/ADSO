@@ -23,6 +23,7 @@ from adso.bot_utils import (
     _get_existing_items,
     _get_existing_tags,
     mark_bot_written,
+    render_with_keyboard,
     spawn_tracked,
 )
 from adso.config import Settings
@@ -62,6 +63,28 @@ STATUS_ON_CONFIRM: dict[str, str] = {
     "task": "pending",
     "idea": "raw",
 }
+
+
+def _with_injection_warning(pending: dict, preview: str) -> str:
+    """Antepone el aviso de inyección si la captura pendiente venía marcada.
+
+    Todo re-render del preview (corrección de texto, cambio de destino) pasa por
+    acá: el aviso tiene que seguir a la vista hasta que la nota se confirme o se
+    cancele.
+    """
+    if pending.get("injection_risk"):
+        return _INJECTION_PREVIEW_WARNING + preview
+    return preview
+
+
+def _fallback_msg(update: Update) -> Any:
+    """Mensaje al que responder si la edición del preview falla.
+
+    Solo tiene sentido cuando el render iba a ser un `edit_message_text`: si ya
+    era un `reply_text`, reintentar el mismo canal no arregla nada.
+    """
+    query = getattr(update, "callback_query", None)
+    return getattr(query, "message", None) if query else None
 
 
 def _remember_preview_msg(result: dict, sent: Any) -> None:
@@ -306,7 +329,9 @@ async def _classify_and_preview(
         keyboard = build_capture_keyboard()
 
         reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        sent = await reply_fn(
+        sent = await render_with_keyboard(
+            reply_fn,
+            _fallback_msg(update),
             "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
             "Confirmar, corregir o cancelar.\n\n" + preview,
             reply_markup=keyboard,
@@ -407,10 +432,17 @@ async def _classify_and_preview(
     # usuario escrute el preview antes de confirmar. No bloquea — igual se confirma.
     if check_injection_risk(text):
         logger.warning("Patrón de inyección detectado en contenido a clasificar")
+        # El flag viaja con el estado pendiente: el preview se vuelve a
+        # renderizar en [Corregir] y [Reubicar], y sin él el aviso desaparecía
+        # justo cuando el usuario está por confirmar, que es cuando la regla de
+        # seguridad pide que escrute (#50).
+        result["injection_risk"] = True
         preview = _INJECTION_PREVIEW_WARNING + preview
 
     reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-    sent = await reply_fn(
+    sent = await render_with_keyboard(
+        reply_fn,
+        _fallback_msg(update),
         preview,
         reply_markup=keyboard,
         parse_mode="HTML",
@@ -755,7 +787,7 @@ async def _handle_text_correction(
 
     body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])
-    preview = build_preview(fm, body, suggested_links)
+    preview = _with_injection_warning(pending, build_preview(fm, body, suggested_links))
     keyboard = build_capture_keyboard()
 
     if locked_msg_id:
@@ -1203,7 +1235,7 @@ async def _cb_dest(
 
     body = pending["payload"].get("body", "")
     suggested_links = pending["payload"].get("suggested_links", [])
-    preview = build_preview(fm, body, suggested_links)
+    preview = _with_injection_warning(pending, build_preview(fm, body, suggested_links))
 
     sent = await query.edit_message_text(
         preview + "\n\n¿Confirmar?",
@@ -1211,6 +1243,52 @@ async def _cb_dest(
         parse_mode="HTML",
     )
     _remember_preview_msg(pending, sent)
+
+
+# Word deja el nombre del archivo en el `title` del PDF que exporta: un título
+# que termina así es el nombre del original, no el título del documento.
+_FILENAME_TITLE_SUFFIXES = (".doc", ".docx", ".pdf")
+
+
+def _frontmatter_from_pdf_metadata(metadata: Optional[dict]) -> dict:
+    """Campos de frontmatter tomados literalmente de la metadata de un PDF.
+
+    Un PDF escaneado suele traer su título real en la metadata aunque no tenga
+    capa de texto: es un dato del archivo, más confiable que lo que el LLM
+    infiere del OCR. Se recolectaba en `pending_fallback_pdf` y no lo leía
+    nadie (#42).
+
+    Filtra la basura habitual antes de dejar que pise al LLM — vacío, solo
+    espacios, o un título que es en realidad un nombre de archivo. Un título
+    inventado por el escáner es peor que el que propuso el LLM.
+
+    Args:
+        metadata: Dict de metadata del PDF (``title``, ``author``, ``pages``…),
+            o None si el PDF no traía.
+
+    Returns:
+        Dict listo para ``extra_fm``. Vacío si no hay nada aprovechable.
+    """
+    if not isinstance(metadata, dict):
+        return {}
+
+    extra: dict[str, Any] = {}
+
+    title = metadata.get("title")
+    if isinstance(title, str):
+        title = title.strip()
+        if title and not title.lower().endswith(_FILENAME_TITLE_SUFFIXES):
+            extra["title"] = title
+
+    author = metadata.get("author")
+    if isinstance(author, str):
+        # `authors` es lista de strings en el schema del vault; la metadata trae
+        # un solo string que puede juntar varios autores.
+        authors = [a.strip() for a in re.split(r"[;,]", author) if a.strip()]
+        if authors:
+            extra["authors"] = authors
+
+    return extra
 
 
 async def _cb_transcript_ok(
@@ -1244,7 +1322,12 @@ async def _cb_transcript_ok(
             Path(temp_path).unlink(missing_ok=True)
 
     if media_type == "audio":
-        await update.callback_query.edit_message_text(
+        # La transcripción ya está pagada y no existe en ningún otro lado: si el
+        # edit falla, el teclado [Tarea]/[Nota] tiene que llegar igual o el
+        # estado queda vivo y sin botones hasta `/reset` (#50).
+        await render_with_keyboard(
+            update.callback_query.edit_message_text,
+            _fallback_msg(update),
             "¿Guardar como tarea o como nota?",
             reply_markup=build_save_keyboard(),
         )
@@ -1260,12 +1343,14 @@ async def _cb_transcript_ok(
         # eligió con [Ya lo leí]/[Lo quiero leer] antes de que se supiera que
         # no tenía capa de texto. E2 de docs/audit-2026-07-31.md.
         read_status = pt.get("read_status")
+        extra_fm = {"read_status": read_status} if read_status else {}
+        extra_fm.update(_frontmatter_from_pdf_metadata(pt.get("pdf_metadata")))
         await update.callback_query.edit_message_text("Clasificando...")
         await _classify_and_preview(
             update, context, text,
             media_type=media_type,
             resource_file=resource_file,
-            extra_fm={"read_status": read_status} if read_status else None,
+            extra_fm=extra_fm or None,
             user_context=pt.get("user_context"),
             preserve_body=True,
             # El usuario ya confirmó que quiere guardar este texto: un
@@ -1339,6 +1424,7 @@ async def _classify_and_preview_arxiv(
     metadata: dict,
     url: str,
     reply_msg: Optional[Any] = None,
+    user_context: Optional[str] = None,
 ) -> None:
     """Clasifica un paper de arXiv y muestra preview.
 
@@ -1363,6 +1449,9 @@ async def _classify_and_preview_arxiv(
         url: URL canónica del paper en arxiv.org.
         reply_msg: Mensaje existente a editar con el preview (ej: el status
             "Clasificando..."). Si es None, se envía como reply al mensaje original.
+        user_context: Texto que el usuario escribió junto al link, sin la URL.
+            Es su única señal de destino: la metadata de la API no dice a qué
+            proyecto va el paper (#39).
     """
     from adso.arxiv_client import build_arxiv_classify_content, build_arxiv_body
 
@@ -1390,6 +1479,7 @@ async def _classify_and_preview_arxiv(
         existing_tags=existing_tags,
         disambiguation_threshold=settings.llm.disambiguation_threshold,
         on_retry=on_retry,
+        user_context=user_context,
     )
 
     mode = _redirect_unimplemented_mode(result, content)
@@ -1458,6 +1548,7 @@ async def _classify_and_preview_arxiv(
     # Abstract/metadata de arXiv con patrón de posible inyección → avisar.
     if check_injection_risk(content):
         logger.warning("Patrón de inyección detectado en metadata de arXiv")
+        result["injection_risk"] = True  # ver #50 en `_classify_and_preview`
         preview = _INJECTION_PREVIEW_WARNING + preview
 
     if reply_msg is not None:

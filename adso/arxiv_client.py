@@ -40,7 +40,12 @@ _ARXIV_URL_RE = re.compile(
     # El formato viejo admite subclase con punto (`math.GT/0309136`,
     # `cond-mat.str-el/0509127`); sin ella esos links caían en silencio al
     # flujo de link genérico. F8 de docs/audit-2026-07-31.md.
-    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/"
+    # `export.arxiv.org` es el host de la propia API de arXiv y aparece en links
+    # copiados desde ahí; sin él caían al flujo de link genérico. El subdominio
+    # va enumerado (no `.*`): un `[^/]*arxiv\.org` aceptaría `notarxiv.org` o
+    # `arxiv.org.evil.com` y mandaría metadata de un host arbitrario al pipeline
+    # que la trata como literal.
+    r"https?://(?:(?:www|export)\.)?arxiv\.org/(?:abs|pdf)/"
     r"([a-z\-]+(?:\.[a-z\-]+)?/\d+|\d{4}\.\d{4,5}(?:v\d+)?)",
     re.IGNORECASE,
 )
@@ -62,6 +67,38 @@ def extract_arxiv_id(text: str) -> Optional[str]:
     # Remover versión si la hay (2301.12345v2 → 2301.12345)
     arxiv_id = re.sub(r"v\d+$", "", arxiv_id)
     return arxiv_id
+
+
+def strip_arxiv_url(text: str) -> Optional[str]:
+    """Devuelve el texto del mensaje sin la URL de arXiv, o None si no queda nada.
+
+    Lo que el usuario escribió alrededor del link ("para el cap. 4 de la tesis")
+    es la única señal de destino que tiene el LLM: la metadata de la API no dice
+    a qué proyecto va el paper. Se descarta solo la URL — que ya viaja aparte
+    como ``source_url``.
+
+    Args:
+        text: Texto completo del mensaje.
+
+    Returns:
+        El resto del texto con el whitespace colapsado a un solo espacio y
+        stripeado, o ``None`` si el mensaje era solo la URL. Nunca ``""``: un
+        string vacío se insertaría en el prompt como un bloque
+        ``<user_context>`` sin contenido, que no es lo mismo que no tenerlo.
+    """
+    m = _ARXIV_URL_RE.search(text)
+    if not m:
+        return text.strip() or None
+
+    start, end = m.span()
+    # El patrón corta en el ID, así que sufijos del mismo token (`.pdf` de
+    # `/pdf/2301.12345.pdf`, un `)` de cierre) quedarían sueltos en el contexto:
+    # se extiende el corte hasta el próximo espacio.
+    while end < len(text) and not text[end].isspace():
+        end += 1
+
+    rest = f"{text[:start]} {text[end:]}"
+    return re.sub(r"\s+", " ", rest).strip() or None
 
 
 def _parse_atom_entry(entry: ET.Element) -> dict:

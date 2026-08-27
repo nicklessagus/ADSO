@@ -74,7 +74,7 @@ from adso.handlers.capture import (
     _cb_transcript_ok,
     _handle_capture_from_callback,
 )
-from adso.bot_utils import _cleanup_pending
+from adso.bot_utils import _cleanup_pending, render_with_keyboard
 from adso.handlers.commands import handle_clasificar
 from adso.handlers.input import _process_pdf_after_read_status
 from adso.handlers.manage import (
@@ -237,10 +237,14 @@ async def handle_callback(
 
     elif data == CB_DISAMBIG_QUERY:
         from adso.handlers.query import run_query
+        # `pending_raw_content` se rescata primero: es justamente el texto que
+        # se va a buscar.
         pending_text = context.user_data.pop("pending_raw_content", None)
-        # Limpiar estado de captura pendiente: el usuario eligió buscar, no guardar.
-        context.user_data.pop("pending_note", None)
-        context.user_data.pop("pending_capture_ctx", None)
+        # El usuario eligió buscar, no guardar: la captura se descarta por la
+        # vía común, que además borra el temporal asociado. Popear las claves a
+        # mano dejaba huérfano el .ogg del audio (en la RPi4 /tmp es tmpfs: RAM
+        # filtrada hasta el reinicio). #50.
+        _cleanup_pending(context, "pending_note", "pending_capture_ctx")
         if pending_text:
             await run_query(update, context, pending_text, keyboard_msg=query.message)
         else:
@@ -508,6 +512,9 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # terminaba sin read_status pese a la elección explícita. E2 de
         # docs/audit-2026-07-31.md.
         "read_status": pending.get("read_status"),
+        # Metadata literal del PDF (title/author): más confiable que lo que el
+        # LLM infiere del OCR, pero se recolectaba y moría acá. #42.
+        "pdf_metadata": pending.get("pdf_metadata"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),
@@ -515,7 +522,11 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     }
 
     from adso.keyboards import build_ocr_result_keyboard
-    sent = await query.edit_message_text(
+    # El texto del OCR es caro y único: si el edit falla, el resultado tiene que
+    # llegar igual con su teclado (#50).
+    sent = await render_with_keyboard(
+        query.edit_message_text,
+        query.message,
         _build_extract_preview("Texto extraído (OCR)", text),
         reply_markup=build_ocr_result_keyboard(),
         parse_mode="HTML",
@@ -554,6 +565,8 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 # de [Ya lo leí]/[Lo quiero leer] se perdía al pedir Vision tras
                 # ver el OCR. C5 de la auditoría 2026-08 (mismo hueco que E2).
                 "read_status": transcript.get("read_status"),
+                # Ver #42 en `_cb_ocr`: el eslabón se corta acá si no se copia.
+                "pdf_metadata": transcript.get("pdf_metadata"),
             }
             from_ocr = True
         else:
@@ -624,6 +637,8 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "user_context": pending.get("user_context"),
         # Ver E2 en el bloque equivalente de `_cb_ocr`.
         "read_status": pending.get("read_status"),
+        # Ver #42 en el bloque equivalente de `_cb_ocr`.
+        "pdf_metadata": pending.get("pdf_metadata"),
         "resource_file": {
             "temp_path": str(tmp_path),
             "filename": pending.get("original_filename", "imagen.jpg"),
@@ -631,7 +646,11 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     }
 
     from adso.keyboards import build_transcript_keyboard
-    sent = await query.edit_message_text(
+    # Ver #50 en `_cb_ocr`: además de caro, este texto ya consumió quota del
+    # modelo de visión.
+    sent = await render_with_keyboard(
+        query.edit_message_text,
+        query.message,
         _build_extract_preview("Texto extraído (Gemini Vision)", text),
         reply_markup=build_transcript_keyboard(),
         parse_mode="HTML",
@@ -664,6 +683,7 @@ async def _cb_arxiv_create_anyway(update: Update, context: ContextTypes.DEFAULT_
         metadata=pending["metadata"],
         url=pending["url"],
         reply_msg=query.message,
+        user_context=pending.get("user_context"),
     )
 
 
@@ -696,7 +716,8 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
     transferred = False
     try:
         transferred = await _dispatch_document(
-            query.message, context, tmp_path, filename, pending.get("user_context")
+            query.message, context, tmp_path, filename,
+            pending.get("user_context"), pending.get("mime_type"),
         )
     except Exception as e:
         logger.error("Error procesando documento duplicado: %s", e)

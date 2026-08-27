@@ -11,7 +11,7 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Awaitable, Callable, Iterator
+from typing import Any, Awaitable, Callable, Iterator, Optional
 
 from telegram.ext import ContextTypes
 
@@ -237,6 +237,54 @@ def _detect_manage_keywords(text: str) -> list[str]:
         intent for intent, kws in MANAGE_KEYWORDS.items()
         if any(re.search(r"\b" + re.escape(kw) + r"\b", lower) for kw in kws)
     ]
+
+
+async def render_with_keyboard(
+    primary: Callable[..., Awaitable[Any]],
+    fallback_msg: Any,
+    text: str,
+    *,
+    reply_markup: Any = None,
+    parse_mode: Optional[str] = None,
+) -> Any:
+    """Draws a message that carries a keyboard, retrying as a brand-new message.
+
+    Every preview follows the same shape: the pending state is set and only then
+    the message is edited. When that edit fails (the user deleted the message,
+    the network dropped), the state stays alive with **no buttons on screen** —
+    `_has_pending_keyboard` then rejects every input until `/reset`, and the
+    text behind it (audio, OCR, Vision, an extraction) exists nowhere else.
+
+    Args:
+        primary: Coroutine function that should draw the message, normally
+            ``query.edit_message_text``.
+        fallback_msg: Message to reply to when ``primary`` fails. If None, the
+            original exception propagates (there is nothing better to try).
+        text: Message body.
+        reply_markup: Keyboard. The whole point of the fallback: a message
+            without it leaves the pending state unreachable.
+        parse_mode: Passed through untouched.
+
+    Returns:
+        Whatever actually reached the user — the caller must register *its*
+        ``message_id`` as the live preview, or the "current preview" guard (G14)
+        would reject the [Confirmar] of the message the user is looking at.
+    """
+    kwargs: dict[str, Any] = {}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+
+    try:
+        return await primary(text, **kwargs)
+    except Exception as e:
+        if fallback_msg is None:
+            raise
+        logger.warning(
+            "No se pudo renderizar el preview (%s) — se reenvía como mensaje nuevo", e
+        )
+        return await fallback_msg.reply_text(text, **kwargs)
 
 
 def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:

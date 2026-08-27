@@ -41,6 +41,22 @@ from adso.transcriber import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
+# Tope del body de un archivo de texto. El body va VERBATIM al vault, así que un
+# .txt de varios MB entraría entero en una nota (y en el prompt).
+_TEXT_FILE_MAX_CHARS = 50000
+
+# El preview muestra 500 caracteres: sin este aviso el usuario confirmaba un body
+# recortado sin enterarse — el recorte solo se logueaba (#41).
+_TRUNCATION_NOTICE = (
+    "\n\n⚠️ Contenido recortado a {limite} caracteres; "
+    "el archivo completo queda adjunto."
+)
+
+
+def _format_miles(n: int) -> str:
+    """Formatea un entero con punto como separador de miles (50000 → 50.000)."""
+    return f"{n:,}".replace(",", ".")
+
 
 def _solo_mensajes_nuevos(handler):
     """Ignora los updates de edición, donde ``update.message`` es None.
@@ -202,11 +218,16 @@ async def handle_text(
         return
 
     # Detectar URL de arXiv antes del flujo genérico
-    from adso.arxiv_client import extract_arxiv_id
+    from adso.arxiv_client import extract_arxiv_id, strip_arxiv_url
     arxiv_id = extract_arxiv_id(text)
     if arxiv_id:
         context.user_data["pending_raw_content"] = text.strip()
-        await _handle_arxiv(update, context, text.strip(), arxiv_id)
+        # Lo que el usuario escribió alrededor del link es su señal de destino;
+        # sin esto se clasificaba el paper solo por su abstract (#39).
+        await _handle_arxiv(
+            update, context, text.strip(), arxiv_id,
+            user_context=strip_arxiv_url(text),
+        )
         return
 
     # Nuevo contenido
@@ -243,6 +264,7 @@ async def _handle_arxiv(
     context: ContextTypes.DEFAULT_TYPE,
     url: str,
     arxiv_id: str,
+    user_context: Optional[str] = None,
 ) -> None:
     """Handler para links de arXiv: obtiene metadata via API y muestra preview de paper.
 
@@ -254,6 +276,8 @@ async def _handle_arxiv(
         context: Bot context.
         url: URL original enviada por el usuario.
         arxiv_id: ID de arXiv extraído de la URL (ej: "2301.12345").
+        user_context: Texto que acompañaba al link (sin la URL), o None si el
+            mensaje era solo la URL.
     """
     from adso.arxiv_client import fetch_arxiv_metadata
     from adso.handlers.capture import _classify_and_preview_arxiv
@@ -289,6 +313,7 @@ async def _handle_arxiv(
         context.user_data["pending_arxiv"] = {
             "metadata": metadata,
             "url": canonical_url,
+            "user_context": user_context,
         }
         await status_msg.edit_text(
             f"Este paper ya existe en el vault:\n<code>{rel_path}</code>\n\n"
@@ -306,7 +331,10 @@ async def _handle_arxiv(
 
     # Pasar el status_msg para que _classify_and_preview_arxiv lo edite con el preview
     # en vez de enviar un mensaje nuevo.
-    await _classify_and_preview_arxiv(update, context, metadata, canonical_url, reply_msg=status_msg)
+    await _classify_and_preview_arxiv(
+        update, context, metadata, canonical_url,
+        reply_msg=status_msg, user_context=user_context,
+    )
 
     # pending_raw_content ya no es necesario: pending_note (seteado por
     # _classify_and_preview_arxiv) se encarga del bloqueo. Si lo dejamos,
@@ -459,12 +487,44 @@ async def _aviso_de_duplicado(tmp_path: Path, vault_path: Path) -> Optional[str]
     )
 
 
+def _mime_fallback(filename: str, mime_type: Optional[str]) -> Optional[str]:
+    """Tipo de documento inferido del MIME cuando la extensión no dice nada.
+
+    La extensión es la señal primaria; el MIME es el respaldo para el caso real
+    que rompía: un PDF **reenviado** llega sin `file_name`, el handler lo llama
+    "documento" y sin extensión terminaba en el flujo de descripción manual
+    ("formato no compatible") pese a venir con `application/pdf` (#40).
+
+    Args:
+        filename: Nombre del archivo (puede ser el placeholder "documento").
+        mime_type: MIME declarado por Telegram. Puede ser None.
+
+    Returns:
+        ``"pdf"``, ``"text"`` o None si la extensión ya alcanza o el MIME no es
+        de un formato soportado.
+    """
+    if is_pdf(filename) or is_text_file(filename):
+        return None  # la extensión manda
+    # Solo un str cuenta como MIME: `mime_type` llega None cuando Telegram no lo
+    # informa, y el respaldo se consulta en el camino de TODO documento sin
+    # extensión conocida — el flujo más común de todos.
+    if not isinstance(mime_type, str):
+        return None
+    mime = mime_type.split(";", 1)[0].strip().lower()
+    if mime == "application/pdf":
+        return "pdf"
+    if mime.startswith("text/"):
+        return "text"
+    return None
+
+
 async def _dispatch_document(
     msg,
     context: ContextTypes.DEFAULT_TYPE,
     tmp_path: Path,
     filename: str,
     caption: Optional[str],
+    mime_type: Optional[str] = None,
 ) -> bool:
     """Deriva un documento ya descargado al flujo que le corresponde por tipo.
 
@@ -477,12 +537,16 @@ async def _dispatch_document(
         tmp_path: Temporal descargado.
         filename: Nombre original del archivo.
         caption: Caption del usuario, si lo hubo (contexto para el LLM).
+        mime_type: MIME declarado por Telegram, usado solo como respaldo cuando
+            la extensión no identifica el formato.
 
     Returns:
         True si el temporal quedó a cargo de un estado pendiente — el caller no
         debe borrarlo. False si el flujo terminó y el temporal es descartable.
     """
-    if is_pdf(filename):
+    por_mime = _mime_fallback(filename, mime_type)
+
+    if is_pdf(filename) or por_mime == "pdf":
         context.user_data["pending_read_status"] = {
             "temp_path": str(tmp_path),
             "original_filename": filename,
@@ -507,9 +571,9 @@ async def _dispatch_document(
             raise
         return True
 
-    if is_text_file(filename):
+    if is_text_file(filename) or por_mime == "text":
         try:
-            text = await extract_text_file(tmp_path, max_chars=50000)
+            text = await extract_text_file(tmp_path, max_chars=_TEXT_FILE_MAX_CHARS)
             if not text.strip():
                 await msg.reply_text("El archivo está vacío.")
                 return False
@@ -528,10 +592,15 @@ async def _dispatch_document(
             snippet = text[:500]
             if len(text) > 500:
                 snippet += "..."
+            aviso = (
+                _TRUNCATION_NOTICE.format(limite=_format_miles(_TEXT_FILE_MAX_CHARS))
+                if getattr(text, "truncated", False)
+                else ""
+            )
             try:
                 await msg.reply_text(
                     f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                    f"<code>{_esc(snippet)}</code>\n\n"
+                    f"<code>{_esc(snippet)}</code>{aviso}\n\n"
                     "Confirmar, o enviar texto corregido.",
                     reply_markup=build_extraction_keyboard(),
                     parse_mode="HTML",
@@ -631,6 +700,7 @@ async def handle_document(
                 "temp_path": str(tmp_path),
                 "original_filename": filename,
                 "user_context": caption,
+                "mime_type": doc.mime_type,
             }
             transferred = True
             try:
@@ -646,7 +716,9 @@ async def handle_document(
                 raise
             return
 
-        transferred = await _dispatch_document(msg, context, tmp_path, filename, caption)
+        transferred = await _dispatch_document(
+            msg, context, tmp_path, filename, caption, doc.mime_type
+        )
     except Exception as e:
         logger.error("Error procesando documento: %s", e)
         await msg.reply_text(f"Error al procesar documento: {e}")

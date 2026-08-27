@@ -259,6 +259,9 @@ class TestHandleDocument:
         doc = MagicMock()
         doc.file_name = "data.xlsx"
         doc.file_size = 2048
+        # Sin esto `doc.mime_type` es un MagicMock truthy y el test pasaba por
+        # accidente: el routing por MIME (#40) lo veía como texto.
+        doc.mime_type = None
         tg_file = MagicMock()
         tg_file.download_to_drive = AsyncMock()
         doc.get_file = AsyncMock(return_value=tg_file)
