@@ -458,6 +458,14 @@ spec requisito por requisito confirmando que cada uno tiene un test que lo
 ejecuta** — sobre todo los del addendum, que son los que nacieron después de
 escritos los tests. Después: suite completa, `ruff`, commit, deploy.
 
+**Es cobertura de la SPEC, no del código.** No es "toda función tiene test" —eso
+es lo que mide la herramienta de coverage, y responde *¿alguna prueba tocó esta
+línea?*. Acá la pregunta es otra: *¿existe un test que falle si este requisito se
+rompe?*. Los dos huecos del lote 1 estaban en código **cubierto al 100%**: las
+líneas corrían, la suite verde, y el requisito sin asertar. Por eso el recorrido
+se hace leyendo la spec y buscando qué test la ejecuta, nunca al revés —
+arrancando desde las funciones jamás se encuentra un requisito que nadie escribió.
+
 Ese recorrido no es redundante con el paso 2b: son dos redes distintas. En el
 lote 1 nadie auditó cobertura —ni el agente ni yo— y quedaron **dos requisitos
 del addendum sin verificar**: que `authors` fuera lista (el test decía
