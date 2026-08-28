@@ -31,6 +31,15 @@ _CHECKBOX_DONE_RE = re.compile(r"^- \[x] (.+)$", re.MULTILINE)
 # Default exclude dirs
 _DEFAULT_EXCLUDE = ["05-Archive", ".obsidian", ".trash"]
 
+# `03-Resources/` es la carpeta de adjuntos según la taxonomía: un `.md` ahí no
+# es una nota del vault. Se excluye **siempre**, no vía `exclude_dirs`, porque
+# los callers reales pasan su propia lista (`_get_existing_tags` en
+# `bot_utils.py` arma una literal para sacar `00-Inbox`) y ampliar solo el
+# default habría dejado sin arreglar justo el camino que alimenta el prompt de
+# clasificación. Misma forma que `_index.md` en `embeddings.should_index`: no es
+# configurable porque no es una preferencia, es la taxonomía. Issue #58.
+_ALWAYS_EXCLUDE = ("03-Resources",)
+
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -46,7 +55,8 @@ def _scan_vault(
 
     Args:
         vault_path: Raíz del vault.
-        exclude_dirs: Carpetas a excluir.
+        exclude_dirs: Carpetas a excluir. `03-Resources` se excluye siempre,
+            la pase o no el caller (ver `_ALWAYS_EXCLUDE`).
         scope: Subdirectorio que restringe la búsqueda.
 
     Returns:
@@ -54,6 +64,7 @@ def _scan_vault(
     """
     if exclude_dirs is None:
         exclude_dirs = _DEFAULT_EXCLUDE
+    exclude_dirs = [*exclude_dirs, *_ALWAYS_EXCLUDE]
 
     base = vault_path / scope if scope else vault_path
 

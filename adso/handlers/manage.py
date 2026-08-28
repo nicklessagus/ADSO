@@ -19,6 +19,7 @@ from adso.bot_utils import (
 from adso.config import Settings
 from adso.keyboards import _esc, build_manage_keyboard
 from adso.llm_client import classify
+from adso.llm_schema import _to_kebab
 from adso.vault_writer import _safe_component, create_note
 
 logger = logging.getLogger(__name__)
@@ -252,7 +253,7 @@ async def _cb_manage_confirm(
                 "status": "active",
                 "description": params["description"],
                 "sections": [],
-                "tags": ["system", params["name"]],
+                "tags": ["system", _to_kebab(params["name"])],
                 "source": "system",
                 "project": params["name"],
             }
@@ -276,7 +277,7 @@ async def _cb_manage_confirm(
                 "title": params["name"].replace("-", " ").title(),
                 "type": "area-index",
                 "description": params["description"],
-                "tags": ["system", params["name"]],
+                "tags": ["system", _to_kebab(params["name"])],
                 "source": "system",
                 "area": params["name"],
             }
