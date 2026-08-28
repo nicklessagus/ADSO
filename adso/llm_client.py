@@ -86,7 +86,14 @@ MAX_RPM_WAIT = 70          # seconds — max wait for RPM rate limit errors
 # suele resolver más rápido de lo que hubiera tardado el stall.
 # Va acá y NO en el cliente (`_get_genai_client`), que es compartido con Vision:
 # rasterizar un PDF escaneado tarda legítimamente mucho más que esto.
-CLASSIFY_TIMEOUT_MS = 8_000
+#
+# El piso NO es negociable: la API rechaza cualquier deadline menor a 10s con un
+# 400 `INVALID_ARGUMENT` ("Manually set deadline 8s is too short") sin llegar a
+# llamar al modelo. Se deployó en 8_000 el 2026-08-27 y toda captura cayó a modo
+# degradado hasta el 2026-08-28. Se deja 12s y no 10s clavados para no depender
+# de cómo redondea el borde el SDK. Techo natural: por encima de ~35s el timeout
+# deja de cortar los stalls para los que existe.
+CLASSIFY_TIMEOUT_MS = 12_000
 
 # Una respuesta malformada casi nunca se arregla reintentando el mismo prompt
 # contra el mismo modelo: se acota el presupuesto y se le da un tiro a Groq,

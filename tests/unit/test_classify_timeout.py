@@ -79,9 +79,30 @@ class TestClassifyTimeout:
             await llm_client._call_gemini("system", "<input>hola</input>")
 
         timeout = _captured_config(client.models.generate_content).http_options.timeout
-        assert 5_000 <= timeout <= 30_000, (
-            f"timeout is {timeout}: expected milliseconds, comfortably above the "
-            "~3s worst case of a legitimate call and below the stalls it targets"
+        assert 10_000 <= timeout <= 30_000, (
+            f"timeout is {timeout}: expected milliseconds, at or above the 10s "
+            "floor the API enforces (see the test below) and below the stalls "
+            "the timeout targets"
+        )
+
+    async def test_the_timeout_clears_the_floor_the_api_enforces(self) -> None:
+        """Gemini rejects a deadline under 10s outright — with a 400, instantly.
+
+        Deployed 2026-08-27 with `CLASSIFY_TIMEOUT_MS = 8_000`, every single
+        classification came back as::
+
+            400 INVALID_ARGUMENT: Manually set deadline 8s is too short.
+                                  Minimum allowed deadline is 10s.
+
+        The call never reached the model: it burnt the three retries in ~6s and
+        sent every capture to degraded mode ("no se pudo clasificar bien"). No
+        mocked test can see this — the floor lives on the server — so the
+        constant is pinned here against the error message that reported it.
+        """
+        assert llm_client.CLASSIFY_TIMEOUT_MS >= 10_000, (
+            f"CLASSIFY_TIMEOUT_MS is {llm_client.CLASSIFY_TIMEOUT_MS}ms: Gemini "
+            "rejects any deadline under 10s with a 400, so every capture "
+            "degrades without ever calling the model"
         )
 
     async def test_vision_is_not_capped_by_the_classification_timeout(self) -> None:

@@ -90,3 +90,16 @@ Lo que lo vuelve grave no es el `IndexError` sino dónde ocurre: **dentro del `e
 Regla que deja: **el backoff solo se lee cuando efectivamente va a haber reintento.** Hay un delay por reintento, no uno por intento; cualquier lectura fuera del guard está mal por construcción. Reproductor en `tests/unit/test_lote3_llm_config.py::TestRpmDelayOnTheLastAttempt`, que asserta que la corrida degrada y que el texto original sobrevive en el body.
 
 Encontrada auditando `docs/architecture.md` contra el código, no por un test — la suite estaba verde porque ningún test cubría un 429 por minuto sin `retryDelay` que agotara los tres intentos.
+
+## El timeout de `classify` quedó por debajo del piso que impone la API (2026-08-27 → 28)
+
+`CLASSIFY_TIMEOUT_MS = 8_000` se deployó el 2026-08-27 y **toda** captura cayó a modo degradado hasta el 2026-08-28. Gemini rechaza cualquier deadline menor a 10 s con `400 INVALID_ARGUMENT` (`Manually set deadline 8s is too short. Minimum allowed deadline is 10s.`) **sin llegar a llamar al modelo**: las tres llamadas fallaban en ~300 ms cada una, se agotaba el presupuesto de reintentos en ~6 s y el usuario recibía "No se pudo clasificar bien — guardado en Inbox como borrador" en cada nota.
+
+Por qué la suite estaba verde: el piso vive en el servidor. `tests/unit/test_classify_timeout.py` verificaba `5_000 <= timeout <= 30_000` sobre un `MagicMock` — 8000 lo cumple, y ningún mock puede saber que la API lo rechaza. El único punto del repo que lo habría visto es `scripts/llm_regression.py`, que llama a `_call_gemini` contra la API real; no se corrió porque el harness estaba documentado como el paso previo a tocar `GEMINI_MODEL` y nada más.
+
+Dos cosas que deja:
+
+1. **El harness de regresión cubre la request completa, no solo el modelo.** Correrlo antes de tocar cualquier parámetro del `GenerateContentConfig`/`HttpOptions` — timeouts, schema, mime type — no solo `GEMINI_MODEL`.
+2. **El guard mockeable que sí sirve es un piso duro sobre la constante**, anclado al mensaje de error que reportó el incidente (`test_the_timeout_clears_the_floor_the_api_enforces`). No sustituye al harness: fija el número conocido, no descubre el próximo límite del servidor.
+
+Valor nuevo: `12_000`. No `10_000` clavado, para no depender de cómo redondea el borde el SDK; el costo es 2 s más de espera en un stall.
