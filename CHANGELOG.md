@@ -10,6 +10,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 ### Fixed
 
 - **El bot ya no se come entero un stall de la API de Gemini** (`CLASSIFY_TIMEOUT_MS`). Alrededor del 20% de las llamadas de clasificación se cuelgan del lado del servidor y devuelven `200 OK` a los 5-35 segundos, con el mismo input que normalmente tarda 2. Ahora la llamada aborta a los 8 s y el loop de reintentos que ya existía la reintenta: en la práctica un stall de 35 s pasa a ~11 s. El timeout va **por llamada**, no en el cliente, que es compartido con Gemini Vision — el OCR de un PDF escaneado tarda legítimamente mucho más
+- **Un cuelgue del bot ahora se resuelve solo.** El heartbeat detectaba que el event loop había dejado de avanzar, pero nadie hacía nada con esa señal: `restart: unless-stopped` solo actúa si el proceso muere y Docker fuera de Swarm ignora `unhealthy`, así que un bot colgado se quedaba colgado. Un watchdog en un thread aparte —no en el loop que vigila, que es justo lo que estaría bloqueado— mata el proceso tras 5 minutos sin señales de vida y deja que Docker lo levante. Al volver, avisa por Telegram que se reinició solo
 - **El aviso de reintento ya no miente:** decía "Servicio caído", pero en un stall la API responde `200 OK`, solo que tarde. Ahora dice "Gemini no responde a tiempo"
 
 ---

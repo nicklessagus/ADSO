@@ -496,7 +496,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5535 statements (lote 3, 2026-08-27).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5589 statements (2026-08-27).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e

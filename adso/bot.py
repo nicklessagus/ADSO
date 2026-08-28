@@ -37,6 +37,7 @@ from adso.handlers.input import handle_audio, handle_document, handle_photo, han
 from adso.handlers.query import handle_buscar
 from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
+from adso.watchdog import consume_trip_marker, start_watchdog
 from adso.security import is_authorized
 from adso.vault_watcher import VaultWatcher
 from adso.vault_writer import backup_label, GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
@@ -49,6 +50,26 @@ async def _post_init(app: Application) -> None:
     settings: Settings = app.bot_data["settings"]
     await ensure_vault_structure(settings.vault_path)
     await seed_vault(settings.vault_path, settings.vault_seed)
+
+    # El heartbeat detecta que el event loop dejó de avanzar, pero nadie actuaba:
+    # `restart: unless-stopped` solo dispara si el proceso muere y Docker fuera
+    # de Swarm ignora `unhealthy`. El watchdog corre en un thread —no en el loop
+    # que vigila— y mata el proceso para que el restart lo levante.
+    start_watchdog()
+    if consume_trip_marker():
+        # Sin este aviso, un cuelgue seguido de reinicio automático es invisible.
+        _bot_logger.warning("El arranque anterior terminó por watchdog (cuelgue)")
+        try:
+            await app.bot.send_message(
+                chat_id=settings.telegram_allowed_user_id,
+                text=(
+                    "El bot se reinició solo: dejó de responder y el watchdog lo "
+                    "levantó. Si había una nota esperando confirmación, volver a "
+                    "mandarla."
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — el arranque no depende del aviso
+            _bot_logger.warning("No se pudo avisar del reinicio por watchdog: %s", exc)
 
     embeddings: EmbeddingsClient = app.bot_data["embeddings"]
     vault_path = settings.vault_path
