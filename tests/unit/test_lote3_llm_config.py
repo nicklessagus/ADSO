@@ -821,3 +821,42 @@ class TestVaultSeedUnknownKeys:
         assert not [k for k in settings.unknown_keys if k.startswith("vault_seed")]
         assert [p.name for p in settings.vault_seed.projects] == ["tesis"]
         assert [a.name for a in settings.vault_seed.areas] == ["docencia"]
+
+
+# ---------------------------------------------------------------------------
+# Regression found after the batch, while auditing docs/architecture.md
+# ---------------------------------------------------------------------------
+
+
+class TestRpmDelayOnTheLastAttempt:
+    """Shrinking RETRY_DELAYS to [1, 2] left one unguarded read of it.
+
+    In the RPM branch the wait is computed *before* the `attempt < MAX_RETRIES`
+    guard, so the third and last attempt still indexes `RETRY_DELAYS[2]`. The
+    IndexError is raised inside the `except` block, so it escapes `classify`
+    entirely: `make_degraded_result` never runs and the user's content is lost,
+    which is the one thing the retry loop must never do.
+    """
+
+    async def test_a_rate_limit_without_a_suggested_delay_still_degrades(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from adso import llm_client
+
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        # A typed 429 that is not a daily quota and carries no retryDelay: the
+        # branch falls back to the backoff table for its wait.
+        rpm = _api_error(429, "resource exhausted: GenerateRequestsPerMinute")
+        gemini = AsyncMock(side_effect=rpm)
+        contenido = "apuntes del seminario del jueves"
+
+        with patch.object(llm_client, "_call_gemini", gemini), patch.object(
+            llm_client.asyncio, "sleep", _SleepRecorder()
+        ):
+            result = await _classify(content=contenido)
+
+        assert result["mode"] == "degraded", (
+            "the loop raised instead of degrading: the user's text never "
+            "reached a note"
+        )
+        assert contenido in result["payload"]["body"]

@@ -98,6 +98,7 @@ Detalles que importan:
 
 - El temporal se llama `.adso-tmp-*.tmp`. Es **oculto** (lo saltea `_is_hidden` del `VaultWatcher`) y su sufijo **no es `.md`** (lo saltea también el filtro por extensión, aunque `_is_hidden` fallara). Sin eso los temporales se indexaban como notas fantasma en ChromaDB y ensuciaban el mensaje del commit de backup; el sufijo distinto además evita que un `git add -A` concurrente los commitee.
 - **Modo del archivo:** `mkstemp` crea el temporal en `0600` y `os.replace` conserva ese modo, así que toda nota escrita por el bot quedaba `0600`. Ahora se preserva el modo del destino si el archivo ya existía (el usuario pudo ajustarlo a propósito), y `0644` si es nuevo (G4 de `docs/audit-2026-07-31.md`).
+- **`fsync` del directorio, después del `os.replace`.** El `fsync` del archivo garantiza que su contenido llegó a disco, pero no que el *rename* que lo publicó haya llegado — la entrada de directorio vive en otro bloque. Sin este segundo `fsync` (sobre `path.parent`, vía `_fsync_dir_sync`), un corte de luz pocos segundos después de "Nota guardada" podía evaporar el rename y dejar el vault sin la nota; la RPi4 no tiene UPS, así que es el modo de fallo más probable de todos (#37B). El fallo de este `fsync` de directorio es **no fatal a propósito**: el contenido ya está publicado en ese punto, y propagar el error haría que el caller borrara una nota buena.
 - Ante cualquier excepción el temporal se borra y la excepción se propaga.
 - Es **síncrono y bloqueante**: se llama siempre vía `asyncio.to_thread`.
 
@@ -105,7 +106,9 @@ Detalles que importan:
 
 El camino de `create_note()`. Elegir el nombre con un `_unique_path` y escribir varios `await` después abría una ventana: dos escrituras concurrentes con el mismo título el mismo día —una captura del usuario y `reclassify_inbox`, por ejemplo— elegían el mismo candidato y **la segunda sobrescribía a la primera en silencio**.
 
-La reserva ahora se hace con `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, que es atómico a nivel kernel: dos procesos no pueden ganar el mismo nombre. Si el nombre está tomado, se prueba `stem-2`, `stem-3`, … El contenido se escribe después con `_atomic_write_sync` sobre el placeholder ya reservado, así que un crash entre medio deja una nota **vacía**, nunca una nota **pisada**. Corre entero en un thread. G1 de `docs/audit-2026-07-31.md`.
+La reserva ahora se hace con `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, que es atómico a nivel kernel: dos procesos no pueden ganar el mismo nombre. Si el nombre está tomado, se prueba `stem-2`, `stem-3`, … El contenido se escribe después con `_atomic_write_sync` sobre el placeholder ya reservado. Corre entero en un thread. G1 de `docs/audit-2026-07-31.md`.
+
+**Si `_atomic_write_sync` lanza una excepción manejada** (no un crash del proceso), la reserva se deshace: el placeholder vacío se borra con `os.unlink(candidate)` antes de repropagar. Sin esto el placeholder quedaba en el vault para siempre —se commiteaba al backup, disparaba el watcher y aparecía como nota en blanco— y encima ocupaba el nombre, así que el reintento del usuario escribía `-2` (#37A). Solo se borra el archivo que **esta** llamada reservó con `O_EXCL`: nunca se lleva puesta una nota ajena. Un crash real del proceso (`docker stop`, OOM) sigue dejando la nota **vacía** en vez de pisada — ese caso está documentado en `docs/decisions-log.md`.
 
 #### Sanitización de componentes de path — `_safe_component(name)`
 
@@ -309,17 +312,37 @@ Copia un archivo a `03-Resources/` en el vault.
 
 **Comportamiento:**
 
-1. Verifica que `source_path` existe.
-2. **Sanitiza el nombre**: aplica `Path(original_filename).name` para eliminar cualquier componente de directorio y prevenir path traversal (ej: `../../.env` queda como `.env`, luego el destino final sigue siendo `03-Resources/.env`).
-3. Calcula `dest = 03-Resources/{safe_name}`.
-4. **Deduplicación por contenido:** recorre los candidatos ocupados (`safe_name`, `stem_1.ext`, `stem_2.ext`, …) y reutiliza uno solo si tiene **el mismo hash SHA-256 del contenido** que el origen. El tamaño se usa como short-circuit: solo se hashea el candidato si `st_size` coincide. El hashing es por chunks (`_file_hash_sync`, memory-safe en la RPi4) y corre en `asyncio.to_thread`.
-5. Si el nombre está ocupado por contenido distinto, sigue con el próximo sufijo numérico: `paper_1.pdf`, `paper_2.pdf`, etc. **Mismo nombre + distinto contenido ⇒ archivo nuevo**, nunca se descarta el entrante (dedupear solo por tamaño era pérdida de datos silenciosa: dos archivos distintos del mismo tamaño se confundían).
-6. Copia el archivo con `shutil.copy2` (preserva metadatos).
-7. **`chmod 0644`** sobre el destino: `copy2` preserva el modo del origen, y el origen es el temporal de la descarga que `tempfile` crea en `0600` — sin esto todo PDF o imagen de `03-Resources/` quedaba ilegible para cualquier otro usuario o proceso (mismo problema que G4 en las notas, por otro camino).
-8. Retorna el path del archivo en el vault.
+1. **Sanitiza el nombre**: aplica `Path(original_filename).name` para eliminar cualquier componente de directorio y prevenir path traversal (ej: `../../.env` queda como `.env`, luego el destino final sigue siendo `03-Resources/.env`).
+2. Delega todo el resto — reserva del nombre, dedup, copia — en `_save_resource_sync`, que corre **entero en un solo `asyncio.to_thread`**. Antes el `stat()` y el bucle de nombres bloqueaban el event loop en cada captura con adjunto en la SD de la RPi4, y cualquier `await` entre elegir el nombre y escribirlo abría una ventana TOCTOU: dos guardados concurrentes de contenido distinto podían pisarse (#36).
+3. **Reserva del nombre sin TOCTOU:** igual que `_reserve_and_write_sync`, usa `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)` — atómico a nivel kernel. Si el nombre está tomado:
+   - **Mismo contenido** (dedup por SHA-256 con short-circuit por tamaño, mismo criterio que `find_resource_by_hash`): reutiliza el existente, sin copiar nada.
+   - **Contenido distinto:** prueba el siguiente sufijo numérico (`stem_1.ext`, `stem_2.ext`, …). **Mismo nombre + distinto contenido ⇒ archivo nuevo**, nunca se descarta el entrante.
+4. **Copia atómica:** `shutil.copy2` al temporal (no directo al destino), `chmod 0644` (`copy2` preserva el modo del origen, y el origen es el temporal de la descarga que `tempfile` crea en `0600` — sin este chmod, todo PDF o imagen de `03-Resources/` quedaba ilegible para cualquier otro usuario o proceso, mismo problema que G4 en las notas por otro camino), `os.replace` al nombre reservado y `fsync` del directorio. Un corte a mitad de camino (OOM, `docker stop`, corte de luz) nunca deja un adjunto truncado visible en `03-Resources/` — Obsidian lo listaría como si estuviera bien y nadie se enteraría.
+5. Si la copia falla, se borran tanto el temporal como el placeholder de la reserva — no queda ningún parcial.
+6. Retorna el path del archivo en el vault (nuevo o reutilizado por dedup).
 
 **Errores:**
 - `FileNotFoundError` si `source_path` no existe → propagar.
+- `OSError` si la copia falla → propagar; el caller debe avisar al usuario (no queda ningún archivo parcial en el vault).
+
+---
+
+### `find_resource_by_hash()`
+
+```python
+async def find_resource_by_hash(source_path: Path, vault_path: Path) -> Path | None:
+```
+
+Busca en `03-Resources/` un archivo con el **mismo contenido** que `source_path`, sin importar el nombre.
+
+**Comportamiento:**
+
+1. Recorre `03-Resources/` (`rglob`) comparando primero tamaño (`st_size`) como short-circuit.
+2. Solo hashea el origen la primera vez que aparece un candidato del mismo tamaño — el caso normal (archivo nuevo, sin candidatos) no paga ninguna lectura de más.
+3. Compara SHA-256 (mismo criterio y helper que `save_resource`, `_file_hash_sync`) y retorna el primer candidato cuyo hash coincide.
+4. Retorna `None` si `03-Resources/` no existe todavía o si ningún archivo coincide en contenido.
+
+**Uso típico:** issue #53 — al recibir un documento por Telegram, `handle_document` calcula el hash del temporal y llama a esta función *antes* de gastar quota en extracción/LLM. Si hay match y alguna nota lo referencia, se ofrece `[Crear igual]` en vez de escribir un duplicado. La clave es el hash, no el nombre: el mismo binario puede llegar con nombres distintos.
 
 ---
 
@@ -378,6 +401,39 @@ async def remove_broken_wikilinks(
 
 ---
 
+### `reconcile_vault()`
+
+```python
+async def reconcile_vault(vault_path: Path) -> tuple[list[Path], list[Path]]:
+```
+
+Reconciliación nocturna: wikilinks rotos y adjuntos huérfanos que `remove_broken_wikilinks()` no llega a cubrir porque depende de que el `VaultWatcher` haya visto el borrado en vivo.
+
+**Comportamiento:**
+
+1. Corre entero en un hilo (`_reconcile_vault_sync`).
+2. Limpia wikilinks rotos que apuntan a notas que ya no existen en el vault — cubre el borrado hecho con el contenedor parado, o desde otro dispositivo mientras ADSO estaba caído, que nunca dispara `inotify` (issue #57).
+3. Detecta adjuntos de `03-Resources/` que ninguna nota referencia (ni por `source_file` en frontmatter ni por embed `![[...]]` en el body) y los **mueve** a `05-Archive/03-Resources/` — nunca los borra.
+4. Retorna `(notas_modificadas, adjuntos_archivados)`.
+
+**Uso:** cron nocturno, mismo espíritu que `reindex_vault()` de `embeddings.py`. Reconcilia el filesystem ante cualquier drift acumulado mientras el bot estuvo caído.
+
+---
+
+### `ensure_vault_structure()` y `seed_vault()`
+
+```python
+async def ensure_vault_structure(vault_path: Path) -> None:
+async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
+```
+
+Se llaman una sola vez, al arranque del bot.
+
+- **`ensure_vault_structure()`** crea las carpetas PARA (`00-Inbox`, `01-Projects`, `02-Areas`, `03-Resources`, `05-Archive`) si no existen — `mkdir(parents=True, exist_ok=True)` para cada una, así que es seguro llamarla en cada arranque.
+- **`seed_vault()`** recorre `vault_seed.projects`/`vault_seed.areas` (de `config.yaml`) y crea, para cada uno, su `_index.md` (`project-index`/`area-index`) vía `create_note()` — **solo si `_index.md` todavía no existe** en esa carpeta, así que reiniciar el bot no pisa proyectos/áreas ya creados o editados a mano. `description` es obligatoria en la config, igual que al crear un proyecto/área desde el bot.
+
+---
+
 ## `vault_search.py`
 
 Responsabilidad única: **lectura y búsqueda estructural sobre el vault**.
@@ -411,7 +467,7 @@ async def get_backlinks(
 5. Lee el frontmatter de cada archivo que matchea para obtener `title`, `type`, `status`.
 6. Retorna lista de `NoteRef` ordenada por `path`.
 
-**Performance:** escaneo lineal de todos los `.md`. Para un vault personal (< 1000 notas) en RPi4 es aceptable (< 500ms estimado). No se mantiene índice en memoria — se escanea en cada llamada.
+**Performance:** escaneo lineal de todos los `.md` (el listado de archivos, `_scan_vault`/`rglob`, se rehace en cada llamada — no hay índice de paths en memoria). Para un vault personal (< 1000 notas) en RPi4 es aceptable (< 500ms estimado). El costo dominante es el `read()+parse` de cada nota, no el `rglob`, y **ese paso sí está cacheado**: `_parse_note_safe` delega en `vault_cache.parse_cached` (ver esa sección), así que un segundo scan sin cambios en el vault evita releer y reparsear las notas ya vistas.
 
 ---
 
@@ -445,11 +501,12 @@ Parsea `query` buscando tokens especiales antes de hacer la búsqueda de texto l
 | `file:{nombre}` | `file:baseline-cnn` | Notas cuyo nombre de archivo contiene el valor |
 | texto libre | `deep learning` | Búsqueda en title + body (case-insensitive) |
 
-**Orden de resultados:**
-1. Notas donde `title` contiene la query (match exacto de frase)
+**Orden de resultados** (cuando hay texto libre, además de los tokens):
+1. Notas donde `title` contiene la query completa (match exacto de frase)
 2. Notas donde `title` contiene alguna de las palabras
 3. Notas donde el body contiene la query
-4. Resto
+
+Una nota que pasa los filtros de tokens pero no matchea el texto libre por ninguna de las tres vías **no aparece en el resultado** — no hay una categoría de "resto" que la incluya igual. Si `query` no trae texto libre (solo tokens), se devuelven todas las notas que pasan los filtros, sin este orden por relevancia.
 
 **`scope`:** si se provee, restringe el escaneo al subdirectorio `{vault_path}/{scope}`. Ejemplo: `scope="01-Projects/tesis"`.
 
@@ -582,6 +639,29 @@ async def get_wikilinks(note_path: Path) -> list[str]:
 
 ---
 
+### `scan_notes()`
+
+**Sin equivalente CLI**
+
+```python
+async def scan_notes(
+    vault_path: Path,
+    scope: str | None = None,
+    exclude_dirs: list[str] | None = None,
+    filters: dict | None = None,
+) -> list[NoteData]:
+```
+
+**Comportamiento:**
+
+1. Escanea `.md` bajo `scope` (o todo el vault si `None`), excluyendo `exclude_dirs`.
+2. Aplica `filters` como `{campo: valor}`, comparación case-insensitive contra el frontmatter: `valor` puede ser un string (igualdad), una lista (OR — el valor del frontmatter debe matchear alguno) o `None` (el campo debe existir, con cualquier valor).
+3. Retorna `NoteData` **completos** (frontmatter + body), no `NoteRef` — a diferencia del resto de `vault_search.py`, que devuelve referencias livianas con snippet.
+
+**Uso típico:** `reporters.py` — es la función que alimenta `/reporte` y `/reporte_full` (scope de proyecto/área, ideas por `type`, inbox, cola de lectura). Necesita el frontmatter completo (no solo un snippet) para agrupar y formatear cada sección del informe.
+
+---
+
 ### `get_note_index()`
 
 **Función interna** — no tiene equivalente CLI
@@ -612,6 +692,33 @@ Recorre el vault y construye `{stem → path}` para todos los `.md`.
 **Consecuencia para los callers:** iterar las claves del dict ya no equivale a iterar las notas del vault (las notas con stem duplicado aparecen dos veces, bajo dos claves). Iterar `.values()` tampoco deduplica. Para "todas las notas del vault" usar `set(index.values())` o `_scan_vault()` directamente.
 
 No se cachea entre llamadas. Si el vault crece y el tiempo de escaneo se convierte en problema, se puede agregar un cache invalidado por `inotify` (watchdog) sin cambiar la interfaz.
+
+---
+
+## `vault_cache.py`
+
+Responsabilidad única: **cachear el parseo de notas** (frontmatter + body). Todas las funciones de scan de `vault_search.py` pasan por `_parse_note_safe`, que delega acá; `EmbeddingsClient.reindex_vault()` (`embeddings.py`) llama a `parse_cached` directamente, por la misma razón — evitar releer notas sin cambios en un scan completo del vault. No decide qué notas existen (eso lo sigue haciendo `_scan_vault`/`rglob` en cada llamada) — solo evita releer y reparsear una nota cuyo contenido no cambió desde el último scan.
+
+```python
+def parse_cached(path: Path) -> NoteData | None:
+```
+
+**Comportamiento:**
+
+1. Clave del caché: `(mtime_ns, size)` del archivo, no el contenido — un `stat()` es barato, un `read()+parse` no.
+2. **Correctness-preserving:** cualquier modificación de la nota cambia su `mtime`, así que la entrada se invalida sola en el siguiente `stat()`. No hay acoplamiento con `VaultWatcher` ni ventana de staleness posible.
+3. Miss: lee y parsea con `load_post` (el mismo parser tolerante de `vault_writer.py`) fuera del lock, para no serializar la I/O entre threads del pool.
+4. YAML inválido → `None` (mismo contrato que el parser directo; la nota queda invisible a los scans, con `warning` en el log).
+5. El frontmatter devuelto es siempre una **copia profunda** (`copy.deepcopy`) del dict cacheado — una copia shallow compartiría las listas (`tags`, `authors`, etc.) entre el caché y el caller, y una mutación de cualquier caller envenenaría los scans siguientes.
+6. LRU acotado a 2000 entradas (`_MAX_ENTRIES`) para no crecer sin límite en la RAM de la RPi4.
+7. Thread-safe: protegido con un `threading.Lock` porque las funciones de scan corren dentro de `asyncio.to_thread`.
+
+**Otras funciones del módulo:**
+- `invalidate(path)` — borra una entrada puntual. No hace falta para correctness (la clave por mtime ya se auto-invalida), pero sirve para tests y para forzar relectura inmediata tras una escritura propia.
+- `clear()` — vacía el caché completo (tests).
+- `stats()` — `{entries, hits, misses, hit_ratio}`, expuesto en `/status`.
+
+**Impacto medido (RPi4, vault de 500 notas):** una captura corre `get_all_tags()` dos veces (escanea todo el vault para el prompt del LLM). Con el caché, el segundo scan baja ~69% (427→132 ms).
 
 ---
 
@@ -665,7 +772,7 @@ else:
 
 Todas las operaciones de búsqueda son `async` con `asyncio.to_thread()` para el I/O de disco — no bloquean el event loop del bot mientras escanean.
 
-Si el vault crece y los tiempos se vuelven perceptibles, el siguiente paso es un índice JSON en memoria (`{stem → {path, frontmatter}}`) mantenido por `watchdog`, sin cambiar las firmas públicas.
+El paso de cachear el parseo de cada nota (evitar releer y reparsear las que no cambiaron entre scans) ya está hecho — ver `vault_cache.py` abajo. Lo que sigue sin cachear es el listado de archivos (`rglob`) en sí: si el vault crece y eso se vuelve perceptible, el siguiente paso es un índice de paths en memoria mantenido por `watchdog`, sin cambiar las firmas públicas.
 
 ---
 

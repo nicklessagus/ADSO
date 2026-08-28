@@ -6,8 +6,8 @@ ADSO is a personal-use bot. Only the latest release line is supported.
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x / `main` (latest) | Yes |
-| < 1.0.0 (pre-release commits) | No |
+| 1.7.x / `main` (latest) | Yes |
+| < 1.7.0 (older releases) | No |
 
 ## Threat Model
 

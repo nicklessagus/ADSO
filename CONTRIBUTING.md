@@ -67,7 +67,7 @@ test(embeddings): add integration test for reindex_vault
 chore(docker): upgrade Python base image to 3.11-slim-bookworm
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`, `perf`, `security`
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`, `perf`, `security`, `ci`, `build`
 
 ## Pull Request Process
 

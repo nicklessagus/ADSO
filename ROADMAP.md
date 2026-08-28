@@ -40,17 +40,14 @@ Design document: `docs/fase6-scheduling-design.md`
 
 Natural language search over the vault using ChromaDB + LLM synthesis.
 
-**Done (7.0):** pure semantic retrieval via `/buscar` and the `[🔎 Buscar en el vault]` button (no LLM synthesis). Design in `docs/fase7-rag-design.md`.
+**Done (7.0):** pure semantic retrieval via `/buscar` and the `[🔎 Buscar en el vault]` button — inline results for up to 3 matches, `.md` report for larger result sets, source citations with `obsidian://` links, and a configurable similarity threshold (`rag.similarity_threshold` in `config.yaml`). No LLM synthesis yet. Design in `docs/fase7-rag-design.md`.
 
 **Pending:**
 
 - `mode=query` in LLM classifier (currently redirected to capture)
 - Retrieval pipeline: semantic search → structural search → merge → LLM synthesis
-- Inline results for 2–3 matches; `.md` report for larger result sets
 - Scope disambiguation: bot asks `[Todo]` `[Proyecto1]` ... if not specified
-- Source citations with `obsidian://` links
 - Expansion from a node: `[Solo relaciones directas]` `[Expandir un grado más]`
-- RAG similarity threshold configurable (`rag.similarity_threshold` in `config.yaml`)
 
 ---
 
@@ -58,7 +55,7 @@ Natural language search over the vault using ChromaDB + LLM synthesis.
 
 **Done:**
 - `/reporte` command: project/area/inbox scope, ideas, reading queue, vault health
-- `/reporte_full`: full vault breakdown with per-project stats
+- `/reporte_full`: same four report types as `/reporte`, with the full body of each note instead of a one-line summary
 - Standard report header (ASCII logo + version + date)
 - LLM synthesis in reports
 
@@ -66,7 +63,7 @@ Natural language search over the vault using ChromaDB + LLM synthesis.
 - Paper scoring: relevance, citation density, recency
 - Gap detection: topics in one project not referenced in related projects
 - Stale note detection: notes never retrieved in RAG results
-- Weekly digest: auto-sent report every Monday
+- Weekly digest: auto-sent report on the configured day (`weekly_report.day` in `config.yaml`, default Friday) — config and reporters already exist, the scheduling job does not yet
 
 ---
 

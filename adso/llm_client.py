@@ -622,16 +622,32 @@ async def classify(
                         return _fill_title_fallback(groq_result, content)
                     break  # Groq also failed or not configured
 
-                # RPM error: use the delay suggested by the API
-                wait = min(suggested_delay, MAX_RPM_WAIT) if suggested_delay else RETRY_DELAYS[attempt - 1]
-                logger.warning(
-                    "Attempt %d/%d — RPM rate limit, waiting %.0fs",
-                    attempt, MAX_RETRIES, wait,
-                )
-                if on_retry and attempt < MAX_RETRIES:
-                    await _safe_on_retry(on_retry, attempt + 1)
+                # RPM error: use the delay suggested by the API.
+                # El backoff se lee DENTRO del guard: hay un delay por reintento,
+                # así que en el último intento `RETRY_DELAYS[attempt - 1]` indexa
+                # fuera de rango. Y como esto corre dentro del `except`, el
+                # IndexError escapaba de `classify()` sin pasar por modo
+                # degradado — perdiendo el texto del usuario, que es lo único
+                # que el loop no puede hacer. Regresión de haber achicado
+                # RETRY_DELAYS a [1, 2] (#43 D) sin revisar este uso.
                 if attempt < MAX_RETRIES:
+                    wait = (
+                        min(suggested_delay, MAX_RPM_WAIT)
+                        if suggested_delay
+                        else RETRY_DELAYS[attempt - 1]
+                    )
+                    logger.warning(
+                        "Attempt %d/%d — RPM rate limit, waiting %.0fs",
+                        attempt, MAX_RETRIES, wait,
+                    )
+                    if on_retry:
+                        await _safe_on_retry(on_retry, attempt + 1)
                     await asyncio.sleep(wait)
+                else:
+                    logger.warning(
+                        "Attempt %d/%d — RPM rate limit, no retries left",
+                        attempt, MAX_RETRIES,
+                    )
             else:
                 logger.warning(
                     "Attempt %d/%d failed: %s", attempt, MAX_RETRIES, e

@@ -78,7 +78,9 @@ Reglas de serialización para máxima compatibilidad con la UI de Properties de 
 
 ## Valores de `status` por tipo
 
-Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `project-index` — archivar un proyecto mueve la carpeta a `05-Archive/` y setea `status: archived` en el `_index.md`. Los demás tipos no usan este valor. El status refleja el estado dentro del ciclo de vida del tipo.
+Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `project-index`; los demás tipos no usan este valor. El status refleja el estado dentro del ciclo de vida del tipo.
+
+> **Archivar es manual.** El diseño es mover la carpeta del proyecto a `05-Archive/` y setear `status: archived` en su `_index.md`, pero **ningún código lo hace**: `archive_project` está en `VALID_OPERATIONS` y en el prompt, y `_cb_manage_confirm` responde `"Operación 'archive_project' todavía no está disponible."` (ver `docs/security.md` §9b). Hoy el usuario mueve la carpeta desde Obsidian y edita el `status` a mano. Lo único que ADSO archiva por su cuenta son los adjuntos huérfanos de `03-Resources/`, que van a `05-Archive/03-Resources/` y no tienen frontmatter.
 
 `pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado) o si el LLM no pudo asignar destino. Las notas con este status son candidatas para reclasificación automática (cron) o manual (`/clasificar`).
 
@@ -130,7 +132,7 @@ related: ["[[otra-nota]]"]             # RESERVADO — no implementado (ver nota
 
 > Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el preview muestra `00-Inbox` como destino; el bot **no** dispara ningún selector proactivamente. Para cambiarlo, el usuario aprieta `[Reubicar]` en el preview y elige `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
 
-> **`summary` y `related` son campos reservados — ningún código los escribe.** Están declarados en el schema del LLM y en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), así que sobreviven a la sanitización si el LLM los devuelve, pero ningún flujo del bot los popula y ninguna nota del vault real los usa. En particular, los links por similitud **no** van a `related`: se escriben como wikilinks en el bloque `## Ver también` del body. El campo `summary` del LLM que sí se usa es el del payload (nivel superior, no frontmatter), y solo en el flujo de arXiv para el callout `> [!summary] AI Summary` del body.
+> **`summary` y `related` son campos reservados — ningún código los escribe.** Están en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), así que sobreviven a la sanitización si aparecen, pero **no** están declaradas en el `frontmatter` de `_GEMINI_RESPONSE_SCHEMA`: el constrained decoding de Gemini no puede emitirlas, solo podría hacerlo el fallback de Groq (que responde sin schema). Ningún flujo del bot las popula y ninguna nota del vault real las usa. En particular, los links por similitud **no** van a `related`: se escriben como wikilinks en el bloque `## Ver también` del body. El campo `summary` del LLM que sí se usa es el del payload (nivel superior, no frontmatter), y solo en el flujo de arXiv para el callout `> [!summary] AI Summary` del body.
 
 ### Campos opcionales para contenido académico
 
@@ -149,17 +151,24 @@ journal: "Nombre de la revista o venue"           # opcional — parte del schem
 source_url: "https://arxiv.org/abs/XXXX.XXXXX"   # URL canónica — "source_url", no "url"
 doi: "10.XXXX/..."                                # extraído localmente del PDF
 keywords: ["time-series", "transformer", "self-supervised"]  # palabras clave del paper, idioma original
-relevance: "Para qué sirve este paper"            # provisto por el usuario — campo libre
-context: "Contexto adicional de uso"              # opcional, ej: "comparar con modelo actual"
 priority: medium                                  # Text enum — low | medium | high — inferido o explícito
-# Campos extraídos por el pipeline de document_extractor.py (no por el LLM de clasificación):
+# RESERVADOS — ningún código los escribe hoy (ver nota abajo):
+relevance: "Para qué sirve este paper"            # campo libre
+context: "Contexto adicional de uso"              # ej: "comparar con modelo actual"
 contribution: "Qué aporta — nuevo modelo, benchmark, survey, etc."
 methods: ["transformer", "contrastive-learning"]  # métodos/técnicas usadas
-dataset: ["ImageNet", "COCO"]                     # opcional
+dataset: ["ImageNet", "COCO"]
 conclusions: "Principales hallazgos y limitaciones reconocidas por los autores"
-related: ["[[otra-nota]]", "[[paper-similar]]"]   # RESERVADO — no implementado; los links van al bloque `## Ver también` del body
+related: ["[[otra-nota]]", "[[paper-similar]]"]   # los links van al bloque `## Ver también` del body
 ---
 ```
+
+> **Qué popula cada campo, verificado contra el código.** De este bloque, lo único que algún flujo escribe es:
+> - **arXiv** (`_classify_and_preview_arxiv`, `capture.py`): `authors`, `year`, `doi`, `keywords` y `source_url` literales de la API, más `read_status: unread` por defecto y el tag `paper` antepuesto.
+> - **PDF** (`_frontmatter_from_pdf_metadata`, `capture.py`): `title` y `authors` de la metadata del archivo (el `author` viene como un solo string y se parte por `,`/`;`), más el `read_status` que eligió el usuario con los botones.
+> - **LLM de clasificación:** `journal`, y `authors`/`year`/`doi`/`keywords` cuando no vinieron de una fuente literal. Junto con `read_status`, son las únicas claves académicas declaradas en `_GEMINI_RESPONSE_SCHEMA` — las demás el constrained decoding no las puede emitir.
+>
+> `relevance`, `context`, `contribution`, `dataset` y `related` están en `ALLOWED_FRONTMATTER_KEYS` pero **no** en el schema del LLM y ningún flujo los escribe: son reservados, igual que `summary`. `methods` y `conclusions` sí los extrae `document_extractor.py`, pero **no como frontmatter**: van al contenido que se manda al LLM y terminan como las secciones `## Methods` / `## Conclusions` del body.
 
 **Body de una nota de paper** — estructura fija generada por el LLM:
 
@@ -191,6 +200,8 @@ related: ["[[otra-nota]]", "[[paper-similar]]"]   # RESERVADO — no implementad
 ```
 
 El cron de reclasificación extrae el contenido original del callout antes de enviarlo al LLM.
+
+> **`user_context` — clave transitoria, solo en notas degradadas.** Si el usuario mandó un caption junto al archivo y la clasificación cayó a modo degradado, `_classify_and_preview` guarda ese texto en el frontmatter como `user_context`. No es parte del schema: es el único rastro de la señal de destino que dio el usuario, y `reclassify_inbox` la lee (`orig_fm.get("user_context")`) para pasársela al LLM en el reintento y la **borra** de la nota reclasificada (`new_fm.pop`). Está deliberadamente **fuera** de `ALLOWED_FRONTMATTER_KEYS`: la escribe el bot, y dejarla en la whitelist le abriría al LLM la posibilidad de proponerla.
 
 ### `task`
 ```yaml
@@ -241,6 +252,10 @@ source: system                          # auto-generado por el bot, no desde un 
 ---
 ```
 
+> **Lo que el bot escribe realmente al crear el proyecto** (`manage.py` y `seed_vault` en `vault_writer.py`): `title` (el nombre con guiones a espacios y capitalizado), `type`, `status: active`, `description`, `sections: []` **vacío**, `tags` (`["system", "<nombre>"]` desde el bot; solo `["<nombre>"]` desde la siembra de `config.yaml`), `source: system` y `project: <nombre>`. Ese `project:` no es decorativo: es uno de los campos que `_get_existing_items` lee del `_index.md` para armar la lista de destinos que ve el LLM.
+>
+> **`sections` nace vacío y ADSO no lo actualiza.** `create_section` solo hace `mkdir` del directorio dentro del proyecto — no toca el `_index.md`. Mantener la lista al día es manual.
+
 El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 
 ```markdown
@@ -274,7 +289,7 @@ source: system
 ---
 ```
 
-> Las áreas usan el mismo campo `description` — no hay diferencia estructural entre el `_index.md` de proyecto y de área, excepto que los proyectos tienen `status` y `sections`.
+> Las áreas usan el mismo campo `description` — no hay diferencia estructural entre el `_index.md` de proyecto y de área, excepto que los proyectos tienen `status` y `sections`. El bot escribe además `tags` y `area: <nombre>` (el equivalente del `project:` del índice de proyecto, y lo que `_get_existing_items` lee).
 
 > **`description` se valida por contenido, no por presencia.** `_validate_manage_payload` (`llm_schema.py`) rechaza con `LLMResponseError` una operación de crear proyecto o área cuya `description` sea `""`, solo espacios o `null` — antes solo se chequeaba que la clave existiera, así que un `_index.md` podía nacer con la descripción vacía. No es cosmético: la `description` es lo que el LLM lee para decidir en qué proyecto o área clasificar cada nota nueva. Un índice sin ella deja al destino invisible para la clasificación.
 
@@ -315,11 +330,11 @@ El usuario la completa después de leer/revisar el contenido — es su interpret
 
 | Campo/sección | Quién lo llena | Qué es |
 |---|---|---|
-| `contribution`, `methods`, `conclusions` | LLM (del paper) | Lo que dice el autor |
-| `relevance`, `context` | Usuario/LLM al guardar | Por qué lo guardaste |
+| `## Abstract`, `## Methods`, `## Conclusions` (body) | Pipeline de extracción + LLM (del paper) | Lo que dice el autor |
+| `contribution`, `relevance`, `context` (frontmatter) | — reservados, nadie los escribe todavía | Por qué lo guardaste |
 | `## Personal Notes` | Usuario después de leer | Tu interpretación — cómo te sirve, con qué linkear, qué aplicar |
 
-El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me sirve para el capítulo 3, linkear con [[baseline-cnn]]", el bot formatea y escribe en esa sección.
+*(Planificado — Fase 7)* El bot podría ayudar a redactar esta sección: si el usuario manda "este paper me sirve para el capítulo 3, linkear con [[baseline-cnn]]", el bot formatea y escribe ahí. Requiere el modo edición, que no está implementado — hoy la sección se completa en Obsidian.
 
 ---
 
@@ -327,9 +342,11 @@ El bot puede ayudar a redactar esta sección: si el usuario manda "este paper me
 
 - El LLM recibe el contenido crudo y devuelve el frontmatter completo + cuerpo de la nota en JSON estructurado
 - El bot parsea el JSON y escribe el archivo `.md` con el YAML correspondiente
-- Los `tags` se generan en kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (excluyendo 00-Inbox, top 100 por frecuencia) antes de crear nuevos
+- Los `tags` se generan en kebab-case, siempre en inglés. El LLM reutiliza tags existentes del vault (los 100 más frecuentes, excluyendo `00-Inbox`, `05-Archive`, `.obsidian` y `.trash`) antes de crear nuevos
+- **Sanitización de `tags` (`_validate_capture_payload`):** un string suelto (`"python, ml"`, típico de Groq sin schema) se parte por comas; cualquier otro tipo inesperado cae a `[]`. Cada tag pasa por `_to_kebab` —minúsculas, transliteración de acentos y `ñ` (`mañana` → `manana`, no `maana`), espacios y guiones bajos a `-`, se descarta el resto de los caracteres—, y después se filtran los que duplican el `type` (`_TYPE_TAGS`: task, tarea, note, nota, idea, reference, paper, document, audio, image, link) y las expresiones temporales (`_TEMPORAL_TAGS`: días de la semana en ES/EN, hoy, manana, today, tomorrow, proxima-semana, next-week). Un `None` suelto dentro de la lista se descarta **antes** de stringificar: sin ese guard, `str(None)` producía el tag literal `none`. El dedup corre **después** de normalizar —`"Machine Learning"` y `"machine-learning"` colapsan en uno— y preserva el orden de primera aparición (un `set()` lo barajaría)
 - El bot actualiza `date_modified` al editar notas existentes
-- `relevance` y `context` en papers pueden ser provistos por el usuario o inferidos por el LLM del lenguaje del mensaje
+- **Qué no llega al YAML (`_clean_frontmatter` en `vault_writer.py`):** los campos con valor `None` se omiten del archivo (no se escriben como `campo: null`), y las claves con prefijo `_` se descartan por convención — son estado interno del bot (por ejemplo el `_body_embedding` que viaja en el payload de `pending_note`) y nunca se persisten. Los campos de `DATE_FIELDS` (`date_created`, `date_modified`, `due_date`, `scheduled`) se convierten de string ISO 8601 a objeto `date`/`datetime` para que PyYAML los serialice sin comillas
+- `relevance` y `context` son **reservados**: el diseño es que los provea el usuario o los infiera el LLM del lenguaje del mensaje, pero no están en el schema del LLM y ningún flujo los escribe hoy (ver la nota del bloque académico)
 - **Prioridad:** el LLM infiere `priority` del lenguaje del mensaje. Si no hay señal clara, usa `medium`. La prioridad aparece en el preview y el usuario puede corregirla por texto libre antes de confirmar. Solo aplica a tipos accionables: `task`, `idea`.
 - **Extracción de papers:** `document_extractor.py` detecta heurísticamente si un PDF es un paper académico (≥ 2 señales: abstract, DOI, references, etc.) y extrae localmente secciones clave (abstract, keywords, methods, conclusions). Solo ese extracto compacto (~3000 chars) se envía al LLM. El título se extrae del metadata del PDF; si está vacío (común en arXiv), se infiere de las primeras líneas del texto. Fórmulas matemáticas: bloques detectados por número de ecuación `(1)`, `(2)` y reemplazados por `> [mathematical content — see PDF]`. `tags` y `keywords` son distintos: `keywords` = palabras clave del paper en idioma original; `tags` = etiquetas ADSO en inglés.
 - **Embeddings de papers:** ChromaDB indexa el body completo generado por el LLM (AI Summary + Abstract + Methods + Conclusions). Gemini Embedding API es multilingüe y maneja búsqueda cross-lingual.

@@ -81,6 +81,12 @@ tests/
 │   ├── test_audit_2026_08_query.py    # auditoría 2026-08: embeddings y retrieval (metadata de Chroma, huérfanos, warmup)
 │   ├── test_audit_2026_08_reports.py  # auditoría 2026-08: reportes y jobs (reporte vacío, scope borrado, escapado)
 │   ├── test_audit_2026_08_data.py     # auditoría 2026-08: datos escritos al vault (bugs con evidencia en el vault real)
+│   ├── test_issue_53_dup_uploads.py   # issue #53: dedup de documentos subidos por hash (no por nombre)
+│   ├── test_lote1_captura_medios.py   # lote 1: captura y medios (#39, #40, #41, #42, #50)
+│   ├── test_lote2_vault_watcher.py    # lote 2: vault y watcher — durabilidad y wikilinks rotos (#36, #37, #38, #57)
+│   ├── test_lote3_llm_config.py       # lote 3: capa LLM y config — retries, sanitización, validación estricta (#43, #44, #45)
+│   ├── test_classify_timeout.py       # timeout por-llamada de `classify()` contra Gemini (stalls server-side)
+│   ├── test_watchdog.py               # watchdog de proceso: reinicia el bot si el event loop deja de progresar
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -496,7 +502,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5589 statements (2026-08-27).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5590 statements (2026-08-27).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
@@ -507,15 +513,15 @@ movía el gate**, que es justo donde la regla test-first más hace falta. Detall
 en I3 de `docs/audit-2026-07-31.md`.
 
 Cobertura actual de handlers (el terreno a ganar): `query.py` 94%, `callbacks.py`
-82%, `capture.py` 83%, `commands.py` 75%, `manage.py` 75%, `input.py` 75%,
-`jobs.py` 71%, `reports.py` 40%.
+84%, `capture.py` 84%, `commands.py` 75%, `manage.py` 75%, `input.py` 82%,
+`jobs.py` 79%, `reports.py` 40%.
 
-Módulos que hoy **no llegan** a su target de la tabla de arriba: `llm_client.py`
-84% (target ≥ 85% — el lote 3 lo subió de 72%), `tasks_client.py` 73% (≥ 80%),
-`transcriber.py` 56% (≥ 70%) y `security.py` 94% (target 100%). El resto está en
-target o por encima: `config.py` 97%, `document_extractor.py` 97%,
-`llm_schema.py` 95%, `embeddings.py` 92%, `vault_writer.py` 90%,
-`vault_search.py` 87%.
+Módulos que hoy **no llegan** a su target de la tabla de arriba: `tasks_client.py`
+73% (≥ 80%), `transcriber.py` 56% (≥ 70%), `security.py` 94% (target 100%) y
+`vault_writer.py` 89% (≥ 90%). El resto está en target o por encima: `config.py`
+97%, `document_extractor.py` 97%, `llm_schema.py` 95%, `embeddings.py` 92%,
+`llm_client.py` 89% (target ≥ 85% — el lote 3 lo subió de 72%), `vault_search.py`
+87%.
 
 ### Qué NO se mide en CI
 
@@ -709,5 +715,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 897 tests: 704 unit, 48 integration, 145 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1067 tests: 874 unit, 48 integration, 145 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

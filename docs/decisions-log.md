@@ -80,3 +80,13 @@ Colateral del mismo mecanismo: un JSON truncado cuyo `JSONDecodeError` diga `col
 El fix clasifica por tipo (`isinstance(e, APIError) and e.code == 429`) y **no deja fallback por substring** — una excepción no tipada va por el camino genérico aunque su texto mencione la cuota. Parsear el payload *después* de confirmar el tipo sigue siendo legítimo (es la API hablando, no el usuario). Reproductores en `tests/unit/test_lote3_llm_config.py::TestErrorClassificationByType`.
 
 Efecto lateral en un test de la auditoría 2026-08-26: `test_groq_sin_titulo_cae_al_contenido` simulaba el error de cuota con una `Exception` pelada, exactamente el diseño que se reemplaza. Se reconstruyó como `APIError` tipado — andamiaje, sin tocar aserciones.
+
+## El backoff de RPM se leía fuera del guard de reintento (`classify`, regresión de 1.7.0)
+
+Achicar `RETRY_DELAYS` de `[1, 2, 4]` a `[1, 2]` (#43 D) dejó una lectura sin proteger: en la rama de rate limit por minuto, `wait = ... else RETRY_DELAYS[attempt - 1]` se evaluaba **antes** del `if attempt < MAX_RETRIES`, así que el tercer y último intento indexaba fuera de rango. La otra lectura, la del camino genérico, sí estaba dentro del guard — por eso pasó desapercibida.
+
+Lo que lo vuelve grave no es el `IndexError` sino dónde ocurre: **dentro del `except`**, así que escapa del `for`, escapa de `classify()` y `make_degraded_result` nunca corre. El input del usuario no cae al Inbox: se pierde. Es exactamente la clase de fallo que el modo degradado existe para evitar.
+
+Regla que deja: **el backoff solo se lee cuando efectivamente va a haber reintento.** Hay un delay por reintento, no uno por intento; cualquier lectura fuera del guard está mal por construcción. Reproductor en `tests/unit/test_lote3_llm_config.py::TestRpmDelayOnTheLastAttempt`, que asserta que la corrida degrada y que el texto original sobrevive en el body.
+
+Encontrada auditando `docs/architecture.md` contra el código, no por un test — la suite estaba verde porque ningún test cubría un 429 por minuto sin `retryDelay` que agotara los tres intentos.
