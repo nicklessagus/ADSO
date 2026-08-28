@@ -17,7 +17,7 @@ DEPLOY_DIR := $(HOME)/docker/ADSO
 COMPOSE := docker compose -p adso --project-directory $(DEPLOY_DIR) \
 	-f docker-compose.yml -f $(DEPLOY_DIR)/local.yml
 
-.PHONY: deploy stop restart logs status shell prune llm-baseline llm-check
+.PHONY: deploy stop restart logs status shell prune check-sync llm-baseline llm-check
 
 deploy:
 	cp config.yaml $(DEPLOY_DIR)/config.yaml
@@ -37,6 +37,14 @@ status:
 
 shell:
 	$(COMPOSE) exec adso-bot bash
+
+# Reconcilia el indice de ChromaDB contra las notas en disco. Read-only: sirve
+# para confirmar que el VaultWatcher proceso los borrados/ediciones hechos a
+# mano en Obsidian. Corre dentro del contenedor, que es donde estan montados el
+# vault y el volumen de Chroma.
+check-sync:
+	$(COMPOSE) exec -T -e PYTHONPATH=/app -w /app adso-bot \
+		python /app/scripts/check_vault_sync.py
 
 prune:
 	docker image prune -f

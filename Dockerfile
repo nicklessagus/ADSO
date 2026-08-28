@@ -18,6 +18,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código
 COPY adso/ adso/
 
+# Scripts de diagnóstico (`make check-sync`). Van después de `adso/` para no
+# invalidar la capa de dependencias, y son read-only: no los corre el bot.
+COPY scripts/ scripts/
+
 # Crear usuario adso con UID/GID 1000 (requerido por SSH — falla si UID no tiene entrada en /etc/passwd)
 RUN groupadd -g 1000 adso && useradd -u 1000 -g 1000 -m adso
 
