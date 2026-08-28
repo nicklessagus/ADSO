@@ -664,8 +664,21 @@ el RPM.
 
 ### Cuándo correrlo
 
-**Antes de tocar `GEMINI_MODEL`.** Primero la baseline del modelo actual, después
-el candidato comparado contra ella:
+**Antes de tocar `GEMINI_MODEL` — y antes de tocar cualquier otro parámetro de la
+request**: `GenerateContentConfig`, `HttpOptions`, timeouts, `response_schema`,
+`response_mime_type`.
+
+Esa segunda mitad se agregó después de un incidente (2026-08-27/28):
+`CLASSIFY_TIMEOUT_MS` se deployó en `8_000` y **toda** captura cayó a modo
+degradado durante un día, porque la API rechaza cualquier deadline menor a 10 s
+con `400 INVALID_ARGUMENT` *sin llegar a llamar al modelo*. La suite estaba
+verde: el piso vive en el servidor y un `MagicMock` acepta cualquier número. Este
+harness lo habría agarrado —llama a `_call_gemini` de verdad— pero estaba
+documentado como el paso previo a cambiar de modelo, nada más. **Si el cambio
+altera lo que se le manda a la API, un mock no es evidencia.**
+
+Primero la baseline del modelo actual, después el candidato comparado contra
+ella:
 
 ```bash
 make llm-baseline                                        # baseline del modelo actual

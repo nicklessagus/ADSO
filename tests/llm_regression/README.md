@@ -6,6 +6,22 @@ el resto del bot asume. Sirve para decidir si actualizar `GEMINI_MODEL` rompe al
 No mide calidad de redacción ni de resumen: eso lo valida el usuario en el preview
 antes de confirmar cada nota. Mide lo que el usuario *no* ve.
 
+## Cuándo correrlo
+
+No solo antes de tocar `GEMINI_MODEL`: **antes de tocar cualquier parámetro de la
+request** — `GenerateContentConfig`, `HttpOptions`, timeouts, `response_schema`,
+`response_mime_type`.
+
+El motivo es un incidente concreto (2026-08-27/28): `CLASSIFY_TIMEOUT_MS` se
+deployó en `8_000` y **toda** captura cayó a modo degradado durante un día. La
+API rechaza cualquier deadline menor a 10 s con `400 INVALID_ARGUMENT` *sin
+llegar a llamar al modelo*. Ningún test mockeado podía verlo: el piso vive en el
+servidor. Este harness sí, porque llama a `_call_gemini` de verdad — pero estaba
+documentado como el paso previo a cambiar de modelo, así que nadie lo corrió.
+
+La regla general: **si el cambio altera lo que se le manda a la API, un mock no
+es evidencia.**
+
 ## Por qué no es pytest
 
 Pega contra la API real y consume quota. Si viviera bajo `tests/` como test de

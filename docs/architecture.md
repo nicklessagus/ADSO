@@ -591,7 +591,7 @@ Cuando un componente falla, el bot ofrece alternativas en vez de fallar silencio
 El tipo de error se determina por el **tipo de la excepción**, no por su texto (ver `llm_client.py`).
 
 ```
-Error genérico (red, timeout de 8s):
+Error genérico (red, timeout de 12s):
   Intento 1 falla → "Gemini no responde a tiempo, reintento 2/3..." (espera 1s)
   Intento 2 falla → "Gemini no responde a tiempo, reintento 3/3..." (espera 2s)
   Intento 3 falla → modo degradado (inbox + aviso)
