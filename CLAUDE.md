@@ -361,8 +361,8 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 ## Validación de código
 
 - Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
-- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`; actual 74%).
-- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (623 tests) — ningún test toca la red.
+- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`; actual 86%).
+- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (1052 tests) — ningún test toca la red.
 - `adso/handlers/*` **está en la medición de cobertura**. No volver a ponerlo en el `omit` de `pyproject.toml`: los e2e sí lo ejercitan, y omitirlo hacía que un test nuevo sobre un handler no moviera el gate (I3 en `docs/audit-2026-07-31.md`).
 
 ### Test-first — obligatorio
@@ -491,6 +491,33 @@ e2e preexistente pasaba por accidente porque nunca seteaba `doc.mime_type` y el
 `MagicMock` era truthy. Además, tener que *decidir* un contrato ambiguo en vez de
 copiar lo que hacía el código destapó un bug que nadie buscaba (#63).
 
+**Qué modelo va en cada rol.** El criterio no es la jerarquía del rol sino
+**dónde hay oráculo**: el modelo fuerte va donde nada verifica automáticamente
+el resultado.
+
+| Rol | Modelo | Por qué |
+|---|---|---|
+| Árbitro (spec, addendum, paso 5) | Opus | Un error suyo se propaga a los dos agentes y nadie lo revisa |
+| Agente de tests (A) | Opus | **Único rol sin oráculo** — un test débil se ve igual que uno bueno: verde |
+| Implementador (B) | Sonnet | Los tests son un oráculo ejecutable; si la caga, la suite se pone roja |
+
+El que sorprende es el agente de tests, porque su trabajo *parece* mecánico. No
+lo es: sus tres tareas críticas son de juicio — resistir la gravedad de mirar el
+código y asertar lo que ya hace, distinguir "falla en la aserción" de "falla
+porque el andamiaje está roto", y el paso 2b, que es pedirle que argumente en
+contra de su propio trabajo. Las dos primeras son exactamente lo que falló en el
+lote 1 (10 contra-casos pasando sin ejecutar nada).
+
+El implementador es además donde está casi todo el ahorro: es el rol que más
+tokens quema (lee spec + todos los tests + los módulos, e itera hasta verde), y
+el más acorralado — no toca tests, el criterio de éxito es binario, y escala en
+vez de decidir. Su única fuga real (aflojar un test para pasarlo) la agarra el
+paso 5 con un `git diff tests/`.
+
+Excepción: subir el implementador a Opus cuando el diff toca **semántica de
+control de flujo** — reintentos, concurrencia, orden de escritura. Se sube ese
+ítem, no el lote entero.
+
 **Cuándo NO usarlo:** un fix puntual de un solo ítem. Ahí el ciclo test-first de
 arriba alcanza y montar tres roles es puro overhead.
 
@@ -559,6 +586,8 @@ Políticas e invariantes que restringen cómo se escribe código nuevo. Los post
 
 - **`params` del modo manage con `properties` declaradas (`_GEMINI_RESPONSE_SCHEMA`):** el constrained decoding de Gemini solo puede emitir claves presentes en el schema, así que el `params: {"type": "OBJECT"}` sin `properties` devolvía siempre `{}` — incluso con el nombre del proyecto visible en el input. `_validate_manage_payload` entonces lanzaba `LLMResponseError` y **todo el modo manage por texto libre caía a modo degradado**: el fallback de `_cb_manage_create` (`manage.py`, cuando `_extract_name_from_command` no reconoce el patrón) proponía el texto crudo del usuario como nombre del proyecto tras gastar 3 reintentos. Detectado por `scripts/llm_regression.py` contra el modelo en producción. Guard de regresión en `test_manage_params_declares_properties`.
 
+- **Presupuesto de reintentos de `classify` por tipo de error (lote 3, #43):** el tipo del error se decide por **`isinstance`**, nunca por el texto del mensaje. "Es rate limit" ≡ `APIError` con `code == 429` (`_is_rate_limit_error`); una excepción que no es `APIError` va por el camino genérico aunque su mensaje diga `429`/`PerDay`. Una vez confirmado el 429 tipado, sí se parsea el payload para separar cuota diaria de RPM y leer `retryDelay` (de `APIError.details` vía `_find_retry_delay`, con el regex sobre `str(e)` como respaldo). Presupuestos: error de red/API → 3 intentos con `RETRY_DELAYS`; **respuesta inválida (`LLMResponseError`, de parseo o de validación) → 2 intentos y un único tiro a Groq**, porque reintentar el mismo prompt contra el mismo modelo casi nunca arregla un JSON malformado, pero otro modelo puede. Groq no se reintenta. `RETRY_DELAYS = [1, 2]`: hay una espera por reintento y el último intento no duerme, así que una lista de tres declaraba un delay inalcanzable.
+
 - **Modo degradado:** si Gemini no responde, el input se guarda en `00-Inbox/` con `status: pending-classification`. Un cron reclasifica cuando la API vuelve. El cron (`reclassify_inbox`) se salta la pasada si hay cualquier flujo interactivo en curso — `_PENDING_FLOW_KEYS` cubre todas las keys de flujo (nota/operación/audio/PDF extraído/PDF escaneado/read_status/arXiv/reporte), alineado con `_has_pending_keyboard`, para no notificar en medio de una interacción.
 
 - **Dedup de recursos (`save_resource`):** al copiar a `03-Resources/`, la reutilización de un archivo existente se decide por hash SHA-256 del contenido (con short-circuit por tamaño), no solo por tamaño. Dos archivos distintos del mismo tamaño ya no se confunden — el nuevo se guarda con sufijo numérico en vez de descartarse. Escritura vía `shutil.copy2`; hashing por chunks (memory-safe en RPi4).
@@ -581,6 +610,10 @@ Políticas e invariantes que restringen cómo se escribe código nuevo. Los post
 
 - **Neutralización de tags en el prompt (`classify` en `llm_client.py`):** el contenido externo se inserta en `<input>` tras neutralizar cualquier `<input>`/`</input>`/`<system>`/`<user_context>` literal que traiga (se le inserta un espacio tras el `<`, preservando el `<` legítimo de código/matemática). Cierra el vector de escape del wrapper para PDFs/OCR/abstracts.
 
+- **Proteger y detectar son dos pasos distintos, en ese orden (`build_user_message`, #44C):** el `user_context` (el caption que acompaña una imagen, por ejemplo) se pasa por `check_injection_risk` **tal como lo mandó el usuario**, y recién después se le sacan los `<>` que protegen el wrapper `<user_context>`. Al revés —que es como estaba— la limpieza desarmaba el intento justo antes de mirarlo: un texto con tags embebidos dejaba de matchear los patrones pero llegaba perfectamente legible al modelo. Si el detector dispara, el `user_context` se descarta entero (no se sanea: sanear un intento de inyección es un juego perdido, y el campo es una comodidad).
+
+- **Los patrones de inyección cubren voseo y tildes (#44B):** `ignor[aá]`, `olvid[aá]`, `actuá como` — las formas que este usuario efectivamente escribe, que hasta el lote 3 eran justo las que no se detectaban. Se ampliaron con clases de carácter sobre los patrones existentes, **no** con alternativas nuevas, para no tocar el contexto de frase (`… instrucciones`, `como + artículo`) que es lo que evita marcar `actualizar`, `olvidadizo` e `ignorante`. Contra-casos en `tests/unit/test_lote3_llm_config.py::TestInjectionPatternsVoseo`: un detector que marca todo es tan inútil como uno que no marca nada — el aviso del preview deja de significar algo.
+
 - **Tareas de fondo con referencia fuerte (`spawn_tracked` en `bot_utils.py`):** reemplaza `asyncio.create_task` para trabajo fire-and-forget (push a Tasks, indexado, re-embed del watcher). Guarda referencia fuerte (evita GC prematuro que cancele la tarea) y loguea excepciones. El `VaultWatcher` usa su propio set y lo drena en `stop()`.
 
 - **Orden "crear antes de descartar" (regla de oro, sin pérdida de datos):** `_cb_confirm` lee `pending_note`/`clasificar_inbox_path` con `get` y los popea **recién después** de que `create_note` retorne — si la escritura falla (disco lleno, I/O de la SD), el estado sigue en `user_data` y un segundo `[Confirmar]` reintenta. Sin esto se perdía definitivamente el texto de audio/OCR/Vision, que no existe en ningún otro lado. El temporal del recurso adjunto también se borra recién tras la escritura (el reintento lo necesita; `save_resource` dedup por hash, así que no duplica). Por el mismo motivo `reclassify_inbox` crea la nota nueva **antes** de borrar la del Inbox (antes hacía `delete_note` → `create_note`: un fallo de creación evaporaba la nota).
@@ -591,7 +624,7 @@ Políticas e invariantes que restringen cómo se escribe código nuevo. Los post
 
 - **Lock compartido de jobs pesados (`_vault_heavy_lock` en `jobs.py`):** `reclassify_inbox` y `reindex_job` comparten un `asyncio.Lock` — el reindex nocturno espera el lock, la reclasificación saltea la pasada si está tomado. Evita CPU/red concurrente de ambos crons en la RPi4. El reindex además usa `vault_cache.parse_cached` (no relee notas sin cambios desde la SD).
 
-- **Observabilidad de latencia de captura (`Stopwatch` en `bot_utils.py`):** `_classify_and_preview` cronometra `scan` (los dos scans del vault), `classify` y `links`, y emite **una** línea INFO al salir — por *todos* los caminos, incluido el modo degradado, que es justamente el lento (quema los 3 reintentos). Formato: `Captura (text): scan 0.13s | classify 6.11s | links 1.24s | total 7.48s`. `total` mide desde la construcción del cronómetro, así que `total` >> suma de etapas señala un tramo sin instrumentar. Antes no había ninguna marca de tiempo entre el inicio de la llamada al LLM y el preview: las únicas anclas del log eran la línea que emite el SDK de Gemini al abrir la request y el `Nota creada` de `vault_writer`, que llega *después* de que el usuario confirma y no mide nada del bot. El reloj es inyectable (`clock=`) para tests, misma convención que el `now` de `_parse_date_from_text`. El flujo de arXiv (`_classify_and_preview_arxiv`) todavía **no** está instrumentado.
+- **Observabilidad de latencia de captura (`Stopwatch` en `bot_utils.py`):** `_classify_and_preview` cronometra `scan` (los dos scans del vault), `classify` y `links`, y emite **una** línea INFO al salir — por *todos* los caminos, incluido el modo degradado, que es justamente el lento (quema el presupuesto de reintentos: 3 intentos para un error de red, 2 más un tiro a Groq para una respuesta inválida). Formato: `Captura (text): scan 0.13s | classify 6.11s | links 1.24s | total 7.48s`. `total` mide desde la construcción del cronómetro, así que `total` >> suma de etapas señala un tramo sin instrumentar. Antes no había ninguna marca de tiempo entre el inicio de la llamada al LLM y el preview: las únicas anclas del log eran la línea que emite el SDK de Gemini al abrir la request y el `Nota creada` de `vault_writer`, que llega *después* de que el usuario confirma y no mide nada del bot. El reloj es inyectable (`clock=`) para tests, misma convención que el `now` de `_parse_date_from_text`. El flujo de arXiv (`_classify_and_preview_arxiv`) todavía **no** está instrumentado.
 
 - **Ruido de log (`logging_setup.py`):** la config de logging vive en su propio módulo, no en `__main__.py`, porque importar `__main__` arranca el bot y la config no se podía testear. Se silencia `apscheduler.executors.default` a WARNING, **no `apscheduler` entero**: el logger del scheduler avisa arranque y `Run time of job was missed`, que es la señal de que el event loop se está bloqueando. Motivo: 2880 de las 3001 líneas de un día (96%) eran las dos INFO por corrida del `heartbeat_job`, y encontrar las ~23 del bot exigía filtrar a mano.
 

@@ -243,8 +243,20 @@ def _build_section(
     return cls(**filtered)
 
 
-def _build_vault_seed(data: dict[str, Any] | None) -> VaultSeedConfig:
+def _build_vault_seed(
+    data: dict[str, Any] | None, unknown: list[str] | None = None
+) -> VaultSeedConfig:
     """Construye VaultSeedConfig validando que cada ítem tenga description.
+
+    Args:
+        data: Dict crudo de la sección `vault_seed`, o None.
+        unknown: Lista donde acumular las claves ignoradas (`vault_seed.clave`).
+            A diferencia de `_build_section`/`_build_weekly_report`, esta
+            sección no delega en `cls(**filtered)` —arma `VaultSeedConfig` a
+            mano porque valida `description` por ítem—, así que el reporte de
+            claves desconocidas tenía que agregarse acá aparte (#45C: un typo
+            como `proyectos` en vez de `projects` sembraba un vault vacío en
+            silencio).
 
     Raises:
         ConfigError: Si la sección no es un mapa de claves, o si algún ítem no
@@ -260,6 +272,10 @@ def _build_vault_seed(data: dict[str, Any] | None) -> VaultSeedConfig:
             f"vault_seed: se esperaba un mapa de claves (projects / areas), "
             f"se obtuvo {type(data).__name__}"
         )
+
+    if unknown is not None:
+        known = {f.name for f in VaultSeedConfig.__dataclass_fields__.values()}
+        unknown.extend(f"vault_seed.{k}" for k in data if k not in known)
 
     projects: list[VaultSeedItem] = []
     for item in data.get("projects", []):
@@ -316,8 +332,34 @@ def _build_weekly_report(
     # normaliza a dict. OJO: la clave es `sections`, no `include` — el
     # config.yaml desplegado usaba `include` y se descartaba en silencio (I2 de
     # docs/audit-2026-07-31.md). Por eso ahora las claves ajenas se reportan.
-    if isinstance(sections, list):
-        sections = {s: True for s in sections}
+    #
+    # Validación de tipo (#45B): un tipo externo (string, número) se asignaba
+    # verbatim y llegaba tal cual a los reporters. El caso caro es el mapa con
+    # valor no-bool: `papers_queue: "false"` es un string, que es truthy, así
+    # que la sección queda encendida justo cuando el usuario la apagó.
+    if sections is not None:
+        if isinstance(sections, list):
+            if not all(isinstance(s, str) for s in sections):
+                raise ConfigError(
+                    "weekly_report.sections: la lista debe contener solo "
+                    f"nombres de sección (strings), se obtuvo {sections!r}"
+                )
+            sections = {s: True for s in sections}
+        elif isinstance(sections, dict):
+            invalid = {
+                k: v for k, v in sections.items()
+                if not isinstance(k, str) or not isinstance(v, bool)
+            }
+            if invalid:
+                raise ConfigError(
+                    "weekly_report.sections: el mapa debe ser {nombre: bool}, "
+                    f"valor(es) inválido(s): {invalid!r}"
+                )
+        else:
+            raise ConfigError(
+                "weekly_report.sections: se esperaba un mapa {nombre: bool} o "
+                f"una lista de nombres, se obtuvo {type(sections).__name__}"
+            )
 
     result = WeeklyReportConfig(
         enabled=data.get("enabled", True),
@@ -349,6 +391,19 @@ def _validate_types(settings: Settings) -> None:
                 f"{name}: se esperaba {expected.__name__ if isinstance(expected, type) else expected}, "
                 f"se obtuvo {type(value).__name__} ({value!r})"
             )
+
+    # `vault.exclude_dirs` debe ser lista de strings (#45A): un string suelto
+    # carga sin error pero cambia la semántica del chequeo de exclusión a un
+    # test de substring silencioso — deja de excluir lo que debería y empieza
+    # a excluir cualquier cosa cuyo nombre sea substring de ese string.
+    exclude_dirs = settings.vault.exclude_dirs
+    if not isinstance(exclude_dirs, list) or not all(
+        isinstance(x, str) for x in exclude_dirs
+    ):
+        raise ConfigError(
+            f"vault.exclude_dirs: se esperaba una lista de strings, "
+            f"se obtuvo {exclude_dirs!r}"
+        )
 
     # Validar rangos
     if not 0.0 <= settings.rag.similarity_threshold <= 1.0:
@@ -455,7 +510,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         # Secciones de config.yaml
         rag=_build_section(RagConfig, raw.get("rag"), "rag", unknown),
         links=_build_section(LinksConfig, raw.get("links"), "links", unknown),
-        vault_seed=_build_vault_seed(raw.get("vault_seed")),
+        vault_seed=_build_vault_seed(raw.get("vault_seed"), unknown),
         vault=_build_section(VaultConfig, raw.get("vault"), "vault", unknown),
         whisper=_build_section(WhisperConfig, raw.get("whisper"), "whisper", unknown),
         reindex=_build_section(ReindexConfig, raw.get("reindex"), "reindex", unknown),

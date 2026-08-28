@@ -496,7 +496,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **84%** sobre 5113 statements (auditoría 2026-08-26).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5535 statements (lote 3, 2026-08-27).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
@@ -511,10 +511,11 @@ Cobertura actual de handlers (el terreno a ganar): `query.py` 94%, `callbacks.py
 `jobs.py` 71%, `reports.py` 40%.
 
 Módulos que hoy **no llegan** a su target de la tabla de arriba: `llm_client.py`
-72% (target ≥ 85%), `tasks_client.py` 73% (≥ 80%), `transcriber.py` 56% (≥ 70%)
-y `security.py` 94% (target 100%). El resto está en target o por encima:
-`document_extractor.py` 97%, `config.py` 96%, `llm_schema.py` 95%,
-`embeddings.py` 92%, `vault_writer.py` 90%, `vault_search.py` 87%.
+84% (target ≥ 85% — el lote 3 lo subió de 72%), `tasks_client.py` 73% (≥ 80%),
+`transcriber.py` 56% (≥ 70%) y `security.py` 94% (target 100%). El resto está en
+target o por encima: `config.py` 97%, `document_extractor.py` 97%,
+`llm_schema.py` 95%, `embeddings.py` 92%, `vault_writer.py` 90%,
+`vault_search.py` 87%.
 
 ### Qué NO se mide en CI
 

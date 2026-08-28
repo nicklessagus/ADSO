@@ -138,6 +138,26 @@ clave se descartaba en silencio (I2 de `docs/audit-2026-07-31.md`). Los tests
 
 Para inspeccionarlo desde código: `load_settings(...).unknown_keys`.
 
+Desde el lote 3 (#45C) el reporte cubre también `vault_seed`, que era la única
+sección que no lo hacía: `_build_vault_seed` arma su dataclass a mano (valida
+`description` por ítem) en vez de delegar en `_build_section`, así que
+`load_settings` nunca le pasaba la lista de claves ignoradas. Un `proyectos:` en
+vez de `projects:` sembraba un vault vacío sin decir nada.
+
+### Tipos que se validan al arrancar (#45)
+
+El loader falla ruidosamente ante una config mal escrita. Tres casos que hasta el
+lote 3 no fallaban y **cambiaban el comportamiento en silencio**:
+
+| Clave | Formas válidas | Qué pasaba antes |
+|---|---|---|
+| `vault.exclude_dirs` | lista de strings | Un string suelto cargaba sin error, pero el chequeo de exclusión pasaba a ser un test de substring: dejaba de excluir lo que debía y excluía cualquier carpeta cuyo nombre fuera substring de ese string |
+| `weekly_report.sections` | mapa `{nombre: bool}`, lista de nombres, o ausente | Un tipo externo (string, número) se asignaba verbatim y llegaba así a los reporters. El caso caro es el mapa con valor no-bool: `papers_queue: "false"` es un string, y un string no vacío es truthy — la sección quedaba **encendida justo cuando el usuario la apagó** |
+| `vault_seed.*` | `projects`, `areas` | Ver arriba |
+
+Todos lanzan `ConfigError` desde `load_settings`, con la clave nombrada en el
+mensaje. Nada de validadores diferidos: si el bot arranca, la config es válida.
+
 Una sección que no sea un mapa de claves (ej: una lista) sí es `ConfigError` —
 ahí no hay ambigüedad sobre la intención. Eso incluye a `vault_seed`, que tiene
 su propio constructor: escribirla como lista es la confusión natural (sus hijos

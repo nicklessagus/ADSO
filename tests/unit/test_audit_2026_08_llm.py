@@ -31,6 +31,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from google.genai import errors as genai_errors
 
 from adso.config import ConfigError, load_settings
 from adso.llm_schema import validate_llm_response
@@ -175,9 +176,19 @@ class TestL3TituloVacioEnElFallbackDeGroq:
         from adso import llm_client
 
         monkeypatch.setenv("GROQ_API_KEY", "gsk-dummy")
-        cuota = Exception(
-            "429 RESOURCE_EXHAUSTED: quota exceeded for metric "
-            "generate_content_free_tier_requests, limit: GenerateRequestsPerDayPerProject"
+        # El error se construye TIPADO (`APIError` con `code=429`): desde el
+        # lote 3 el loop clasifica por tipo y una `Exception` pelada con "429"
+        # en el texto va por el camino genérico, no al fallback de Groq.
+        cuota = genai_errors.APIError(
+            429,
+            {"error": {
+                "message": (
+                    "quota exceeded for metric "
+                    "generate_content_free_tier_requests, limit: "
+                    "GenerateRequestsPerDayPerProject"
+                ),
+                "status": "RESOURCE_EXHAUSTED",
+            }},
         )
         groq = json.dumps({
             "mode": "capture",

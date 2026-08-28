@@ -70,3 +70,13 @@ si Telegram no informa `file_size` (None), el pre-check se saltea — el límite
 ## Error handler global de PTB (`_global_error_handler` en `bot.py`)
 
 registrado con `add_error_handler`. Los `BadRequest` benignos (`message is not modified`, `query is too old` — típicos tras timeouts de red a mitad de flujo) se ignoran con log a `info`. Los errores de red (`NetworkError`/`TimedOut`) solo se loguean — notificar por la misma red caída fallaría. El resto se loguea y notifica al usuario con mensaje genérico + `/reset`. Complementos en `handle_callback`: `query.answer()` vencido no aborta el procesamiento del tap, y `_cb_confirm` trata "message is not modified" como éxito silencioso (la confirmación ya se había aplicado).
+
+## El mensaje de una excepción decidía el control de flujo del retry loop (`classify`, lote 3 / #43)
+
+`classify` clasificaba el error con `"429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)`. El problema no es la fragilidad teórica del substring: es que `_validate_capture_payload` **embebe valores controlados por el modelo en el mensaje de la excepción** (`Invalid status '<valor>'…`), y el modelo copia texto del input del usuario a esos campos. Un usuario que manda la captura de pantalla de un error de cuota de Gemini produce, en cadena: un `status` con `"429 … GenerateRequestsPerDayPerProject"` adentro → `LLMResponseError` con ese texto en el mensaje → el loop lo lee como cuota diaria agotada → abandona Gemini tras **un** intento y salta a Groq. Contenido del usuario eligiendo la rama de reintentos.
+
+Colateral del mismo mecanismo: un JSON truncado cuyo `JSONDecodeError` diga `column 429` era indistinguible de un rate limit.
+
+El fix clasifica por tipo (`isinstance(e, APIError) and e.code == 429`) y **no deja fallback por substring** — una excepción no tipada va por el camino genérico aunque su texto mencione la cuota. Parsear el payload *después* de confirmar el tipo sigue siendo legítimo (es la API hablando, no el usuario). Reproductores en `tests/unit/test_lote3_llm_config.py::TestErrorClassificationByType`.
+
+Efecto lateral en un test de la auditoría 2026-08-26: `test_groq_sin_titulo_cae_al_contenido` simulaba el error de cuota con una `Exception` pelada, exactamente el diseño que se reemplaza. Se reconstruyó como `APIError` tipado — andamiaje, sin tocar aserciones.

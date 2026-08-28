@@ -9,6 +9,24 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.7.0] — 2026-08-27
+
+**Lote 3 — capa LLM y config** (#43, #44, #45), con el método de roles separados de `CLAUDE.md` § "Spec → tests → implementación". Esta corrida fijó además **qué modelo va en cada rol**: el criterio es dónde hay oráculo — el agente de tests es el único rol cuyo trabajo no verifica nada automáticamente (un test débil se ve verde igual que uno bueno), así que va en el modelo fuerte; el implementador tiene los tests como oráculo ejecutable.
+
+Suite: 1009 → **1052 tests**. Cobertura 86%.
+
+### Fixed
+
+- **El mensaje de una excepción ya no decide el control de flujo de los reintentos** (#43). `classify` clasificaba el error buscando `"429"` en el texto, y `_validate_capture_payload` embebe valores que el modelo copia del input del usuario en el mensaje de la excepción. Concretamente: mandar **la captura de pantalla de un error de cuota de Gemini** hacía que el bot creyera que su propia cuota estaba agotada y abandonara Gemini tras un solo intento. Ahora el tipo del error se decide por `isinstance` (`APIError` con `code == 429`) y no hay fallback por substring
+- **Un JSON malformado ya no quema tres llamadas a la API** antes de degradar (#43). Reintentar el mismo prompt contra el mismo modelo casi nunca arregla una respuesta inválida: ahora son dos intentos y un único tiro al fallback de Groq, que sí es otro modelo. Los errores de red conservan su presupuesto completo
+- **El backoff declarado es el que se aplica** (#43): `RETRY_DELAYS` declaraba tres delays y el tercero era inalcanzable, porque el último intento nunca duerme
+- **Los patrones de inyección detectan voseo y tildes** (#44): `ignorá`, `olvidá`, `actuá como` — el registro que este usuario efectivamente escribe era justo el que no se detectaba. Sin marcar `actualizar`, `olvidadizo` ni `ignorante`
+- **El detector de inyección mira el texto original** (#44): al `user_context` se le sacaban los `<>` *antes* de revisarlo, así que un intento con tags embebidos dejaba de matchear los patrones pero llegaba legible al modelo
+- **Un `None` en `tags` ya no produce el tag literal `none`**, y los tags duplicados colapsan a uno preservando el orden (#44)
+- **Tres claves de config que cambiaban el comportamiento en silencio ahora fallan al arrancar** (#45): `vault.exclude_dirs` que no sea lista de strings (un string suelto convertía la exclusión en un test de substring), `weekly_report.sections` con un tipo, ítem o valor inesperado (`papers_queue: "false"` es truthy — la sección quedaba encendida justo cuando se la apagó), y las claves desconocidas dentro de `vault_seed`, la única sección que no las reportaba
+
+---
+
 ## [1.6.0] — 2026-08-26
 
 Primeras dos tandas de mejoras de la auditoría (9 issues), implementadas con un **método de trabajo nuevo**: la spec, los tests y la implementación las hacen roles separados que no se comunican entre sí. El motivo es concreto — cuando la misma cabeza escribe el test y el código, el test tiende a confirmar lo que el código hace en vez de especificar lo que debería hacer, y nadie lo nota porque está verde. Documentado en `CLAUDE.md` § "Spec → tests → implementación".

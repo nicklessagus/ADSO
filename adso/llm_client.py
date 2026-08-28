@@ -71,8 +71,17 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 MAX_RETRIES = 3
-RETRY_DELAYS = [1, 2, 4]  # seconds — backoff for generic errors
+# Un delay por reintento: con MAX_RETRIES intentos hay MAX_RETRIES-1 esperas.
+# Declarar un tercer valor lo volvía código muerto — el último intento no
+# duerme, porque dormir después del intento que no se va a reintentar solo
+# retrasa la nota degradada (#43 D).
+RETRY_DELAYS = [1, 2]  # seconds — backoff for generic errors
 MAX_RPM_WAIT = 70          # seconds — max wait for RPM rate limit errors
+
+# Una respuesta malformada casi nunca se arregla reintentando el mismo prompt
+# contra el mismo modelo: se acota el presupuesto y se le da un tiro a Groq,
+# que no gasta quota de Gemini (#43 B).
+MAX_INVALID_RESPONSE_ATTEMPTS = 2
 
 # Markers used to build and detect degraded-mode callout bodies
 _DEGRADED_HEADER = "> [!warning]- Modo degradado: Clasificación pendiente"
@@ -84,27 +93,96 @@ _DEGRADED_REASON = "> El LLM no respondió. Contenido original sin procesar:"
 # ---------------------------------------------------------------------------
 
 
-def _parse_rate_limit_error(error_str: str) -> tuple[bool, float]:
-    """Parse a Gemini 429 error and extract quota type and suggested retry delay.
+_RETRY_DELAY_RE = re.compile(r"^(\d+(?:\.\d+)?)s$")
+
+
+def _is_rate_limit_error(error: BaseException) -> bool:
+    """Return True only for a *typed* 429 coming from the Gemini API.
+
+    El tipo del error nunca se decide por su texto. Antes bastaba con que el
+    mensaje dijera "429"/"RESOURCE_EXHAUSTED" para tomar el camino de rate
+    limit, así que un `LLMResponseError` que cita contenido del usuario (la
+    captura de pantalla de un error de cuota, o un `column 429` de JSON
+    truncado) abandonaba Gemini en el primer intento. Sin fallback por
+    substring: una excepción que no es `APIError` va por el camino genérico
+    aunque su mensaje mencione la cuota (#43 A).
 
     Args:
-        error_str: String representation of the error.
+        error: Exception raised by the API call.
+
+    Returns:
+        True if the error is an ``APIError`` (or subclass) with code 429.
+    """
+    try:
+        from google.genai import errors as genai_errors
+    except ImportError:  # pragma: no cover - google-genai es dependencia dura
+        return False
+
+    # ClientError/ServerError son subclases de APIError: isinstance las cubre.
+    return isinstance(error, genai_errors.APIError) and error.code == 429
+
+
+def _find_retry_delay(details: Any) -> float:
+    """Walk a structured API error payload looking for a ``retryDelay``.
+
+    El `retryDelay` viaja en un bloque `google.rpc.RetryInfo` dentro del JSON de
+    la respuesta. Leerlo del payload y no del `repr` del dict evita perder el
+    delay en silencio si el SDK cambia cómo imprime el error.
+
+    Args:
+        details: Structured payload (``APIError.details``) or any nested part.
+
+    Returns:
+        Delay in seconds, or 0.0 if the payload has none.
+    """
+    if isinstance(details, dict):
+        raw = details.get("retryDelay")
+        if isinstance(raw, str):
+            match = _RETRY_DELAY_RE.match(raw.strip())
+            if match:
+                return float(match.group(1))
+        for value in details.values():
+            found = _find_retry_delay(value)
+            if found:
+                return found
+    elif isinstance(details, (list, tuple)):
+        for item in details:
+            found = _find_retry_delay(item)
+            if found:
+                return found
+    return 0.0
+
+
+def _parse_rate_limit_error(error: BaseException) -> tuple[bool, float]:
+    """Inspect a typed 429 to tell daily quota from RPM and read its retry delay.
+
+    Solo se llama cuando :func:`_is_rate_limit_error` ya confirmó que el error es
+    un 429 tipado: a esa altura leer el payload es legítimo, lo que estaba
+    prohibido era deducir el *tipo* del error de su texto.
+
+    Args:
+        error: Typed API error with code 429.
 
     Returns:
         (is_daily_quota, retry_delay_seconds)
         is_daily_quota=True → daily quota exhausted, no point retrying.
         retry_delay_seconds → delay suggested by the API (0.0 if not parseable).
     """
-    is_daily = "PerDay" in error_str
+    message = getattr(error, "message", None)
+    error_str = str(error)
+    haystack = f"{message if isinstance(message, str) else ''} {error_str}"
+    is_daily = "PerDay" in haystack
 
-    delay = 0.0
-    match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", error_str)
-    if match:
-        delay = float(match.group(1))
-    else:
-        match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_str, re.IGNORECASE)
+    delay = _find_retry_delay(getattr(error, "details", None))
+    if not delay:
+        # Fallback al texto: cubre payloads que el SDK no expone estructurados.
+        match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", error_str)
         if match:
             delay = float(match.group(1))
+        else:
+            match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_str, re.IGNORECASE)
+            if match:
+                delay = float(match.group(1))
 
     return is_daily, delay
 
@@ -377,12 +455,20 @@ def build_user_message(content: str, user_context: Optional[str] = None) -> str:
     )
     user_message = f"<input>\n{safe_content}\n</input>"
     if user_context:
-        # Sanitize user_context to prevent tag-breaking injection.
-        # Remove angle brackets that could escape the <user_context> wrapper.
-        safe_context = re.sub(r"[<>]", "", user_context)
-        if check_injection_risk(safe_context):
+        # El chequeo de inyección corre sobre el texto TAL COMO LO MANDÓ EL
+        # USUARIO, antes de cualquier limpieza. Si se corriera después de sacar
+        # los "<>", un intento con tags embebidos ("</user_context><system>")
+        # dejaría de matchear el patrón justo porque la limpieza lo desarmó —
+        # pero el texto seguiría llegando perfectamente legible al modelo.
+        # Detectar y proteger son dos pasos distintos con propósitos distintos:
+        # no reordenar esto para "simplificar" el if.
+        if check_injection_risk(user_context):
             logger.warning("Patrón de inyección detectado en user_context — descartado")
             safe_context = None
+        else:
+            # Sanitize user_context to prevent tag-breaking injection.
+            # Remove angle brackets that could escape the <user_context> wrapper.
+            safe_context = re.sub(r"[<>]", "", user_context)
         if safe_context:
             user_message += f"\n\n<user_context>{safe_context}</user_context>"
     return user_message
@@ -470,6 +556,8 @@ async def classify(
     system_prompt = build_system_prompt(existing_projects, existing_areas, existing_tags)
     user_message = build_user_message(content, user_context)
 
+    invalid_response_attempts = 0
+
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response_text = await _call_gemini(system_prompt, user_message)
@@ -485,12 +573,35 @@ async def classify(
 
             return _fill_title_fallback(validated, content)
 
-        except Exception as e:
-            error_str = str(e)
-            is_rate_limit = "429" in error_str or "RESOURCE_EXHAUSTED" in error_str
+        except LLMResponseError as e:
+            # La respuesta del modelo es inservible (JSON no parseable o schema
+            # inválido). Reintentar el mismo prompt contra el mismo modelo casi
+            # nunca la arregla: dos intentos y después un único tiro a Groq, que
+            # no gasta quota de Gemini y es lo último que separa al usuario de
+            # una nota degradada. Groq no se reintenta (#43 B).
+            invalid_response_attempts += 1
+            logger.warning(
+                "Attempt %d/%d — invalid LLM response: %s",
+                invalid_response_attempts, MAX_INVALID_RESPONSE_ATTEMPTS, e,
+            )
+            if (
+                invalid_response_attempts >= MAX_INVALID_RESPONSE_ATTEMPTS
+                or attempt >= MAX_RETRIES
+            ):
+                groq_result = await _try_groq_fallback(
+                    system_prompt, user_message, disambiguation_threshold,
+                    media_type,
+                )
+                if groq_result is not None:
+                    return _fill_title_fallback(groq_result, content)
+                break  # Groq also failed or not configured
+            if on_retry:
+                await _safe_on_retry(on_retry, attempt + 1)
+            await asyncio.sleep(RETRY_DELAYS[attempt - 1])
 
-            if is_rate_limit:
-                is_daily, suggested_delay = _parse_rate_limit_error(error_str)
+        except Exception as e:
+            if _is_rate_limit_error(e):
+                is_daily, suggested_delay = _parse_rate_limit_error(e)
                 if is_daily:
                     logger.error("Gemini daily quota exhausted — trying Groq fallback")
                     groq_result = await _try_groq_fallback(

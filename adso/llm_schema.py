@@ -86,12 +86,18 @@ INJECTION_PATTERNS = [
     r"from now on",
     # XML/tag injection — breaking out of <input> wrapper
     r"</?(input|system|instructions?|user_context|prompt)>",
-    # Spanish variants
-    r"ignora (las|tus|todas las|las anteriores|tus anteriores) instrucciones",
-    r"olvida (las instrucciones|todo|el contexto|lo anterior|tus instrucciones)",
-    r"ahora (eres|actúa como|actua como|sos)",
+    # Spanish variants — tuteo y voseo/tildes (#44B): "ignorá"/"olvidá"/"actuá"
+    # son las formas con voseo y tilde de "ignora"/"olvida"/"actúa", el registro
+    # habitual de este usuario. El contexto completo (palabra siguiente +
+    # "instrucciones"/"como + artículo") es lo que evita falsos positivos con
+    # "ignorante", "olvidadizo" y "actualizar", que comparten la raíz pero no
+    # la frase.
+    r"ignor[aá] (las|tus|todas las|las anteriores|tus anteriores) instrucciones",
+    r"olvid[aá] (las instrucciones|todo|el contexto|lo anterior|tus instrucciones)",
+    r"ahora (eres|actúa como|actua como|actuá como|sos)",
     r"actúa como (un|una|el|la)",
     r"actua como (un|una|el|la)",
+    r"actuá como (un|una|el|la)",
     r"nuevas instrucciones\s*:",
     r"a partir de ahora",
     r"eres (un|una|ahora)",
@@ -460,16 +466,30 @@ def _validate_capture_payload(payload: dict) -> None:
             raise LLMResponseError(f"Invalid priority: {priority!r}")
         fm["priority"] = norm_priority
 
-    # Normalize tags to kebab-case; remove type-duplicating and temporal tags
+    # Normalize tags to kebab-case; remove type-duplicating and temporal tags.
+    # El dedup corre DESPUÉS de normalizar a kebab (#44A): "Machine Learning" y
+    # "machine-learning" normalizan al mismo tag y deben colapsar a uno. Se
+    # preserva el orden de primera aparición (un `set()` lo barajaría) y un
+    # `None` suelto en la lista se descarta antes de stringificar — si no,
+    # `_to_kebab(str(None))` produce el tag literal "none".
     tags = fm.get("tags")
     if isinstance(tags, str):
         # Groq (sin schema) devuelve a veces "python, ml" como string suelto.
         tags = tags.split(",")
     if isinstance(tags, list):
-        fm["tags"] = [
-            t for t in (_to_kebab(str(tag)) for tag in tags)
-            if t and t not in _TYPE_TAGS and t not in _TEMPORAL_TAGS
-        ]
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for tag in tags:
+            if tag is None:
+                continue
+            kebab = _to_kebab(str(tag))
+            if not kebab or kebab in _TYPE_TAGS or kebab in _TEMPORAL_TAGS:
+                continue
+            if kebab in seen:
+                continue
+            seen.add(kebab)
+            deduped.append(kebab)
+        fm["tags"] = deduped
     else:
         fm["tags"] = []
 
