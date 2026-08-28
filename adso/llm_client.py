@@ -78,6 +78,16 @@ MAX_RETRIES = 3
 RETRY_DELAYS = [1, 2]  # seconds — backoff for generic errors
 MAX_RPM_WAIT = 70          # seconds — max wait for RPM rate limit errors
 
+# Timeout por llamada de clasificación, en MILISEGUNDOS (`HttpOptions.timeout`).
+# Medido en producción: `classify` tiene piso de 1,5 s y p50 ~2,2 s, y ningún
+# input legítimo pasa de ~3 s — pero ~20% de las llamadas hacen un stall del
+# lado del servidor y devuelven 200 OK a los 5-35 s. Sin timeout el bot se come
+# el stall entero; con timeout aborta y el loop de reintentos que ya existe
+# suele resolver más rápido de lo que hubiera tardado el stall.
+# Va acá y NO en el cliente (`_get_genai_client`), que es compartido con Vision:
+# rasterizar un PDF escaneado tarda legítimamente mucho más que esto.
+CLASSIFY_TIMEOUT_MS = 8_000
+
 # Una respuesta malformada casi nunca se arregla reintentando el mismo prompt
 # contra el mismo modelo: se acota el presupuesto y se le da un tiro a Groq,
 # que no gasta quota de Gemini (#43 B).
@@ -751,6 +761,7 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
             system_instruction=system_prompt,
             response_mime_type="application/json",
             response_schema=_GEMINI_RESPONSE_SCHEMA,
+            http_options=types.HttpOptions(timeout=CLASSIFY_TIMEOUT_MS),
         ),
     )
 

@@ -272,7 +272,7 @@ async def _classify_and_preview(
     async def on_retry(attempt: int, max_attempts: int) -> None:
         if update.callback_query:
             await update.callback_query.edit_message_text(
-                f"Servicio caído, reintento {attempt}/{max_attempts}..."
+                f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}..."
             )
 
     with sw.stage("classify"):
@@ -1469,7 +1469,7 @@ async def _classify_and_preview_arxiv(
             if update.callback_query
             else update.message.reply_text
         )
-        await reply_fn(f"Servicio caído, reintento {attempt}/{max_attempts}...")
+        await reply_fn(f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}...")
 
     result = await classify(
         content=content,
