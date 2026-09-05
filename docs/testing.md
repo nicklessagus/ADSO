@@ -85,6 +85,7 @@ tests/
 │   ├── test_lote1_captura_medios.py   # lote 1: captura y medios (#39, #40, #41, #42, #50)
 │   ├── test_lote2_vault_watcher.py    # lote 2: vault y watcher — durabilidad y wikilinks rotos (#36, #37, #38, #57)
 │   ├── test_lote3_llm_config.py       # lote 3: capa LLM y config — retries, sanitización, validación estricta (#43, #44, #45)
+│   ├── test_lote4.py                  # lote 4: authors como lista (#63), salida exacta (#49), push del cron a Tasks (#48), guards uniformes (#47), timeout de síntesis (#46), límites por tipo (#2), rate limit (#1), raíz del vault (#60), cobertura (#51)
 │   ├── test_classify_timeout.py       # timeout por-llamada de `classify()` contra Gemini (stalls server-side)
 │   ├── test_watchdog.py               # watchdog de proceso: reinicia el bot si el event loop deja de progresar
 │   ├── test_issue58_vault_hygiene.py  # issue #58: tags de índice en kebab-case, `03-Resources/` fuera de los scans
@@ -729,5 +730,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1112 tests: 925 unit, 44 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1254 tests: 1067 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

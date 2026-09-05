@@ -54,7 +54,16 @@ whisper:
 
 # ─── Documentos ─────────────────────────────────────────────────────────────
 documents:
-  max_size_mb: 20                  # tamaño máximo de archivos aceptados (PDF, imagen, audio)
+  max_size_mb: 20                  # tope de los documentos que no son PDF (.txt, .md, …)
+  pdf_max_mb: 15                   # tope de los PDF
+  image_max_mb: 8                  # tope de las imágenes (se rasterizan y van a Vision)
+  audio_max_mb: 20                 # tope del audio (se transcribe con whisper en la RPi4)
+
+# ─── Rate limit de updates ──────────────────────────────────────────────────
+rate_limit:
+  enabled: true                    # false para aceptar todo sin límite
+  burst: 10                        # updates seguidos que se aceptan de golpe
+  refill_seconds: 2.0              # segundos que tarda en reponerse cada token
 
 # ─── Re-indexado nocturno ──────────────────────────────────────────────────
 reindex:

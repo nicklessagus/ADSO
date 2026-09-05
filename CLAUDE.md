@@ -180,7 +180,7 @@ Los tipos `project-index` y `area-index` se generan automáticamente al crear pr
 ### Regla de confirmación
 Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bot muestra un preview del frontmatter y los links sugeridos, y el usuario confirma con inline keyboard.
 
-- **Notas y tareas** (`reference`, `idea`, `task`): primera fila `[Cancelar]` `[Corregir]` `[Reubicar]`, segunda fila `[Confirmar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados. La corrección puede ajustar título, prioridad, tags y tipo; para tareas también fecha límite en lenguaje natural.
+- **Notas y tareas** (`reference`, `idea`, `task`): primera fila `[Cancelar]` `[Corregir]` `[Reubicar]`, segunda fila `[Confirmar]`. El texto libre está bloqueado hasta que el usuario apriete `[Corregir]` (activa modo corrección con lock). Durante el lock solo se acepta texto plano — audio, archivos y `/comandos` quedan bloqueados (todos salvo `/reset`, via el decorador `command_guard`). La corrección puede ajustar título, prioridad, tags y tipo; para tareas también fecha límite en lenguaje natural.
 
 **Prefijos válidos en modo corrección** (`_handle_text_correction` en `capture.py`):
 - `titulo <texto>` / `título <texto>` — reemplaza el título
@@ -191,6 +191,8 @@ Ninguna nota se escribe al vault sin confirmación explícita del usuario. El bo
 - Sin prefijo y texto largo o multi-línea → se rechaza con mensaje de ayuda (`error_msg_id` guardado en `pending`); el lock se mantiene activo para que el usuario reintente. Cuando la siguiente corrección es válida, ese mensaje de error se borra junto con el mensaje del usuario, quedando solo el preview actualizado.
 
 **Failsafe:** `/reset` cancela cualquier operación pendiente y limpia todo el estado (`pending_note`, `pending_capture_ctx`, `block_msg_ids`, etc.). Funciona en cualquier momento, sin confirmación. Implementado en `handle_reset` (`commands.py`).
+
+**Guards de comando uniformes (`command_guard` en `bot_utils.py`, #47):** cada comando repetía —o se olvidaba— sus propios chequeos de estado pendiente. Ahora los aplica un solo decorador, por dentro de `@authorized` (que queda como el más externo, así que un usuario no autorizado se sigue descartando en silencio antes de cualquier respuesta). La regla: el **lock de corrección** bloquea todos los comandos salvo `/reset`; el **teclado pendiente** bloquea además los que arrancan flujo propio — `command_guard(starts_flow=True)` en `/clasificar`, `/buscar`, `/reporte` y `/reporte_full`, `starts_flow=False` en `/status`, `/help` y `/start`. `/reset` no se decora nunca. El aviso de teclado pendiente pasa por `reply_blocked` (deja los dos ids en `block_msg_ids` para borrarlos al resolver el teclado), y si el comando llega como callback (`/clasificar` desde el botón `[Clasificar inbox]`, donde `update.message` es None) el decorador contesta primero el `callback_query.answer()` y responde sobre el mensaje del botón.
 
 `[Reubicar]` cambia únicamente el destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`) en ambos tipos.
 
@@ -363,7 +365,7 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 
 - Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
 - Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`; actual 86%).
-- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (1112 tests) — ningún test toca la red.
+- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (1254 tests) — ningún test toca la red.
 - `adso/handlers/*` **está en la medición de cobertura**. No volver a ponerlo en el `omit` de `pyproject.toml`: los e2e sí lo ejercitan, y omitirlo hacía que un test nuevo sobre un handler no moviera el gate (I3 en `docs/audit-2026-07-31.md`).
 
 ### Test-first — obligatorio

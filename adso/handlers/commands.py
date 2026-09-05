@@ -15,10 +15,8 @@ from adso.bot_utils import (
     _cleanup_pending,
     _get_existing_items,
     _get_existing_tags,
-    _has_pending_keyboard,
-    _is_awaiting_text_input,
+    command_guard,
     has_destination,
-    reply_blocked,
 )
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
@@ -53,6 +51,7 @@ _HELP_TEXT = """\
 
 
 @authorized
+@command_guard(starts_flow=False)
 async def handle_help(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -62,6 +61,7 @@ async def handle_help(
 
 
 @authorized
+@command_guard(starts_flow=False)
 async def handle_start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -138,14 +138,12 @@ def _gather_vault_counts(vault_path: Path) -> tuple[int, int, int, int]:
 
 
 @authorized
+@command_guard(starts_flow=False)
 async def handle_status(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Handler de /status — muestra estado del sistema."""
-    if _is_awaiting_text_input(context):
-        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
-        return
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
@@ -154,8 +152,13 @@ async def handle_status(
     )
     total_pending = pending_auto + pending_manual
 
+    # `activo` exige que ChromaDB ya se haya abierto, no solo que el cliente
+    # exista: el cliente se construye en el arranque e inicializa lazy, así que
+    # un directorio de Chroma roto se reportaba igual que uno sano (#49).
     embeddings = context.bot_data.get("embeddings")
-    embeddings_status = "activo" if embeddings else "no iniciado"
+    embeddings_status = (
+        "activo" if embeddings is not None and embeddings.is_initialized else "no iniciado"
+    )
 
     git_backup: Optional[GitBackup] = context.bot_data.get("git_backup")
     backup_status = "activo" if git_backup else "no configurado"
@@ -187,7 +190,16 @@ async def handle_status(
         lines.append("")
         lines.append(f"⚠️ <b>Inbox pendiente:</b> {total_pending}")
         if pending_auto:
-            lines.append(f"  · Con destino asignado: {pending_auto} (el bot las procesa automáticamente)")
+            # Con `llm.degraded_retry_minutes: 0` el cron de reclasificación no
+            # se programa (`bot.py`), así que "el bot las procesa
+            # automáticamente" era falso justo cuando el usuario necesitaba
+            # saber que tenía que clasificarlas a mano (#49).
+            detalle = (
+                "el bot las procesa automáticamente"
+                if settings.llm.degraded_retry_minutes > 0
+                else "el cron de reclasificación está deshabilitado"
+            )
+            lines.append(f"  · Con destino asignado: {pending_auto} ({detalle})")
         if pending_manual:
             lines.append(f"  · Sin destino: {pending_manual}")
             markup = InlineKeyboardMarkup([
@@ -198,13 +210,15 @@ async def handle_status(
 
 
 @authorized
+@command_guard(starts_flow=True)
 async def handle_clasificar(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Handler de /clasificar — procesa notas de Inbox sin destino asignado (Caso B).
 
-    Guard: bloquea si hay corrección de texto pendiente.
+    Los guards de lock de corrección y de teclado pendiente los aplica
+    `@command_guard(starts_flow=True)`, igual que en el resto de los comandos.
 
     Toma la primera nota pendiente sin project/area, llama al LLM y muestra el
     preview para confirmación del usuario (mismo flujo que captura normal).
@@ -213,24 +227,14 @@ async def handle_clasificar(
     settings: Settings = context.bot_data["settings"]
     vault_path = settings.vault_path
 
-    # `reply` se resuelve ANTES de los dos guards: invocado via
-    # CB_CLASIFICAR_INBOX, `update.message` es None y ambos guards lo usaban
-    # directamente → AttributeError → error handler global con mensaje
-    # genérico, justo al apretar un botón del propio bot. E7 de
-    # docs/audit-2026-07-31.md.
+    # Invocado via CB_CLASIFICAR_INBOX (botón [Clasificar inbox] de /status),
+    # `update.message` es None: hay que acusar recibo del botón y contestar
+    # sobre su mensaje. E7 de docs/audit-2026-07-31.md.
     if update.callback_query:
         await update.callback_query.answer()
         reply = update.callback_query.message.reply_text
     else:
         reply = update.message.reply_text
-
-    if _is_awaiting_text_input(context):
-        await reply("Hay una corrección pendiente. Escribir el texto primero.")
-        return
-
-    if _has_pending_keyboard(context):
-        await reply_blocked(context, reply, update.effective_message)
-        return
 
     inbox_notes = await find_by_property(
         "status", "pending-classification", vault_path,

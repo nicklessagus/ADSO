@@ -158,10 +158,13 @@ class TestNonStringFrontmatter:
     @pytest.mark.asyncio
     async def test_search_survives_hand_edited_note(self, tmp_path: Path) -> None:
         # `title: 2024` (int) y `project:` vacío (None) rompían toda la búsqueda.
-        (tmp_path / "rota.md").write_text(
+        # Las notas van dentro de una carpeta PARA: un `.md` en la raíz del vault
+        # no es una nota (#60) y el scan lo saltea.
+        (tmp_path / "00-Inbox").mkdir()
+        (tmp_path / "00-Inbox" / "rota.md").write_text(
             "---\ntitle: 2024\ntype: reference\nstatus:\nproject:\narea:\n---\ncontenido\n"
         )
-        (tmp_path / "ok.md").write_text(
+        (tmp_path / "00-Inbox" / "ok.md").write_text(
             "---\ntitle: Buena\ntype: reference\nstatus: active\n---\ncontenido buscado\n"
         )
         results = await search("type:reference contenido", tmp_path)
@@ -182,11 +185,13 @@ class TestScopeReportDates:
 
     @pytest.mark.asyncio
     async def test_mixed_aware_and_naive_dates(self, tmp_path: Path) -> None:
-        (tmp_path / "aware.md").write_text(
+        # Dentro de una carpeta PARA: la raíz del vault no se escanea (#60).
+        (tmp_path / "00-Inbox").mkdir()
+        (tmp_path / "00-Inbox" / "aware.md").write_text(
             "---\ntitle: Aware\ntype: reference\nstatus: active\n"
             "date_modified: '2026-01-02T10:00:00+0000'\n---\ncuerpo\n"
         )
-        (tmp_path / "naive.md").write_text(
+        (tmp_path / "00-Inbox" / "naive.md").write_text(
             "---\ntitle: Naive\ntype: reference\nstatus: active\n"
             "date_modified: '2026-01-03T10:00:00'\n---\ncuerpo\n"
         )

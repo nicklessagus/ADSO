@@ -6,6 +6,7 @@ confirmación/cancelación/destino, y los helpers del flujo de captura.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -895,6 +896,60 @@ async def _push_task_safe(
         await notify_fn(f"[debug] Google Tasks: tarea '{title}' sincronizada (id={task_id})")
 
 
+def push_task_to_google(
+    context: ContextTypes.DEFAULT_TYPE,
+    fm: dict,
+    note_path: Path,
+    vault_path: Path,
+    body: str,
+) -> Optional[asyncio.Task]:
+    """Spawns the Google Tasks push for a note, if the note is a task at all.
+
+    The push lived inlined in `_cb_confirm`, so the cron that reclassifies the
+    Inbox wrote the task to the vault and never to Google Tasks: the same note
+    ended up in the task list or not depending on whether the user confirmed it
+    by hand or the LLM was down when it arrived (#48).
+
+    Args:
+        context: Bot context (`bot_data` carries the `tasks_client` and the
+            settings; `bot` sends the failure notice).
+        fm: Frontmatter of the note that was just written.
+        note_path: Path of the note in the vault.
+        vault_path: Vault root.
+        body: Body written to the note — becomes the task description.
+
+    Returns:
+        The spawned background task, or None when there is nothing to push
+        (the note is not a task, or no Tasks client is configured). Errors are
+        swallowed by `_push_task_safe`: a failed push notifies the user and
+        never propagates.
+    """
+    if fm.get("type") != "task":
+        return None
+    tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
+    if not tasks_client:
+        return None
+
+    settings: Settings = context.bot_data["settings"]
+    user_id = settings.telegram_allowed_user_id
+
+    async def _notify_tasks(msg: str) -> None:
+        await context.bot.send_message(chat_id=user_id, text=msg)
+
+    return spawn_tracked(
+        _push_task_safe(
+            tasks_client,
+            fm,
+            note_path,
+            vault_path,
+            body=body,
+            notify_fn=_notify_tasks,
+            debug=settings.tasks.debug,
+        ),
+        name="push_task",
+    )
+
+
 async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path: Path) -> None:
     """Confirma y escribe la nota al vault.
 
@@ -1002,27 +1057,7 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     if resource_temp is not None:
         resource_temp.unlink(missing_ok=True)
 
-    if fm.get("type") == "task":
-        tasks_client: Optional[TasksClient] = context.bot_data.get("tasks_client")
-        if tasks_client:
-            _settings: Settings = context.bot_data["settings"]
-            _user_id = _settings.telegram_allowed_user_id
-
-            async def _notify_tasks(msg: str) -> None:
-                await context.bot.send_message(chat_id=_user_id, text=msg)
-
-            spawn_tracked(
-                _push_task_safe(
-                    tasks_client,
-                    fm,
-                    path,
-                    vault_path,
-                    body=original_body,
-                    notify_fn=_notify_tasks,
-                    debug=_settings.tasks.debug,
-                ),
-                name="push_task",
-            )
+    push_task_to_google(context, fm, path, vault_path, original_body)
 
     # `mark_bot_written` va FUERA del `if git_backup`: es el registro
     # anti-doble-embed, no tiene nada que ver con el backup. Adentro, con

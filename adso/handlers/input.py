@@ -70,9 +70,35 @@ def _snippet(text: str, limit: int = 500) -> str:
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def _too_large_msg(settings: Settings, label: str) -> str:
-    """Aviso de archivo que excede ``documents.max_size_mb``."""
-    return f"{label} demasiado grande (máx {settings.documents.max_size_mb}MB)."
+# Etiqueta que ve el usuario por cada tipo de medio con límite propio.
+_SIZE_LABELS = {
+    "pdf": "PDF",
+    "image": "Imagen",
+    "audio": "Audio",
+    "document": "Archivo",
+}
+
+
+def _size_limit_bytes(settings: Settings, kind: str) -> int:
+    """Límite en bytes para un tipo de medio (``documents.limit_mb``)."""
+    return settings.documents.limit_mb(kind) * 1024 * 1024
+
+
+def _too_large_msg(settings: Settings, kind: str) -> str:
+    """Aviso de archivo que excede el límite de su tipo.
+
+    El mensaje nombra el tope que se aplicó: con un solo `max_size_mb` para
+    todo decía "máx 20MB" incluso cuando el archivo se rechazaba por otro
+    motivo, y ahora cada medio tiene el suyo (#2).
+
+    Args:
+        settings: Settings cargados.
+        kind: ``"pdf"``, ``"image"``, ``"audio"`` o ``"document"``.
+    """
+    return (
+        f"{_SIZE_LABELS.get(kind, 'Archivo')} demasiado grande "
+        f"(máx {settings.documents.limit_mb(kind)}MB)."
+    )
 
 
 async def _download_to_tmp(tg_media: Any, suffix: Optional[str]) -> Path:
@@ -388,9 +414,9 @@ async def handle_audio(
         await msg.reply_text("No se pudo procesar el audio.")
         return
 
-    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    max_bytes = _size_limit_bytes(settings, "audio")
     if audio_file.file_size and audio_file.file_size > max_bytes:
-        await msg.reply_text(_too_large_msg(settings, "Audio"))
+        await msg.reply_text(_too_large_msg(settings, "audio"))
         return
 
     await msg.reply_text("Transcribiendo audio...")
@@ -400,7 +426,7 @@ async def handle_audio(
         tmp_path = await _download_to_tmp(audio_file, ".ogg" if msg.voice else None)
 
         if await _exceeds_size_after_download(tmp_path, audio_file.file_size, max_bytes):
-            await msg.reply_text(_too_large_msg(settings, "Audio"))
+            await msg.reply_text(_too_large_msg(settings, "audio"))
             return
 
         text = await transcribe_audio(
@@ -666,9 +692,13 @@ async def handle_document(
 
     filename = doc.file_name or "documento"
 
-    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    # El tope depende del tipo: un PDF y un .txt del mismo tamaño no cuestan lo
+    # mismo. El MIME es el respaldo del nombre — un PDF reenviado llega sin
+    # `file_name` (#40) y con el tope genérico se colaba (#2).
+    kind = "pdf" if is_pdf(filename) or _mime_fallback(filename, doc.mime_type) == "pdf" else "document"
+    max_bytes = _size_limit_bytes(settings, kind)
     if doc.file_size and doc.file_size > max_bytes:
-        await msg.reply_text(_too_large_msg(settings, "Archivo"))
+        await msg.reply_text(_too_large_msg(settings, kind))
         return
 
     tmp_path: Optional[Path] = None
@@ -677,7 +707,7 @@ async def handle_document(
         tmp_path = await _download_to_tmp(doc, Path(filename).suffix or "")
 
         if await _exceeds_size_after_download(tmp_path, doc.file_size, max_bytes):
-            await msg.reply_text(_too_large_msg(settings, "Archivo"))
+            await msg.reply_text(_too_large_msg(settings, kind))
             return
 
         caption = msg.caption or None
@@ -739,15 +769,15 @@ async def handle_photo(
         await msg.reply_text("No se pudo procesar la imagen.")
         return
 
-    max_bytes = settings.documents.max_size_mb * 1024 * 1024
+    max_bytes = _size_limit_bytes(settings, "image")
     if photo.file_size and photo.file_size > max_bytes:
-        await msg.reply_text(_too_large_msg(settings, "Imagen"))
+        await msg.reply_text(_too_large_msg(settings, "image"))
         return
 
     tmp_path = await _download_to_tmp(photo, ".jpg")
 
     if await _exceeds_size_after_download(tmp_path, photo.file_size, max_bytes):
-        await msg.reply_text(_too_large_msg(settings, "Imagen"))
+        await msg.reply_text(_too_large_msg(settings, "image"))
         return
 
     context.user_data["pending_fallback_pdf"] = {
@@ -817,7 +847,7 @@ async def _process_pdf_after_read_status(
         is_paper = detect_paper(text)
 
         paper_title: Optional[str] = None
-        paper_authors: Optional[str] = None
+        paper_authors: Optional[list[str]] = None
         paper_doi: Optional[str] = None
         if is_paper:
             sections = extract_paper_sections(text, pdf_meta)

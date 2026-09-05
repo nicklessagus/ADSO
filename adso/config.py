@@ -105,7 +105,49 @@ class BackupConfig:
 
 @dataclass
 class DocumentsConfig:
+    """Límites de tamaño de los archivos que el bot acepta.
+
+    Un solo tope para todo trataba igual a un paper de 14 MB y a una captura de
+    pantalla de 14 MB, cuando lo que cuestan es muy distinto: la imagen se
+    rasteriza y se manda a Vision, el audio se transcribe con whisper en la
+    RPi4 (#2). `max_size_mb` sigue siendo el tope de los documentos que no son
+    PDF.
+    """
+
     max_size_mb: int = 20
+    pdf_max_mb: int = 15
+    image_max_mb: int = 8
+    audio_max_mb: int = 20
+
+    def limit_mb(self, kind: str) -> int:
+        """Tope en MB para un tipo de medio.
+
+        Args:
+            kind: ``"pdf"``, ``"image"``, ``"audio"`` o ``"document"``.
+
+        Returns:
+            El límite del tipo pedido; `max_size_mb` para cualquier otro valor
+            (un `kind` desconocido no puede dejar pasar un archivo sin tope).
+        """
+        return {
+            "pdf": self.pdf_max_mb,
+            "image": self.image_max_mb,
+            "audio": self.audio_max_mb,
+        }.get(kind, self.max_size_mb)
+
+
+@dataclass
+class RateLimitConfig:
+    """Rate limit por token bucket sobre los updates entrantes (#1).
+
+    El bot es de un solo usuario, así que esto no protege contra terceros: lo
+    que acota es una ráfaga accidental (reenviar 40 mensajes de una) que
+    dispararía 40 clasificaciones contra un free tier de 15 RPM.
+    """
+
+    enabled: bool = True
+    burst: int = 10
+    refill_seconds: float = 2.0
 
 
 @dataclass
@@ -168,6 +210,7 @@ class Settings:
     sync: SyncConfig = field(default_factory=SyncConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     documents: DocumentsConfig = field(default_factory=DocumentsConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     weekly_report: WeeklyReportConfig = field(default_factory=WeeklyReportConfig)
 
@@ -370,7 +413,9 @@ def _build_weekly_report(
 
 def _validate_types(settings: Settings) -> None:
     """Valida tipos básicos de la configuración."""
-    checks: list[tuple[str, Any, type]] = [
+    # El tercer elemento puede ser un tipo o una tupla de tipos (lo que acepta
+    # `isinstance`): declararlo solo como `type` era una anotación incorrecta.
+    checks: list[tuple[str, Any, type | tuple[type, ...]]] = [
         ("rag.similarity_threshold", settings.rag.similarity_threshold, (int, float)),
         ("rag.max_results", settings.rag.max_results, int),
         ("links.similarity_threshold", settings.links.similarity_threshold, (int, float)),
@@ -380,6 +425,12 @@ def _validate_types(settings: Settings) -> None:
         ("llm.disambiguation_threshold", settings.llm.disambiguation_threshold, (int, float)),
         ("llm.degraded_retry_minutes", settings.llm.degraded_retry_minutes, int),
         ("documents.max_size_mb", settings.documents.max_size_mb, int),
+        ("documents.pdf_max_mb", settings.documents.pdf_max_mb, int),
+        ("documents.image_max_mb", settings.documents.image_max_mb, int),
+        ("documents.audio_max_mb", settings.documents.audio_max_mb, int),
+        ("rate_limit.enabled", settings.rate_limit.enabled, bool),
+        ("rate_limit.burst", settings.rate_limit.burst, int),
+        ("rate_limit.refill_seconds", settings.rate_limit.refill_seconds, (int, float)),
     ]
     for name, value, expected in checks:
         if not isinstance(value, expected):
@@ -400,6 +451,13 @@ def _validate_types(settings: Settings) -> None:
             f"vault.exclude_dirs: se esperaba una lista de strings, "
             f"se obtuvo {exclude_dirs!r}"
         )
+
+    # Un bucket de capacidad 0 descarta TODO update y deja el bot mudo sin
+    # decir por qué; un refill <= 0 no repone nunca (o repone infinito).
+    if settings.rate_limit.burst < 1:
+        raise ConfigError("rate_limit.burst debe ser >= 1")
+    if settings.rate_limit.refill_seconds <= 0:
+        raise ConfigError("rate_limit.refill_seconds debe ser > 0")
 
     # Validar rangos
     if not 0.0 <= settings.rag.similarity_threshold <= 1.0:
@@ -510,6 +568,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         backup=_build_section(BackupConfig, raw.get("backup"), "backup", unknown),
         documents=_build_section(
             DocumentsConfig, raw.get("documents"), "documents", unknown
+        ),
+        rate_limit=_build_section(
+            RateLimitConfig, raw.get("rate_limit"), "rate_limit", unknown
         ),
         llm=_build_section(LlmConfig, raw.get("llm"), "llm", unknown),
         weekly_report=_build_weekly_report(raw.get("weekly_report"), unknown),

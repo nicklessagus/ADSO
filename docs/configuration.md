@@ -83,7 +83,16 @@ backup:
 
 # ─── Documentos adjuntos ──────────────────────────────────────────────────
 documents:
-  max_size_mb: 20             # archivos más grandes se rechazan con mensaje al usuario
+  max_size_mb: 20             # tope de los documentos que no son PDF (.txt, .md, …)
+  pdf_max_mb: 15              # tope de los PDF
+  image_max_mb: 8             # tope de las imágenes
+  audio_max_mb: 20            # tope del audio
+
+# ─── Rate limit de updates ────────────────────────────────────────────────
+rate_limit:
+  enabled: true               # false acepta todo sin límite
+  burst: 10                   # updates seguidos que se aceptan de golpe
+  refill_seconds: 2.0         # segundos que tarda en reponerse cada token (> 0)
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
@@ -117,6 +126,48 @@ watcher:
                               # útil para verificar que el watcher funciona durante testing
                               # en producción dejar en false (los cambios se reindexan silenciosamente)
 ```
+
+---
+
+## Límites de tamaño por tipo de medio
+
+Un solo `max_size_mb` trataba igual a un paper de 14 MB y a una captura de
+pantalla de 14 MB, cuando lo que cuestan es muy distinto: la imagen se rasteriza
+y viaja a Gemini Vision, el audio se transcribe con whisper en la RPi4 (#2).
+Cada tipo tiene su tope:
+
+| Clave | Default | Se aplica a |
+|---|---|---|
+| `documents.pdf_max_mb` | 15 | PDFs (por extensión o por MIME `application/pdf`) |
+| `documents.image_max_mb` | 8 | Fotos |
+| `documents.audio_max_mb` | 20 | Notas de voz y audios |
+| `documents.max_size_mb` | 20 | Cualquier otro documento (`.txt`, `.md`, …) |
+
+Los cuatro se validan como enteros al arrancar. El límite se chequea dos veces:
+antes de descargar, contra el `file_size` que informa Telegram, y —cuando
+Telegram no lo informa— sobre el temporal ya descargado, que se borra si se
+pasa. El mensaje de rechazo nombra el tipo y su tope: `PDF demasiado grande
+(máx 15MB).`
+
+## Rate limit de updates
+
+`rate_limit` acota las ráfagas de updates con un token bucket en el gate global
+de `bot.py`, **después** del chequeo de autorización (#1). No es una defensa
+contra terceros —el bot tiene un solo usuario autorizado y los ajenos se
+descartan en silencio antes de tocar el bucket—: lo que evita es que reenviar
+cuarenta mensajes de golpe dispare cuarenta clasificaciones contra un free tier
+de 15 RPM.
+
+| Clave | Default | Significado |
+|---|---|---|
+| `rate_limit.enabled` | `true` | `false` no crea el bucket: no hay límite |
+| `rate_limit.burst` | 10 | Updates seguidos que se aceptan de golpe (entero ≥ 1) |
+| `rate_limit.refill_seconds` | 2.0 | Segundos que tarda en reponerse un token (> 0) |
+
+El bucket arranca lleno y se repone de forma continua. Cuando se agota, el bot
+avisa **una sola vez por ráfaga** (`Demasiados mensajes, esperar unos
+segundos.`; en un callback, como alerta) y descarta los updates siguientes en
+silencio hasta que vuelva a haber tokens.
 
 ---
 

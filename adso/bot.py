@@ -38,7 +38,7 @@ from adso.handlers.query import handle_buscar
 from adso.handlers.capture import _index_note_safe
 from adso.handlers.jobs import heartbeat_job, reindex_job, reclassify_inbox
 from adso.watchdog import consume_trip_marker, start_watchdog
-from adso.security import is_authorized
+from adso.security import TokenBucket, is_authorized
 from adso.vault_watcher import VaultWatcher
 from adso.vault_writer import backup_label, GitBackup, ensure_vault_structure, remove_broken_wikilinks, seed_vault
 
@@ -242,17 +242,40 @@ async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TY
         _bot_logger.debug("No se pudo notificar el error al usuario.")
 
 
+_RATE_LIMIT_MSG = "Demasiados mensajes, esperar unos segundos."
+
+
 async def _global_auth_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Descarta updates de usuarios no autorizados antes de cualquier handler.
+    """Descarta updates no autorizados, y los que exceden el rate limit.
 
     Registrado en group=-1: si el usuario no está en la allow-list, corta el
     procesamiento (ApplicationHandlerStop) y el update nunca llega a los handlers
     reales del group 0. Defensa en profundidad: hace que el decorador `authorized`
     por handler sea cinturón-y-tiradores en vez del único control — un handler
     nuevo sin decorar ya no es un bypass.
+
+    El rate limit va DESPUÉS de la autorización, y en ese orden importa: un
+    tercero no puede gastar los tokens del usuario ni enterarse de que el bot
+    existe (el descarte silencioso no manda nada). El aviso al usuario legítimo
+    se manda una sola vez por ráfaga y su fallo no impide el descarte.
     """
     if not is_authorized(update):
         raise ApplicationHandlerStop
+
+    bucket: Optional[TokenBucket] = context.bot_data.get("rate_limiter")
+    if bucket is None or bucket.try_acquire():
+        return
+
+    if not bucket.notified:
+        bucket.notified = True
+        try:
+            if update.callback_query is not None:
+                await update.callback_query.answer(_RATE_LIMIT_MSG, show_alert=True)
+            elif update.effective_message is not None:
+                await update.effective_message.reply_text(_RATE_LIMIT_MSG)
+        except Exception as exc:  # noqa: BLE001 — el descarte no depende del aviso
+            _bot_logger.debug("No se pudo avisar del rate limit: %s", exc)
+    raise ApplicationHandlerStop
 
 
 def create_application(settings: Optional[Settings] = None) -> Application:
@@ -293,6 +316,10 @@ def create_application(settings: Optional[Settings] = None) -> Application:
         gemini_api_key=settings.gemini_api_key,
     )
     app.bot_data["tasks_client"] = TasksClient(settings.google_calendar_creds)
+    if settings.rate_limit.enabled:
+        app.bot_data["rate_limiter"] = TokenBucket(
+            settings.rate_limit.burst, settings.rate_limit.refill_seconds
+        )
 
     # Gate de auth global (defensa en profundidad): corre antes que todo y
     # descarta updates no autorizados. Los handlers siguen decorados con

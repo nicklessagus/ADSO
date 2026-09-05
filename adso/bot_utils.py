@@ -6,12 +6,13 @@ Funciones puras y getters async sin lógica de negocio de Telegram.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterator, Optional
+from typing import Any, Awaitable, Callable, Coroutine, Iterator, Optional
 
 from telegram.ext import ContextTypes
 
@@ -295,6 +296,74 @@ async def reply_blocked(
         ids.append(message.message_id)
     sent = await reply("Hay una acción pendiente. Resolver los botones antes de continuar.")
     ids.append(sent.message_id)
+
+
+# Aviso único del lock de corrección. Vivía copiado en cada comando y ese es
+# justamente el motivo de que los guards no fueran uniformes (#47).
+LOCK_REPLY = "Hay una corrección pendiente. Escribir el texto primero."
+
+# Un handler de PTB ya decorado con `@authorized`: la firma que espera
+# `security.authorized`, para que el orden de los decoradores type-checkee.
+Handler = Callable[..., Coroutine[Any, Any, Any]]
+
+
+def command_guard(*, starts_flow: bool) -> Callable[[Handler], Handler]:
+    """Applies the pending-state guards to a command handler, uniformly.
+
+    Every command used to carry its own copy of these checks — or not carry
+    them at all: `/help` and `/start` ran their body in the middle of a
+    correction lock, and `/reporte` opened its menu on top of a keyboard that
+    was still waiting for an answer, leaving two live keyboards on screen
+    (#47). The rule now lives in one place, and a new command opts in by
+    declaring whether it starts a flow.
+
+    Goes **inside** `@authorized` (the auth decorator stays outermost), so an
+    unauthorized update is still dropped in silence before any reply.
+
+    Args:
+        starts_flow: True for commands that open a keyboard of their own
+            (`/clasificar`, `/buscar`, `/reporte`, `/reporte_full`): those are
+            rejected while another keyboard is pending. False for read-only
+            commands (`/status`, `/help`, `/start`), which only respect the
+            correction lock. `/reset` is never guarded — it is the failsafe.
+
+    Returns:
+        The decorator. The wrapped handler is skipped entirely when a guard
+        fires; the user gets the reason instead.
+    """
+
+    def decorator(handler: Handler) -> Handler:
+
+        @functools.wraps(handler)
+        async def wrapper(update: Any, context: ContextTypes.DEFAULT_TYPE, *args: Any, **kwargs: Any) -> Any:
+            locked = _is_awaiting_text_input(context)
+            blocked = starts_flow and _has_pending_keyboard(context)
+            if not locked and not blocked:
+                return await handler(update, context, *args, **kwargs)
+
+            # `/clasificar` también llega como callback (botón [Clasificar
+            # inbox] de /status): ahí `update.message` es None y hay que
+            # acusar recibo del botón antes de contestar, o Telegram deja el
+            # spinner girando. E7 de docs/audit-2026-07-31.md.
+            message = update.message
+            if message is None and update.callback_query is not None:
+                await update.callback_query.answer()
+                message = update.callback_query.message
+            if message is None:
+                message = update.effective_message
+            if message is None:
+                logger.warning("Comando bloqueado sin mensaje al que contestar.")
+                return None
+
+            if locked:
+                await message.reply_text(LOCK_REPLY)
+                return None
+            await reply_blocked(context, message.reply_text, message)
+            return None
+
+        return wrapper
+
+    return decorator
 
 
 def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:

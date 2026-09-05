@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from functools import wraps
 from typing import Any, Callable, Coroutine
 
@@ -102,3 +103,58 @@ def authorized(
         return await handler(update, context, *args, **kwargs)
 
     return wrapper
+
+
+class TokenBucket:
+    """Token bucket for the global update gate.
+
+    The bot has a single authorized user, so this is not a defence against
+    third parties: what it bounds is an accidental burst — forwarding forty
+    messages at once fires forty classifications against a free tier of 15 RPM,
+    and the ones that survive arrive minutes late (#1).
+
+    Starts full, refills continuously (one token every `refill_seconds`) and
+    never holds more than `capacity`.
+
+    Args:
+        capacity: Maximum number of tokens held at once (the burst).
+        refill_seconds: Seconds it takes to put one token back.
+        clock: Monotonic time source. Injectable for tests, same convention as
+            `Stopwatch` and `_parse_date_from_text`.
+    """
+
+    def __init__(
+        self,
+        capacity: int,
+        refill_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._capacity = float(capacity)
+        self._refill_seconds = float(refill_seconds)
+        self._clock = clock
+        self._tokens = float(capacity)
+        self._last = clock()
+        # The gate sets this after telling the user it is dropping updates, so
+        # a sustained burst produces one notice and not one per dropped update.
+        self.notified = False
+
+    def try_acquire(self) -> bool:
+        """Consumes one token if there is any.
+
+        Returns:
+            True when the update may proceed (a token was consumed, and the
+            "already warned" flag is cleared so the next exhaustion notifies
+            again). False when the bucket is empty.
+        """
+        now = self._clock()
+        elapsed = now - self._last
+        self._last = now
+        if elapsed > 0:
+            self._tokens = min(
+                self._capacity, self._tokens + elapsed / self._refill_seconds
+            )
+        if self._tokens < 1.0:
+            return False
+        self._tokens -= 1.0
+        self.notified = False
+        return True

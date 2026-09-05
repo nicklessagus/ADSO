@@ -56,7 +56,8 @@ def _scan_vault(
     Args:
         vault_path: Raíz del vault.
         exclude_dirs: Carpetas a excluir. `03-Resources` se excluye siempre,
-            la pase o no el caller (ver `_ALWAYS_EXCLUDE`).
+            la pase o no el caller (ver `_ALWAYS_EXCLUDE`). Los `.md` sueltos
+            en la raíz del vault tampoco se devuelven nunca.
         scope: Subdirectorio que restringe la búsqueda.
 
     Returns:
@@ -77,6 +78,14 @@ def _scan_vault(
         rel = md_file.relative_to(vault_path)
         parts = rel.parts
         if any(exc in parts for exc in exclude_dirs):
+            continue
+        # Un `.md` en la raíz del vault no es una nota (#60): ahí viven los
+        # dashboards de Obsidian, que declaran `type: area-index` y traen miles
+        # de líneas de Dataview. Sus tags llegaban al prompt de clasificación y
+        # aparecían como notas en los reportes. Va acá dentro y no en
+        # `exclude_dirs` por el mismo motivo que `_ALWAYS_EXCLUDE`: los callers
+        # reales pasan su propia lista.
+        if len(parts) == 1:
             continue
         results.append(md_file)
 

@@ -328,11 +328,13 @@ class TestExtractPaperSections:
         assert "Alguien 2020" not in s["conclusions"]
 
     def test_titulo_y_autores_de_metadata(self) -> None:
+        # `authors` es lista desde #63: el string de metadata se parte por `,` y `;`
+        # (misma regla que `_frontmatter_from_pdf_metadata` y el sanitizador).
         s = extract_paper_sections(
-            self._paper(), {"title": "  Mi Paper  ", "author": " Nieto, L. "}
+            self._paper(), {"title": "  Mi Paper  ", "author": " Nieto L.; Pérez J. "}
         )
         assert s["title"] == "Mi Paper"
-        assert s["authors"] == "Nieto, L."
+        assert s["authors"] == ["Nieto L.", "Pérez J."]
 
     def test_titulo_cae_al_texto_si_metadata_esta_vacia(self) -> None:
         """Caso típico de arXiv: el PDF no trae título en metadata."""

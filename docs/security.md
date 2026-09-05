@@ -100,6 +100,14 @@ La autenticación es de dos capas: el gate global `_global_auth_gate` de `bot.py
 `ApplicationHandlerStop` antes de que llegue a ningún handler) y el decorador
 `@authorized` por handler como segunda barrera. Ambos llaman a `is_authorized()`.
 
+Después de la autorización, el mismo gate aplica un **rate limit** por token
+bucket (`security.TokenBucket`, configurable en `rate_limit` de `config.yaml`,
+#1): acota ráfagas accidentales del usuario legítimo (un reenvío masivo que
+dispararía decenas de clasificaciones contra un free tier de 15 RPM). Va
+después del chequeo de identidad a propósito: un tercero no consume tokens ni
+recibe el aviso — se lo sigue descartando en silencio. Ver
+`docs/configuration.md` § Rate limit de updates.
+
 ### 2. Separación estricta sistema / datos en prompts
 
 El contenido externo nunca se pasa como instrucción. Siempre va delimitado como dato (el bloque de abajo es esquemático: el prompt real lo arma `build_system_prompt` en `llm_client.py` y está **en inglés**, aunque le pida al modelo escribir el body en español):

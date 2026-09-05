@@ -19,10 +19,11 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+from slugify import slugify
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _is_awaiting_text_input
+from adso.bot_utils import _get_existing_items, command_guard
 from adso.config import Settings
 from adso.constants import (
     CB_REPORT_HEALTH,
@@ -89,17 +90,47 @@ _ITEMS_STEP: dict[str, tuple[bool, str, str, str]] = {
 }
 
 
+def report_filename(
+    stem: str, project: Optional[str], area: Optional[str], inbox: bool
+) -> str:
+    """Name of the .md a scoped report is sent as.
+
+    The filename used to carry the raw callback suffix (`scope-p-4f2a1b9c3d-...`),
+    a 10-hex token that means nothing outside the keyboard that produced it: the
+    user ended up with a folder of downloads none of which said which project it
+    was about (#49). The scope resolves the same way `reporters._scope_label`
+    does, so the name matches the header inside the document.
+
+    Args:
+        stem: Report kind (`scope`, `ideas`, `lectura`).
+        project: Resolved project name, or None.
+        area: Resolved area name, or None.
+        inbox: True when the scope is the Inbox (wins over project and area).
+
+    Returns:
+        `"{stem}-{scope}-{today}.md"`, with `scope` slugified (`todo` when the
+        report covers the whole vault).
+    """
+    if inbox:
+        scope = "inbox"
+    elif project:
+        scope = slugify(project) or "todo"
+    elif area:
+        scope = slugify(area) or "todo"
+    else:
+        scope = "todo"
+    return f"{stem}-{scope}-{date.today()}.md"
+
+
 async def _start_report_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE, full: bool
 ) -> None:
     """Muestra el menú de tipos de reporte y bloquea texto mientras esté activo.
 
     `pending_report=True` bloquea texto entrante; `report_full` lo leen los
-    callbacks para pasarlo a los reporters.
+    callbacks para pasarlo a los reporters. Los guards de estado pendiente los
+    aplica `@command_guard(starts_flow=True)` sobre los dos comandos.
     """
-    if _is_awaiting_text_input(context):
-        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
-        return
     context.user_data["pending_report"] = True
     context.user_data["report_full"] = full
     prompt = "¿Qué reporte generar?"
@@ -109,6 +140,7 @@ async def _start_report_menu(
 
 
 @authorized
+@command_guard(starts_flow=True)
 async def handle_reporte_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -118,6 +150,7 @@ async def handle_reporte_command(
 
 
 @authorized
+@command_guard(starts_flow=True)
 async def handle_reporte_full_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -131,7 +164,33 @@ async def handle_report_callback(
     context: ContextTypes.DEFAULT_TYPE,
     data: str,
 ) -> None:
-    """Maneja todos los callbacks rpt:*.
+    """Maneja todos los callbacks rpt:*, garantizando que el menú no se trabe.
+
+    Delega en `_dispatch_report_callback` y, si el dispatch levanta, descarta
+    `pending_report` antes de propagar. Sin eso el flag quedaba puesto para
+    siempre: el error handler global avisaba del fallo, pero todo input
+    posterior chocaba contra el guard de teclado pendiente y la única salida
+    era `/reset` — que el mensaje de error no menciona (#47). La excepción se
+    sigue propagando: quien notifica al usuario es el error handler.
+
+    Args:
+        query: CallbackQuery de Telegram.
+        context: Bot context.
+        data: callback_data recibido.
+    """
+    try:
+        await _dispatch_report_callback(query, context, data)
+    except Exception:
+        context.user_data.pop("pending_report", None)
+        raise
+
+
+async def _dispatch_report_callback(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    data: str,
+) -> None:
+    """Despacha un callback rpt:* al paso que corresponda.
 
     Flujo de dos pasos para scope/ideas/lectura:
     1. Tipo → categoría (Proyectos / Áreas / extra)
@@ -203,7 +262,7 @@ async def handle_report_callback(
         await _send_report(
             query, context,
             report_bytes_coro=reporter(vault_path, **kwargs),
-            filename=f"{stem}-{suffix.replace(':', '-')}-{date.today()}.md",
+            filename=report_filename(stem, project, area, inbox),
         )
         return
 

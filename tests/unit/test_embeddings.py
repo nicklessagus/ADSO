@@ -424,10 +424,11 @@ class TestReindexVault:
         mock_embed.return_value = FAKE_EMBEDDING
 
         vault = tmp_path / "vault"
-        vault.mkdir()
+        # Dentro de una carpeta PARA: un `.md` en la raíz no se indexa (#60).
+        (vault / "00-Inbox").mkdir(parents=True)
         import frontmatter as fm_lib
         post = fm_lib.Post("Contenido estable.", title="Nota", type="reference")
-        (vault / "nota.md").write_text(fm_lib.dumps(post), encoding="utf-8")
+        (vault / "00-Inbox" / "nota.md").write_text(fm_lib.dumps(post), encoding="utf-8")
 
         stats1 = await client.reindex_vault(vault)
         assert stats1["indexed"] == 1
@@ -446,9 +447,9 @@ class TestReindexVault:
         mock_embed.return_value = FAKE_EMBEDDING
 
         vault = tmp_path / "vault"
-        vault.mkdir()
+        (vault / "00-Inbox").mkdir(parents=True)  # la raíz del vault no se indexa (#60)
         import frontmatter as fm_lib
-        note_path = vault / "nota.md"
+        note_path = vault / "00-Inbox" / "nota.md"
 
         post = fm_lib.Post("Contenido original.", title="Nota", type="reference")
         note_path.write_text(fm_lib.dumps(post), encoding="utf-8")

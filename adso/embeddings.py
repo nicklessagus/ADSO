@@ -151,6 +151,13 @@ def should_index(
         return False
     if rel.stem == "_index":
         return False
+    # Un `.md` suelto en la raíz del vault no es una nota: ahí viven los
+    # dashboards de Obsidian (`000-Dashboard.md`, 32 KB de Dataview) que se
+    # declaran `type: area-index`. La taxonomía pone las notas dentro de
+    # `00-Inbox/`, `01-Projects/`, `02-Areas/` y `05-Archive/` (#60). Como
+    # `_index.md`, no es configurable: no es una preferencia, es la taxonomía.
+    if len(rel.parts) == 1:
+        return False
     if ".sync-conflict-" in md_path.name:
         return False
     return True
@@ -188,6 +195,16 @@ class EmbeddingsClient:
         # Limita concurrencia contra Gemini Embedding API; protege contra bursts
         # del watcher (ej: sync masivo de Syncthing → muchos eventos en paralelo).
         self._embed_semaphore = asyncio.Semaphore(max_concurrent_embeds)
+
+    @property
+    def is_initialized(self) -> bool:
+        """True once ChromaDB was opened successfully.
+
+        `/status` used to report `activo` for the mere existence of the client,
+        which is created at startup and initializes lazily: a broken Chroma
+        directory looked healthy in the only place the user can check (#49).
+        """
+        return self._initialized
 
     def _ensure_initialized(self) -> None:
         """Inicializa ChromaDB lazily al primer uso."""

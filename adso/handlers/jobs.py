@@ -23,6 +23,7 @@ from adso.handlers.capture import (
     _index_note_safe,
     _redirect_unimplemented_mode,
     inherit_inbox_frontmatter,
+    push_task_to_google,
 )
 from adso.keyboards import _esc
 from adso.llm_client import classify, extract_original_from_degraded
@@ -177,6 +178,13 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
             # memoria y se perdía. Una colisión de nombre la resuelve _unique_path.
             new_path = await create_note(new_fm, body, vault_path)
             await delete_note(ref.path)
+
+            # Mismo push que hace `_cb_confirm` al confirmar una tarea a mano:
+            # sin esto, una tarea que llegó en modo degradado se reclasificaba
+            # al vault y nunca aparecía en Google Tasks (#48). Va después del
+            # punto de no retorno y no puede abortar la pasada — un push
+            # fallido avisa al usuario y nada más.
+            push_task_to_google(context, new_fm, new_path, vault_path, body)
 
             # Fuera del `if git_backup` — ver F1 en docs/audit-2026-07-31.md.
             mark_bot_written(context.bot_data, new_path)

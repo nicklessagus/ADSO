@@ -242,13 +242,33 @@ def _authors_year(fm: dict) -> str:
     return text
 
 
-async def _llm_synthesis(report_summary: str) -> Optional[str]:
+# Tope de espera de la síntesis LLM de un reporte. La síntesis es opcional: el
+# documento se arma igual sin ella, así que un stall del servidor (~20% de las
+# llamadas, ver CLAUDE.md) no puede dejar al usuario esperando un adjunto que
+# ya está listo (#46).
+SYNTHESIS_TIMEOUT_S: float = 20.0
+
+# Deadline HTTP de la request de síntesis, en milisegundos. Va por debajo del
+# timeout de arriba para que el thread no quede colgado después de que
+# `asyncio.wait_for` abandone, y por encima del piso de 10 s que impone la API.
+SYNTHESIS_HTTP_TIMEOUT_MS = 15_000
+
+
+async def _llm_synthesis(
+    report_summary: str, *, timeout: float = SYNTHESIS_TIMEOUT_S
+) -> Optional[str]:
     """Genera una síntesis breve del reporte usando Gemini (texto libre).
 
-    Si la API falla, retorna None sin bloquear el reporte.
+    Si la API falla —o tarda más de ``timeout``— retorna None sin bloquear el
+    reporte. La síntesis es un adorno: el documento se genera igual, así que no
+    hay motivo para que el usuario espere indefinidamente por ella (#46). La
+    request lleva además su propio deadline HTTP, porque un stall del lado del
+    servidor deja el thread de ``to_thread`` colgado aunque acá se abandone la
+    espera.
 
     Args:
         report_summary: Resumen compacto del contenido del reporte.
+        timeout: Segundos a esperar antes de dar la síntesis por perdida.
 
     Returns:
         Síntesis en español (2-3 oraciones) o None.
@@ -266,18 +286,30 @@ async def _llm_synthesis(report_summary: str) -> Optional[str]:
             f"Reporte:\n{report_summary}"
         )
 
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="text/plain",
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="text/plain",
+                    # Milisegundos, y la API rechaza con 400 cualquier deadline
+                    # menor a 10 s sin llegar a llamar al modelo (ver el
+                    # post-mortem de CLASSIFY_TIMEOUT_MS en CLAUDE.md).
+                    http_options=types.HttpOptions(timeout=SYNTHESIS_HTTP_TIMEOUT_MS),
+                ),
             ),
+            timeout=timeout,
         )
 
         text = response.text
         return text.strip() if text else None
 
+    except asyncio.TimeoutError:
+        logger.warning(
+            "_llm_synthesis: sin respuesta en %.1fs, el reporte sale sin síntesis", timeout
+        )
+        return None
     except Exception as e:
         logger.warning("_llm_synthesis falló (no bloqueante): %s", e)
         return None
@@ -395,7 +427,14 @@ async def scope_report(
     if last_modified:
         summary_parts.append(f"Última actividad: {last_modified.strftime('%Y-%m-%d')}")
 
-    synthesis = await _llm_synthesis("\n".join(summary_parts))
+    # Un scope vacío (o que solo tiene su `_index.md`) no tiene nada que
+    # sintetizar: la llamada gastaba una request de Gemini para adornar un
+    # reporte que `_send_report` ni siquiera manda (#46).
+    synthesis = (
+        await _llm_synthesis("\n".join(summary_parts))
+        if _item_count(all_notes)
+        else None
+    )
 
     # --- Construir documento ---
     _render = _note_block if full else _note_line
@@ -505,7 +544,8 @@ async def ideas_report(
         count = sum(1 for n in all_notes if _fm_lower(n, "status") == st)
         if count:
             summary_parts.append(f"  {st}: {count}")
-    synthesis = await _llm_synthesis("\n".join(summary_parts))
+    # Sin ideas/papers en el scope no hay nada que sintetizar (#46).
+    synthesis = await _llm_synthesis("\n".join(summary_parts)) if all_notes else None
 
     _render = _note_block if full else _note_line
     lines: list[str] = [_report_header(title, full=full)]
@@ -644,7 +684,12 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         f"Áreas sin actividad: {len(stale_areas)}",
         f"Scopes con ideas raw: {len(raw_ideas_by_scope)}",
     ]
-    synthesis = await _llm_synthesis("\n".join(summary_parts))
+    # Vault vacío: nada que sintetizar (#46).
+    synthesis = (
+        await _llm_synthesis("\n".join(summary_parts))
+        if _item_count(all_notes)
+        else None
+    )
 
     _render = _note_block if full else _note_line
     title = f"Salud del vault (umbral: {stale_days} días)"
@@ -754,7 +799,8 @@ async def reading_queue(
         f"Cola de lectura en {scope_label}: {len(all_notes)} papers sin leer",
         f"  high: {high}, medium: {medium}, low/sin prioridad: {low}",
     ]
-    synthesis = await _llm_synthesis("\n".join(summary_parts))
+    # Sin ideas/papers en el scope no hay nada que sintetizar (#46).
+    synthesis = await _llm_synthesis("\n".join(summary_parts)) if all_notes else None
 
     _render = _note_block if full else _note_line
     lines: list[str] = [_report_header(title, full=full)]

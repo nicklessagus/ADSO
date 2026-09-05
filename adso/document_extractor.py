@@ -275,6 +275,29 @@ def _extract_section_text(
     return content
 
 
+def _split_authors(raw: object) -> list[str]:
+    """Splits the PDF `author` metadata string into a list of author names.
+
+    The vault schema declares `authors` as a list of strings, but PDF metadata
+    packs every author into one field, separated by commas or semicolons. This
+    used to travel to the frontmatter as the raw string: the whole PDF path
+    bypasses `_validate_capture_payload` (the extractor's value is injected as
+    `extra_fm` after validation), so nothing coerced it (#63). Same rule as
+    `capture._frontmatter_from_pdf_metadata`, so both paths agree.
+
+    Args:
+        raw: The `author` value of the PDF metadata. Any non-string is treated
+            as "no authors".
+
+    Returns:
+        One entry per author, stripped, without empties. `[]` when there is
+        nothing usable.
+    """
+    if not isinstance(raw, str):
+        return []
+    return [part.strip() for part in re.split(r"[;,]", raw) if part.strip()]
+
+
 def extract_paper_sections(text: str, metadata: dict) -> dict:
     """Extrae secciones clave de un paper para clasificación.
 
@@ -288,7 +311,8 @@ def extract_paper_sections(text: str, metadata: dict) -> dict:
 
     Returns:
         Dict con: title, authors, doi, abstract, keywords, methods, conclusions.
-        Cada campo es string vacío si no se encontró.
+        Cada campo es string vacío si no se encontró, salvo ``authors``, que es
+        ``list[str]`` (vacía si el PDF no declara autores).
     """
     lines = text.splitlines()
     boundaries = _find_section_boundaries(lines)
@@ -342,7 +366,7 @@ def extract_paper_sections(text: str, metadata: dict) -> dict:
 
     return {
         "title":       title,
-        "authors":     metadata.get("author", "").strip(),
+        "authors":     _split_authors(metadata.get("author")),
         "doi":         doi,
         "abstract":    abstract,
         "keywords":    keywords,
