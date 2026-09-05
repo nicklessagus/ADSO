@@ -17,7 +17,7 @@ from adso.bot_utils import (
     spawn_tracked,
 )
 from adso.config import Settings
-from adso.constants import STATUS_ON_CONFIRM
+from adso.constants import STATUS_ON_CONFIRM, VERBATIM_BODY_MEDIA
 from adso.embeddings import EmbeddingsClient
 from adso.handlers.capture import (
     _index_note_safe,
@@ -156,10 +156,14 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
             if new_fm.get("status") in (None, "pending-classification"):
                 new_fm["status"] = STATUS_ON_CONFIRM.get(note_type, "active")
 
-            if orig_fm.get("media_type") == "audio":
-                body = extract_original_from_degraded(note.body)
+            # Misma regla que la captura interactiva (#64): en texto y audio el
+            # body es el que mandó el usuario, nunca la reescritura del LLM.
+            # Para document/image/link el LLM genera el body, como en la
+            # captura de esos medios; si viene vacío, se conserva el original.
+            if orig_fm.get("media_type", "text") in VERBATIM_BODY_MEDIA:
+                body = contenido
             else:
-                body = payload.get("body", extract_original_from_degraded(note.body))
+                body = payload.get("body") or contenido
 
             # Verificar flujo activo justo antes de escribir (classify() tarda segundos)
             user_data_now: dict = context.application.user_data.get(chat_id, {})

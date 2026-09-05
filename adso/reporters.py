@@ -221,6 +221,17 @@ def _filter_scope(
     return notes
 
 
+def _item_count(notes: list[NoteData]) -> int:
+    """Notas que el reporte lista, sin los `_index.md` de proyecto/área.
+
+    Un proyecto con solo su índice está vacío para el usuario: contar el
+    índice hacía que `_send_report` mandara un .md con todas las secciones
+    en "_Sin ..._" en vez del aviso "no hay nada" (#65). Los índices siguen
+    en el scan porque aportan a "Última actividad".
+    """
+    return sum(1 for n in notes if n.path.stem != "_index")
+
+
 def _authors_year(fm: dict) -> str:
     """``"Autor1, Autor2 (año)"`` para la línea de un paper; "" si no hay nada."""
     authors = _normalize_authors(fm.get("authors"))
@@ -450,7 +461,7 @@ async def scope_report(
         lines.append(f"## Última actividad\n\n{last_modified.strftime('%Y-%m-%d %H:%M')}\n")
 
     content = "\n".join(lines)
-    return ReportBytes(content.encode("utf-8"), len(all_notes))
+    return ReportBytes(content.encode("utf-8"), _item_count(all_notes))
 
 
 # ---------------------------------------------------------------------------
@@ -699,7 +710,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         lines.append("_Sin ideas raw en el vault._\n")
 
     content = "\n".join(lines)
-    return ReportBytes(content.encode("utf-8"), len(all_notes))
+    return ReportBytes(content.encode("utf-8"), _item_count(all_notes))
 
 
 # ---------------------------------------------------------------------------

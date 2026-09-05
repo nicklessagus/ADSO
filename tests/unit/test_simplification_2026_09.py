@@ -2,8 +2,8 @@
 
 The refactor collapsed copies of the same logic into shared helpers. These tests
 specify what each helper must do so the next edit cannot drift a caller away
-from the others, plus two `xfail(strict=True)` reproducers for bugs found while
-reading the code (not fixed here — see the issues named in each `reason`).
+from the others, plus the reproducers of #64 and #65 (found while reading the
+code, fixed the same day).
 """
 
 from __future__ import annotations
@@ -315,9 +315,8 @@ class TestReportersHelpers:
 
 class TestReclassifyKeepsVerbatimBody:
     """Interactive capture keeps the user's text as the body for `text`/`audio`
-    (and for documents captured verbatim); `/clasificar` does the same. The
-    cron `reclassify_inbox` only does it for `audio` — a degraded text note
-    comes back with the LLM's rewrite as its body."""
+    (`VERBATIM_BODY_MEDIA`); the cron `reclassify_inbox` follows the same rule
+    since #64 — before, only `audio` did."""
 
     @staticmethod
     def _context(vault: Path) -> SimpleNamespace:
@@ -374,18 +373,19 @@ class TestReclassifyKeepsVerbatimBody:
         assert await self._run(vault_path, "audio") == "Texto original del usuario."
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG #64: reclassify_inbox replaces the verbatim body of a text note with the LLM rewrite",
-    )
     async def test_text_keeps_the_original_body(self, vault_path: Path) -> None:
+        """#64: same rule as the interactive capture for `text`."""
         assert await self._run(vault_path, "text") == "Texto original del usuario."
+
+    @pytest.mark.asyncio
+    async def test_document_takes_the_llm_body(self, vault_path: Path) -> None:
+        """Counter-case: for a document the LLM writes the body, as in capture."""
+        assert await self._run(vault_path, "document") == "Reescritura del LLM."
 
 
 class TestScopeReportEmptyProjectCountsNoItems:
-    """A project that only has its `_index.md` is empty for the user, but
-    `scan_notes` returns the index and `item_count` counts it, so the
-    "no hay nada" notice of `_send_report` never fires for it."""
+    """A project that only has its `_index.md` is empty for the user: `_item_count`
+    leaves the index out so the "no hay nada" notice of `_send_report` fires (#65)."""
 
     @pytest.mark.asyncio
     async def test_project_with_notes_counts_them(self, vault_path: Path) -> None:
@@ -400,11 +400,8 @@ class TestScopeReportEmptyProjectCountsNoItems:
         assert result.item_count >= 1
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG #65: scope_report counts the project's own _index.md as an item",
-    )
     async def test_project_with_only_its_index_is_empty(self, vault_path: Path) -> None:
+        """#65: the index is scanned (last activity) but not counted as an item."""
         from adso.reporters import scope_report
 
         fm, body = build_index_note("project", "p", "Scope.")

@@ -28,7 +28,7 @@ from adso.bot_utils import (
     spawn_tracked,
 )
 from adso.config import Settings
-from adso.constants import STATUS_ON_CONFIRM
+from adso.constants import STATUS_ON_CONFIRM, VERBATIM_BODY_MEDIA
 from adso.embeddings import EmbeddingsClient, build_note_metadata
 from adso.keyboards import (
     _esc,
@@ -401,7 +401,7 @@ async def _classify_and_preview(
     # directamente del usuario (descripción manual, OCR confirmado).
     # original_text permite que el LLM clasifique con un fragmento (text) pero
     # el body de la nota use el contenido completo (original_text).
-    if media_type in ("text", "audio") or preserve_body:
+    if media_type in VERBATIM_BODY_MEDIA or preserve_body:
         body = original_text or text
         payload["body"] = original_text or text
     else:

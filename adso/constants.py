@@ -40,6 +40,11 @@ STATUS_ON_CONFIRM: dict[str, str] = {
     "idea": "raw",
 }
 
+# Medios cuyo body es siempre el texto original del usuario, nunca la
+# reescritura del LLM. Lo aplican la captura interactiva y el cron de
+# reclasificación (#64); para document/image/link el LLM sí genera el body.
+VERBATIM_BODY_MEDIA = frozenset({"text", "audio"})
+
 # Carpetas que ningún scan ni índice debe mirar por defecto. Es el mismo valor
 # que el default de `vault.exclude_dirs` en config.yaml.
 DEFAULT_EXCLUDE_DIRS = ("05-Archive", ".obsidian", ".trash")

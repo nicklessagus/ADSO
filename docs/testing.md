@@ -88,7 +88,7 @@ tests/
 │   ├── test_classify_timeout.py       # timeout por-llamada de `classify()` contra Gemini (stalls server-side)
 │   ├── test_watchdog.py               # watchdog de proceso: reinicia el bot si el event loop deja de progresar
 │   ├── test_issue58_vault_hygiene.py  # issue #58: tags de índice en kebab-case, `03-Resources/` fuera de los scans
-│   ├── test_simplification_2026_09.py # contratos de los helpers compartidos de la pasada de simplificación + reproductores xfail de #64 y #65
+│   ├── test_simplification_2026_09.py # contratos de los helpers compartidos de la pasada de simplificación + tests de #64 y #65
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -729,5 +729,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1111 tests: 924 unit, 44 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1112 tests: 925 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.
