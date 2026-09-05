@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 import re
 
+from adso.constants import LLM_NOTE_TYPES, STATUS_BY_TYPE, VALID_PRIORITY
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -26,12 +28,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 VALID_MODES = {"capture", "query", "edit", "manage"}
-VALID_TYPES = {"reference", "task", "idea"}  # LLM proposes only these 3
-VALID_STATUS = {
-    "reference": {"active", "pending-classification"},
-    "task": {"pending", "in-progress", "done", "pending-classification"},
-    "idea": {"raw", "implemented", "discarded", "pending-classification"},
-}
+# Lo que el LLM puede proponer: la taxonomía completa vive en `constants.py`.
+VALID_TYPES = LLM_NOTE_TYPES
+VALID_STATUS = {t: STATUS_BY_TYPE[t] for t in LLM_NOTE_TYPES}
 # Aliases the LLM may return → canonical value
 STATUS_ALIASES: dict[str, str] = {
     "todo": "pending",
@@ -40,7 +39,6 @@ STATUS_ALIASES: dict[str, str] = {
     "draft": "raw",
     "published": "active",
 }
-VALID_PRIORITY = {"low", "medium", "high"}
 VALID_READ_STATUS = {"read", "unread"}
 # Claves legítimas del frontmatter según docs/frontmatter-schema.md. Cualquier
 # otra clave que devuelva el LLM se descarta en `_validate_capture_payload`.
@@ -400,7 +398,7 @@ def coerce_discarded_type(response_json: object, media_type: str) -> None:
     # validación por la coerción que acaba de rescatar la respuesta.
     status = _norm_enum(fm.get("status"))
     status = STATUS_ALIASES.get(status, status)
-    if status and status not in VALID_STATUS.get(nuevo, set()):
+    if status and status not in VALID_STATUS.get(nuevo, frozenset()):
         fm["status"] = None
 
 
@@ -447,7 +445,7 @@ def _validate_capture_payload(payload: dict) -> None:
     status = fm.get("status")
     if status is not None:
         norm_status = _norm_enum(status)
-        valid = VALID_STATUS.get(note_type, set())
+        valid = VALID_STATUS.get(note_type, frozenset())
         if not valid or norm_status in valid:
             fm["status"] = norm_status
         else:

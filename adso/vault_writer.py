@@ -17,11 +17,13 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import unquote
 
 import frontmatter
 from slugify import slugify
+
+from adso.constants import NOTE_TYPES, STATUS_BY_TYPE, VALID_PRIORITY
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +64,9 @@ DATE_FIELDS = {"date_created", "date_modified", "due_date", "scheduled"}
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
-VALID_TYPES = {"reference", "task", "idea", "project-index", "area-index"}
-
-VALID_STATUS: dict[str, set[str]] = {
-    "reference": {"active", "pending-classification"},
-    "task": {"pending", "in-progress", "done", "pending-classification"},
-    "idea": {"raw", "implemented", "discarded", "pending-classification"},
-    "project-index": {"active", "on-hold", "completed", "archived"},
-    "area-index": set(),
-}
-
-VALID_PRIORITY = {"low", "medium", "high"}
+# Tipos y status persistibles: la taxonomía vive en `constants.py`.
+VALID_TYPES = NOTE_TYPES
+VALID_STATUS = STATUS_BY_TYPE
 VALID_MEDIA = {"text", "audio", "image", "link", "document"}
 VALID_SOURCE = {"telegram", "system"}
 
@@ -90,8 +84,8 @@ MAX_SLUG_LENGTH = 60
 # ---------------------------------------------------------------------------
 
 
-def _now_iso() -> str:
-    """Retorna timestamp actual en ISO 8601."""
+def now_iso() -> str:
+    """Timestamp local actual en ISO 8601 sin zona, el formato de todo el frontmatter."""
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -273,38 +267,18 @@ def _resolve_dest_dir(fm: dict, vault_path: Path) -> Optional[Path]:
             return vault_path / "02-Areas" / area
         return vault_path / "00-Inbox"
 
-    if note_type == "reference":
-        if project:
-            base = vault_path / "01-Projects" / project
-            if section:
-                return base / section
-            return base
-        if area:
-            return vault_path / "02-Areas" / area
-        # Sin proyecto ni área → caller decide
-        return None
-
-    if note_type == "task":
-        if project:
-            base = vault_path / "01-Projects" / project
-            if section:
-                return base / section
-            return base
-        if area:
-            return vault_path / "02-Areas" / area
+    if note_type not in ("reference", "task", "idea"):
         return vault_path / "00-Inbox"
 
-    if note_type == "idea":
-        if project:
-            base = vault_path / "01-Projects" / project
-            if section:
-                return base / section
-            return base
-        if area:
-            return vault_path / "02-Areas" / area
-        return None
-
-    return vault_path / "00-Inbox"
+    # Mismo orden para los tres tipos: project > area > fallback. Solo cambia
+    # el fallback: una task sin destino va al Inbox; reference/idea devuelven
+    # None para que el caller decida (preview → Inbox, gestión → preguntar).
+    if project:
+        base = vault_path / "01-Projects" / project
+        return base / section if section else base
+    if area:
+        return vault_path / "02-Areas" / area
+    return vault_path / "00-Inbox" if note_type == "task" else None
 
 
 def _unique_path(dest_dir: Path, filename: str) -> Path:
@@ -321,6 +295,51 @@ def _unique_path(dest_dir: Path, filename: str) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
+
+def _reserve_name_sync(
+    directory: Path,
+    filename: str,
+    *,
+    sep: str,
+    start: int,
+    reuse_if: Optional[Callable[[Path], bool]] = None,
+) -> tuple[Path, bool]:
+    """Reserva con ``O_EXCL`` el primer nombre libre de la familia ``stem{sep}N``.
+
+    Es el bucle común de `_reserve_and_write_sync`, `_save_resource_sync` y
+    `_archive_orphan_sync`: los tres reservaban a mano con la misma forma y
+    solo cambiaba la convención del sufijo. La reserva es atómica a nivel
+    kernel, así que dos escrituras concurrentes nunca ganan el mismo nombre.
+
+    Args:
+        directory: Carpeta destino (ya creada).
+        filename: Nombre deseado; si está tomado se prueba ``stem{sep}N``.
+        sep: Separador del sufijo numérico (``-`` para notas, ``_`` para adjuntos).
+        start: Primer N que se prueba tras el nombre original.
+        reuse_if: Predicado opcional sobre un candidato ya existente. Si
+            devuelve True, ese archivo se devuelve tal cual (dedup) sin
+            reservar nada nuevo.
+
+    Returns:
+        ``(path, reserved)``: ``reserved`` es True si el path es un placeholder
+        de 0 bytes recién creado por esta llamada, False si es un archivo
+        existente que ``reuse_if`` aceptó.
+    """
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    candidate = directory / filename
+    counter = start
+    while True:
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            if reuse_if is not None and reuse_if(candidate):
+                return candidate, False
+            candidate = directory / f"{stem}{sep}{counter}{suffix}"
+            counter += 1
+            continue
+        os.close(fd)
+        return candidate, True
 
 
 def _reserve_and_write_sync(dest_dir: Path, filename: str, content: str) -> Path:
@@ -345,19 +364,7 @@ def _reserve_and_write_sync(dest_dir: Path, filename: str, content: str) -> Path
         Path efectivamente escrito.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
-
-    base = Path(filename)
-    stem, suffix = base.stem, base.suffix
-    counter = 1
-    while True:
-        candidate = dest_dir / (filename if counter == 1 else f"{stem}-{counter}{suffix}")
-        try:
-            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            counter += 1
-            continue
-        os.close(fd)
-        break
+    candidate, _ = _reserve_name_sync(dest_dir, filename, sep="-", start=2)
 
     # El contenido se escribe con el mismo write atómico de siempre: el
     # placeholder vacío que dejó la reserva se reemplaza de una. Un crash entre
@@ -504,7 +511,7 @@ async def create_note(
         fm["type"] = "idea"
         fm["status"] = "pending-classification"
     else:
-        valid_status = VALID_STATUS.get(note_type, set())
+        valid_status = VALID_STATUS.get(note_type, frozenset())
         # `area-index` declara el set vacío a propósito (no tiene ciclo de
         # vida): ahí no hay nada que validar.
         if valid_status and "status" in fm and fm["status"] not in valid_status:
@@ -520,7 +527,7 @@ async def create_note(
             fm["status"] = fallback
 
     # Setear campos automáticos si no vienen
-    now = _now_iso()
+    now = now_iso()
     fm.setdefault("date_created", now)
     fm.setdefault("date_modified", now)
     fm.setdefault("source", "telegram")
@@ -613,7 +620,7 @@ async def append_to_note(
     note = await read_note(note_path)
     new_body = note.body + separator + content
 
-    note.frontmatter["date_modified"] = _now_iso()
+    note.frontmatter["date_modified"] = now_iso()
 
     clean_fm = _clean_frontmatter(note.frontmatter)
     post = _build_post(new_body, clean_fm)
@@ -646,9 +653,8 @@ async def set_property(
     # Validaciones por campo
     note_type = fm.get("type", "")
 
-    if key == "type":
-        if value not in VALID_TYPES:
-            raise ValueError(f"type inválido: {value!r} (válidos: {VALID_TYPES})")
+    if key == "type" and value not in VALID_TYPES:
+        raise ValueError(f"type inválido: {value!r} (válidos: {sorted(VALID_TYPES)})")
 
     if key == "status":
         # Sin este guard, un `type` fuera del enum devolvía un set vacío y el
@@ -658,41 +664,37 @@ async def set_property(
             raise ValueError(
                 f"type inválido en la nota: {note_type!r} — no se puede validar status"
             )
-        valid = VALID_STATUS.get(note_type, set())
+        valid = VALID_STATUS.get(note_type, frozenset())
         if valid and value not in valid:
             raise ValueError(
                 f"status inválido para type={note_type!r}: {value!r} "
                 f"(válidos: {valid})"
             )
 
-    if key == "priority":
-        if value not in VALID_PRIORITY:
-            raise ValueError(f"priority inválido: {value!r} (válidos: {VALID_PRIORITY})")
+    for enum_key, valid_values in (
+        ("priority", VALID_PRIORITY),
+        ("media_type", VALID_MEDIA),
+        ("source", VALID_SOURCE),
+    ):
+        if key == enum_key and value not in valid_values:
+            raise ValueError(
+                f"{key} inválido: {value!r} (válidos: {sorted(valid_values)})"
+            )
 
-    if key == "media_type":
-        if value not in VALID_MEDIA:
-            raise ValueError(f"media_type inválido: {value!r} (válidos: {VALID_MEDIA})")
+    if key in DATE_FIELDS and value is not None:
+        try:
+            datetime.fromisoformat(str(value))
+        except ValueError:
+            raise ValueError(f"{key} debe ser ISO 8601: {value!r}") from None
 
-    if key == "source":
-        if value not in VALID_SOURCE:
-            raise ValueError(f"source inválido: {value!r} (válidos: {VALID_SOURCE})")
-
-    if key in ("date_created", "date_modified", "due_date", "scheduled"):
-        if value is not None:
-            try:
-                datetime.fromisoformat(str(value))
-            except ValueError:
-                raise ValueError(f"{key} debe ser ISO 8601: {value!r}")
-
-    if key == "tags":
-        if not isinstance(value, list):
-            raise ValueError(f"tags debe ser una lista: {value!r}")
+    if key == "tags" and not isinstance(value, list):
+        raise ValueError(f"tags debe ser una lista: {value!r}")
 
     # Aplicar cambio
     fm[key] = value
 
     if update_date_modified and key != "date_modified":
-        fm["date_modified"] = _now_iso()
+        fm["date_modified"] = now_iso()
 
     clean_fm = _clean_frontmatter(fm)
     post = _build_post(note.body, clean_fm)
@@ -794,7 +796,7 @@ async def update_wikilinks(
     if new_content != raw:
         # Actualizar date_modified en frontmatter
         post = load_post(new_content)
-        clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": _now_iso()})
+        clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": now_iso()})
         final_post = _build_post(post.content, clean_meta)
         output = frontmatter.dumps(final_post)
         await asyncio.to_thread(_atomic_write_sync, note_path, output)
@@ -860,7 +862,17 @@ def _remove_empty_ver_tambien(content: str) -> str:
     return "\n".join(result)
 
 
-def _strip_broken_links_in_ver_tambien(content: str, link_re: "re.Pattern[str]") -> str:
+def _ver_tambien_item_re(stem: str) -> re.Pattern[str]:
+    """Regex de un item ``- [[stem]]`` (con alias o anchor opcional) del bloque Ver también.
+
+    Anclado en ``^- [[``: solo líneas que son un item de lista con el
+    wikilink. Se aplica exclusivamente DENTRO del bloque "## Ver también" para
+    no borrar texto del usuario que use ese wikilink en otra parte de la nota.
+    """
+    return re.compile(r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*$")
+
+
+def _strip_broken_links_in_ver_tambien(content: str, link_re: re.Pattern[str]) -> str:
     """Elimina items ``- [[stem]]`` rotos, pero SOLO dentro del bloque '## Ver también'.
 
     Recorre las líneas manteniendo el estado "dentro del bloque Ver también"
@@ -910,12 +922,7 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
         Número de archivos modificados.
     """
     stem = deleted_path.stem
-    # Ancla ^- \[\[stem...\]\]: solo líneas que son un item de lista con el wikilink.
-    # Se aplica exclusivamente DENTRO del bloque "## Ver también" (ver más abajo)
-    # para no borrar texto del usuario que use ese wikilink en otra parte de la nota.
-    link_re = re.compile(
-        r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*$"
-    )
+    link_re = _ver_tambien_item_re(stem)
 
     modified = 0
     # El generator de rglob hace un readdir bloqueante en cada paso, y esta
@@ -1059,18 +1066,7 @@ def _archive_orphan_sync(path: Path, archive_dir: Path) -> Path:
     import shutil
 
     archive_dir.mkdir(parents=True, exist_ok=True)
-    stem, suffix = path.stem, path.suffix
-    candidate = archive_dir / path.name
-    counter = 1
-    while True:
-        try:
-            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            candidate = archive_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
-            continue
-        os.close(fd)
-        break
+    candidate, _ = _reserve_name_sync(archive_dir, path.name, sep="_", start=1)
     # `shutil.move` sobre el placeholder que acaba de reservar el nombre: un
     # rename si es el mismo filesystem, copy2+unlink si no.
     shutil.move(str(path), str(candidate))
@@ -1134,10 +1130,9 @@ def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
 
         new_content = raw
         for stem in sorted(broken):
-            link_re = re.compile(
-                r"^- \[\[" + re.escape(stem) + r"(?:[|#][^\]]+)?\]\].*$"
+            new_content = _strip_broken_links_in_ver_tambien(
+                new_content, _ver_tambien_item_re(stem)
             )
-            new_content = _strip_broken_links_in_ver_tambien(new_content, link_re)
         new_content = _remove_empty_ver_tambien(new_content)
 
         # Sin cambio real no se reescribe: bumpear el mtime dispara un evento
@@ -1237,6 +1232,52 @@ async def ensure_vault_structure(vault_path: Path) -> None:
     logger.info("Estructura del vault verificada: %s", vault_path)
 
 
+def build_index_note(kind: str, name: str, description: str) -> tuple[dict, str]:
+    """Frontmatter y body del ``_index.md`` de un proyecto o un área nuevos.
+
+    Único constructor del índice: lo usan la siembra inicial (`seed_vault`) y
+    el flujo de gestión (`manage.py`). Antes cada uno armaba el suyo y
+    divergían — la siembra escribía el nombre crudo como tag y sin el marcador
+    ``system``, partiendo en dos el vocabulario de tags que #58 unificó.
+
+    El nombre va crudo a ``project``/``area`` (direccionan la carpeta en disco)
+    y kebab-caseado al tag, que es lo que el prompt reutiliza.
+
+    Args:
+        kind: ``"project"`` o ``"area"``.
+        name: Nombre tal como lo escribió el usuario.
+        description: Descripción obligatoria (scope de clasificación).
+
+    Returns:
+        ``(frontmatter, body)`` listos para `create_note`.
+
+    Raises:
+        ValueError: Si ``kind`` no es ``project`` ni ``area``.
+    """
+    if kind not in ("project", "area"):
+        raise ValueError(f"kind inválido: {kind!r}")
+    # Import local: `llm_schema` importa `constants`, no este módulo, así que
+    # no hay ciclo — pero el helper de tags vive ahí y no se necesita en el
+    # camino de escritura de notas comunes.
+    from adso.llm_schema import _to_kebab
+
+    title = name.replace("-", " ").title()
+    fm: dict[str, Any] = {
+        "title": title,
+        "type": f"{kind}-index",
+        "description": description,
+        "tags": ["system", _to_kebab(name)],
+        "source": "system",
+        kind: name,
+    }
+    body = f"# {title}\n\n## Descripción\n{description}\n"
+    if kind == "project":
+        fm["status"] = "active"
+        fm["sections"] = []
+        body += f"\n## Secciones\n\n## Estado\n- Creado: {now_iso()[:10]}\n"
+    return fm, body
+
+
 async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
     """Siembra proyectos y áreas iniciales desde config.
 
@@ -1244,48 +1285,16 @@ async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
         vault_path: Path raíz del vault.
         vault_seed: VaultSeedConfig con proyectos y áreas a crear.
     """
-    for project in vault_seed.projects:
-        project_dir = vault_path / "01-Projects" / project.name
-        index_path = project_dir / "_index.md"
-        if index_path.exists():
-            continue
-        fm = {
-            "title": project.name.replace("-", " ").title(),
-            "type": "project-index",
-            "status": "active",
-            "description": project.description,
-            "sections": [],
-            "tags": [project.name],
-            "source": "system",
-            "project": project.name,
-        }
-        body = (
-            f"# {fm['title']}\n\n"
-            f"## Descripción\n{project.description}\n\n"
-            f"## Secciones\n\n"
-            f"## Estado\n- Creado: {_now_iso()[:10]}\n"
-        )
-        await create_note(fm, body, vault_path)
-        logger.info("Proyecto seed creado: %s", project.name)
-
-    for area in vault_seed.areas:
-        area_dir = vault_path / "02-Areas" / area.name
-        index_path = area_dir / "_index.md"
-        if index_path.exists():
-            continue
-        fm = {
-            "title": area.name.replace("-", " ").title(),
-            "type": "area-index",
-            "description": area.description,
-            "source": "system",
-            "area": area.name,
-        }
-        body = (
-            f"# {fm['title']}\n\n"
-            f"## Descripción\n{area.description}\n"
-        )
-        await create_note(fm, body, vault_path)
-        logger.info("Área seed creada: %s", area.name)
+    for kind, folder, items in (
+        ("project", "01-Projects", vault_seed.projects),
+        ("area", "02-Areas", vault_seed.areas),
+    ):
+        for item in items:
+            if (vault_path / folder / item.name / "_index.md").exists():
+                continue
+            fm, body = build_index_note(kind, item.name, item.description)
+            await create_note(fm, body, vault_path)
+            logger.info("%s seed creado: %s", kind.capitalize(), item.name)
 
 
 # ---------------------------------------------------------------------------
@@ -1331,43 +1340,35 @@ def _save_resource_sync(
 
     resources_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = Path(safe_name).stem
-    suffix = Path(safe_name).suffix
     source_size = source_path.stat().st_size
     source_hash: Optional[str] = None
 
-    candidate = resources_dir / safe_name
-    counter = 1
-    while True:
+    def _same_content(candidate: Path) -> bool:
+        # El nombre está tomado: si el contenido es el mismo, se reutiliza
+        # (dedup por hash; comparar solo tamaño confundía archivos distintos
+        # y descartaba el nuevo en silencio).
+        nonlocal source_hash
         try:
-            # La reserva deja un archivo de 0 bytes hasta el `os.replace` de
-            # abajo. Es una ventana corta y solo afecta al dedup: dos guardados
-            # *simultáneos* del mismo binario pueden terminar en dos archivos
-            # (uno de más), nunca en uno pisado (pérdida de datos).
-            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            # El nombre está tomado: si el contenido es el mismo, se reutiliza
-            # (dedup por hash; comparar solo tamaño confundía archivos distintos
-            # y descartaba el nuevo en silencio).
-            try:
-                if candidate.stat().st_size == source_size:
-                    if source_hash is None:
-                        source_hash = _file_hash_sync(source_path)
-                    if _file_hash_sync(candidate) == source_hash:
-                        logger.info(
-                            "Recurso ya existe (mismo contenido), reutilizando: %s",
-                            candidate,
-                        )
-                        return candidate
-            except OSError:
-                # Un archivo ilegible o borrado en medio del scan no puede
-                # tumbar la captura: se prueba el siguiente nombre.
-                pass
-            candidate = resources_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
-            continue
-        os.close(fd)
-        break
+            if candidate.stat().st_size != source_size:
+                return False
+            if source_hash is None:
+                source_hash = _file_hash_sync(source_path)
+            return _file_hash_sync(candidate) == source_hash
+        except OSError:
+            # Un archivo ilegible o borrado en medio del scan no puede tumbar
+            # la captura: se prueba el siguiente nombre.
+            return False
+
+    # La reserva deja un archivo de 0 bytes hasta el `os.replace` de abajo. Es
+    # una ventana corta y solo afecta al dedup: dos guardados *simultáneos* del
+    # mismo binario pueden terminar en dos archivos (uno de más), nunca en uno
+    # pisado (pérdida de datos).
+    candidate, reserved = _reserve_name_sync(
+        resources_dir, safe_name, sep="_", start=1, reuse_if=_same_content
+    )
+    if not reserved:
+        logger.info("Recurso ya existe (mismo contenido), reutilizando: %s", candidate)
+        return candidate
 
     tmp_fd, tmp_name = tempfile.mkstemp(
         dir=str(resources_dir), prefix=".adso-tmp-", suffix=".tmp"

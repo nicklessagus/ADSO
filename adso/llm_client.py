@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+from datetime import datetime
 from typing import Any, Callable, Coroutine, Optional
 
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL
@@ -308,7 +310,6 @@ def build_system_prompt(
     Returns:
         System prompt as a string.
     """
-    from datetime import datetime
     _now = datetime.now()
     today = _now.strftime("%Y-%m-%d")
     weekday = _now.strftime("%A")  # e.g. "Sunday"
@@ -540,6 +541,25 @@ def _fill_title_fallback(result: dict, content: str) -> dict:
     return result
 
 
+def _validate_response(
+    response_text: str, media_type: str, disambiguation_threshold: float
+) -> dict:
+    """Parsea, coacciona y valida la respuesta cruda de cualquier proveedor.
+
+    Camino común de Gemini y Groq: en texto/audio el `type` lo eligen los
+    botones, así que se rescata un valor inválido antes de validar; y el flag
+    de desambiguación se deriva de la confianza ya coaccionada a float.
+
+    Raises:
+        LLMResponseError: Si el texto no es JSON o no cumple el schema.
+    """
+    response_json = _parse_json_response(response_text)
+    coerce_discarded_type(response_json, media_type)
+    validated = validate_llm_response(response_json)
+    validated["needs_disambiguation"] = validated["confidence"] < disambiguation_threshold
+    return validated
+
+
 async def classify(
     content: str,
     media_type: str,
@@ -578,16 +598,7 @@ async def classify(
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response_text = await _call_gemini(system_prompt, user_message)
-            response_json = _parse_json_response(response_text)
-            # En texto/audio el `type` lo eligen los botones: rescatar un valor
-            # inválido antes de validar evita degradar la respuesta entera.
-            coerce_discarded_type(response_json, media_type)
-            validated = validate_llm_response(response_json)
-
-            # Flag de desambiguación
-            confidence = validated.get("confidence", 0.5)
-            validated["needs_disambiguation"] = confidence < disambiguation_threshold
-
+            validated = _validate_response(response_text, media_type, disambiguation_threshold)
             return _fill_title_fallback(validated, content)
 
         except LLMResponseError as e:
@@ -676,19 +687,14 @@ async def _try_groq_fallback(
     media_type: str = "text",
 ) -> Optional[dict]:
     """Attempt classification via Groq. Returns validated dict or None if unavailable."""
-    import os
     if not os.environ.get("GROQ_API_KEY"):
         logger.warning("GROQ_API_KEY not configured — no fallback available")
         return None
     try:
         response_text = await _call_groq(system_prompt, user_message)
-        response_json = _parse_json_response(response_text)
         # Groq no tiene schema constrained: es justo donde más aparece un
-        # `type` fuera del enum.
-        coerce_discarded_type(response_json, media_type)
-        validated = validate_llm_response(response_json)
-        confidence = validated.get("confidence", 0.5)
-        validated["needs_disambiguation"] = confidence < disambiguation_threshold
+        # `type` fuera del enum — `_validate_response` lo rescata igual.
+        validated = _validate_response(response_text, media_type, disambiguation_threshold)
         logger.info("Classified via Groq (fallback)")
         return validated
     except Exception as e:
@@ -710,7 +716,6 @@ async def _call_groq(system_prompt: str, user_message: str) -> str:
         Exception: If the API fails or the key is not configured.
     """
     from groq import Groq
-    import os
 
     api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
@@ -748,8 +753,6 @@ def _get_genai_client():
     """
     global _genai_client
     if _genai_client is None:
-        import os
-
         from google import genai
 
         api_key = os.environ.get("GEMINI_API_KEY", "")

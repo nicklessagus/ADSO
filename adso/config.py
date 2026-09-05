@@ -11,6 +11,8 @@ from typing import Any
 
 import yaml
 
+from adso.constants import DEFAULT_EXCLUDE_DIRS
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,9 +76,7 @@ class VaultSeedConfig:
 
 @dataclass
 class VaultConfig:
-    exclude_dirs: list[str] = field(
-        default_factory=lambda: ["05-Archive", ".obsidian", ".trash"]
-    )
+    exclude_dirs: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE_DIRS))
 
 
 @dataclass
@@ -277,27 +277,26 @@ def _build_vault_seed(
         known = {f.name for f in VaultSeedConfig.__dataclass_fields__.values()}
         unknown.extend(f"vault_seed.{k}" for k in data if k not in known)
 
-    projects: list[VaultSeedItem] = []
-    for item in data.get("projects", []):
-        if not isinstance(item, dict) or "name" not in item:
-            raise ConfigError("vault_seed.projects: cada ítem requiere 'name'")
-        if "description" not in item or not item["description"]:
-            raise ConfigError(
-                f"vault_seed.projects: '{item['name']}' requiere 'description'"
-            )
-        projects.append(VaultSeedItem(name=item["name"], description=item["description"]))
+    return VaultSeedConfig(
+        projects=_seed_items(data, "projects"),
+        areas=_seed_items(data, "areas"),
+    )
 
-    areas: list[VaultSeedItem] = []
-    for item in data.get("areas", []):
-        if not isinstance(item, dict) or "name" not in item:
-            raise ConfigError("vault_seed.areas: cada ítem requiere 'name'")
-        if "description" not in item or not item["description"]:
-            raise ConfigError(
-                f"vault_seed.areas: '{item['name']}' requiere 'description'"
-            )
-        areas.append(VaultSeedItem(name=item["name"], description=item["description"]))
 
-    return VaultSeedConfig(projects=projects, areas=areas)
+def _seed_items(data: dict[str, Any], key: str) -> list[VaultSeedItem]:
+    """Ítems de `vault_seed.projects` o `vault_seed.areas`, validando name y description.
+
+    Raises:
+        ConfigError: Si algún ítem no es un mapa con `name` y `description` no vacía.
+    """
+    items: list[VaultSeedItem] = []
+    for item in data.get(key, []):
+        if not isinstance(item, dict) or "name" not in item:
+            raise ConfigError(f"vault_seed.{key}: cada ítem requiere 'name'")
+        if not item.get("description"):
+            raise ConfigError(f"vault_seed.{key}: '{item['name']}' requiere 'description'")
+        items.append(VaultSeedItem(name=item["name"], description=item["description"]))
+    return items
 
 
 def _build_weekly_report(
@@ -469,15 +468,12 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
     Raises:
         ConfigError: Si config.yaml no existe o tiene valores inválidos.
     """
-    if config_path is None:
-        config_path = Path("config.yaml")
-    else:
-        config_path = Path(config_path)
+    config_path = Path("config.yaml" if config_path is None else config_path)
 
     if not config_path.exists():
         raise ConfigError(f"config.yaml no encontrado en {config_path.resolve()}")
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
     if not isinstance(raw, dict):

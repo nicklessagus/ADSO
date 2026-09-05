@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,8 +18,7 @@ from adso.bot_utils import (
 from adso.config import Settings
 from adso.keyboards import _esc, build_manage_keyboard
 from adso.llm_client import classify
-from adso.llm_schema import _to_kebab
-from adso.vault_writer import _safe_component, create_note
+from adso.vault_writer import _safe_component, build_index_note, create_note
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +28,15 @@ _OPERATION_LABELS = {
     "create_area": "área",
     "create_section": "sección",
 }
+
+
+def _is_blank(value: Any) -> bool:
+    """True si un param de gestión no trae nada usable.
+
+    Cubre ``None``, ``""`` y el string ``"None"``: un modelo chico serializa el
+    null como texto y llegaba al índice como nombre o descripción literal.
+    """
+    return value is None or str(value).strip() in ("", "None")
 
 
 def _operation_label(operation: str) -> str:
@@ -123,14 +130,14 @@ async def _handle_manage(
 
     missing = []
     if operation in ("create_project", "create_area"):
-        if not params.get("name") or params.get("name") in (None, "None", ""):
+        if _is_blank(params.get("name")):
             missing.append("nombre")
-        if not params.get("description") or params.get("description") in (None, "None", ""):
+        if _is_blank(params.get("description")):
             missing.append("descripción")
     elif operation == "create_section":
-        if not params.get("name") or params.get("name") in (None, "None", ""):
+        if _is_blank(params.get("name")):
             missing.append("nombre de la sección")
-        if not params.get("project") or params.get("project") in (None, "None", ""):
+        if _is_blank(params.get("project")):
             missing.append("nombre del proyecto")
 
     if missing:
@@ -226,7 +233,7 @@ async def _cb_manage_confirm(
     # G10 de docs/audit-2026-07-31.md.
     if operation in ("create_project", "create_area"):
         descripcion = (params.get("description") or "").strip()
-        if not descripcion or descripcion == "None":
+        if _is_blank(descripcion):
             # `pop_manage_state` ya popeó el estado: hay que reponerlo para que
             # `_handle_manage_missing_fields` pueda retomar con el texto que
             # escriba el usuario.
@@ -240,54 +247,19 @@ async def _cb_manage_confirm(
         params["description"] = descripcion
 
     try:
-        if operation == "create_project":
-            project_dir = vault_path / "01-Projects" / params["name"]
-            if project_dir.exists():
-                await query.edit_message_text(
-                    f"El proyecto '{params['name']}' ya existe."
-                )
+        if operation in ("create_project", "create_area"):
+            kind = "project" if operation == "create_project" else "area"
+            folder = "01-Projects" if kind == "project" else "02-Areas"
+            label, done = ("proyecto", "creado") if kind == "project" else ("área", "creada")
+            if (vault_path / folder / params["name"]).exists():
+                await query.edit_message_text(f"El {label} '{params['name']}' ya existe.")
                 return
-            fm = {
-                "title": params["name"].replace("-", " ").title(),
-                "type": "project-index",
-                "status": "active",
-                "description": params["description"],
-                "sections": [],
-                "tags": ["system", _to_kebab(params["name"])],
-                "source": "system",
-                "project": params["name"],
-            }
-            body = (
-                f"# {fm['title']}\n\n"
-                f"## Descripción\n{params['description']}\n\n"
-                f"## Secciones\n\n## Estado\n- Creado: {datetime.now().strftime('%Y-%m-%d')}\n"
-            )
+            fm, body = build_index_note(kind, params["name"], params["description"])
             index_path = await create_note(fm, body, vault_path)
             await _notify_index_written(context, index_path, fm["title"])
-            await query.edit_message_text(f"Proyecto '{params['name']}' creado.")
-
-        elif operation == "create_area":
-            area_dir = vault_path / "02-Areas" / params["name"]
-            if area_dir.exists():
-                await query.edit_message_text(
-                    f"El área '{params['name']}' ya existe."
-                )
-                return
-            fm = {
-                "title": params["name"].replace("-", " ").title(),
-                "type": "area-index",
-                "description": params["description"],
-                "tags": ["system", _to_kebab(params["name"])],
-                "source": "system",
-                "area": params["name"],
-            }
-            body = (
-                f"# {fm['title']}\n\n"
-                f"## Descripción\n{params['description']}\n"
+            await query.edit_message_text(
+                f"{label.capitalize()} '{params['name']}' {done}."
             )
-            index_path = await create_note(fm, body, vault_path)
-            await _notify_index_written(context, index_path, fm["title"])
-            await query.edit_message_text(f"Área '{params['name']}' creada.")
 
         elif operation == "create_section":
             section_dir = vault_path / "01-Projects" / params["project"] / params["name"]
@@ -322,11 +294,16 @@ def _pop_pending_content(context: ContextTypes.DEFAULT_TYPE) -> tuple[str | None
     return text, ctx
 
 
-async def _cb_intent_save(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+async def _run_intent(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, **classify_kwargs: Any
 ) -> None:
-    """El usuario eligió guardar como nota — clasifica con LLM y muestra preview."""
+    """Consume el contenido pendiente y lo manda al flujo de captura.
+
+    Camino común de `[Tarea]` y `[Nota]`: popea ``pending_raw_content`` (y el
+    contexto de captura que lo acompaña en audio) y clasifica con
+    ``force_capture=True`` — el usuario ya eligió guardar, así que un
+    ``mode=manage`` del LLM no puede descartar el texto.
+    """
     from adso.handlers.capture import _classify_and_preview  # evitar circular en módulo-nivel
 
     text, ctx = _pop_pending_content(context)
@@ -340,6 +317,7 @@ async def _cb_intent_save(
         media_type=ctx.get("media_type", "text"),
         preserve_body=ctx.get("preserve_body", False),
         resource_file=ctx.get("resource_file"),
+        **classify_kwargs,
     )
 
 
@@ -348,19 +326,8 @@ async def _cb_intent_task(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """El usuario eligió guardar como tarea — el LLM infiere título/tags/destino, type=task fijo."""
-    from adso.handlers.capture import _classify_and_preview
-
-    text, ctx = _pop_pending_content(context)
-    query = update.callback_query
-    if not text:
-        await query.edit_message_text("No hay contenido pendiente.")
-        return
-    await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(
-        update, context, text, force_capture=True,
-        media_type=ctx.get("media_type", "text"),
-        preserve_body=ctx.get("preserve_body", False),
-        resource_file=ctx.get("resource_file"),
+    await _run_intent(
+        update, context,
         forced_type="task",
         user_context="El usuario clasificó este contenido como tarea. Inferir prioridad, fecha límite y proyecto/área con ese foco.",
     )
@@ -371,19 +338,8 @@ async def _cb_intent_note(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """El usuario eligió guardar como nota — el LLM infiere tipo (reference/idea) y resto."""
-    from adso.handlers.capture import _classify_and_preview
-
-    text, ctx = _pop_pending_content(context)
-    query = update.callback_query
-    if not text:
-        await query.edit_message_text("No hay contenido pendiente.")
-        return
-    await query.edit_message_text("Clasificando...")
-    await _classify_and_preview(
-        update, context, text, force_capture=True,
-        media_type=ctx.get("media_type", "text"),
-        preserve_body=ctx.get("preserve_body", False),
-        resource_file=ctx.get("resource_file"),
+    await _run_intent(
+        update, context,
         user_context="El usuario clasificó este contenido como nota (no es una tarea).",
         prevent_task=True,
     )

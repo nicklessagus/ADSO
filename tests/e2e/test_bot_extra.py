@@ -17,7 +17,6 @@ from adso.keyboards import (
     build_preview,
     build_capture_keyboard,
     build_destination_keyboard,
-    build_disambiguation_keyboard,
     build_manage_keyboard,
     _esc,
 )
@@ -28,7 +27,6 @@ from adso.constants import (
     CB_DEST_PROJECT_PREFIX,
     CB_CHOOSE_AREA,
     CB_CHOOSE_PROJECT,
-    CB_DISAMBIG_CAPTURE,
     CB_DISAMBIG_QUERY,
     CB_MANAGE_CONFIRM,
     CB_MANAGE_CANCEL,
@@ -142,12 +140,6 @@ class TestKeyboards:
         texts = [b.text for row in kb.inline_keyboard for b in row]
         assert "Inbox" in texts
 
-    def test_disambiguation_keyboard(self) -> None:
-        kb = build_disambiguation_keyboard()
-        texts = [b.text for row in kb.inline_keyboard for b in row]
-        assert "Guardar como nota" in texts
-        assert "Buscar en vault" in texts
-
     def test_manage_keyboard(self) -> None:
         kb = build_manage_keyboard()
         texts = [b.text for row in kb.inline_keyboard for b in row]
@@ -223,14 +215,6 @@ class TestCallbackPaths:
         kb = build_save_keyboard()
         datas = [b.callback_data for row in kb.inline_keyboard for b in row]
         assert CB_DISAMBIG_QUERY in datas
-
-    @pytest.mark.asyncio
-    @patch("adso.security.ALLOWED_USER_IDS", {42})
-    async def test_disambig_capture(self, make_callback_query, mock_context) -> None:
-        _setup_pending_note(mock_context)
-        update = make_callback_query(data=CB_DISAMBIG_CAPTURE)
-        await handle_callback(update, mock_context)
-        update.callback_query.edit_message_text.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("adso.security.ALLOWED_USER_IDS", {42})

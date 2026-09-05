@@ -24,7 +24,6 @@ from adso.constants import (
     CB_DEST_AREA_PREFIX,
     CB_DEST_INBOX,
     CB_DEST_PROJECT_PREFIX,
-    CB_DISAMBIG_CAPTURE,
     CB_DISAMBIG_QUERY,
     CB_EXTRACTION_CANCEL,
     CB_EXTRACTION_CORRECT,
@@ -162,16 +161,6 @@ def build_destination_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_disambiguation_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para desambiguación de intención."""
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Guardar como nota", callback_data=CB_DISAMBIG_CAPTURE),
-            InlineKeyboardButton("Buscar en vault", callback_data=CB_DISAMBIG_QUERY),
-        ]
-    ])
-
-
 def build_manage_keyboard() -> InlineKeyboardMarkup:
     """Teclado de confirmación para operaciones de gestión."""
     return InlineKeyboardMarkup([
@@ -182,15 +171,20 @@ def build_manage_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_transcript_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para confirmar/corregir/cancelar transcripción de audio."""
+def _review_keyboard(cancel_cb: str, correct_cb: str, ok_cb: str) -> InlineKeyboardMarkup:
+    """Fila ``[Cancelar] [Corregir] [Confirmar]`` para revisar un texto extraído."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Cancelar", callback_data=CB_TRANSCRIPT_CANCEL),
-            InlineKeyboardButton("Corregir", callback_data=CB_TRANSCRIPT_CORRECT),
-            InlineKeyboardButton("Confirmar", callback_data=CB_TRANSCRIPT_OK),
+            InlineKeyboardButton("Cancelar", callback_data=cancel_cb),
+            InlineKeyboardButton("Corregir", callback_data=correct_cb),
+            InlineKeyboardButton("Confirmar", callback_data=ok_cb),
         ]
     ])
+
+
+def build_transcript_keyboard() -> InlineKeyboardMarkup:
+    """Teclado para confirmar/corregir/cancelar transcripción de audio."""
+    return _review_keyboard(CB_TRANSCRIPT_CANCEL, CB_TRANSCRIPT_CORRECT, CB_TRANSCRIPT_OK)
 
 
 def build_ocr_result_keyboard() -> InlineKeyboardMarkup:
@@ -224,13 +218,19 @@ def build_read_status_keyboard() -> InlineKeyboardMarkup:
 
 def build_extraction_keyboard() -> InlineKeyboardMarkup:
     """Teclado para confirmar/corregir/cancelar texto extraído de un documento."""
+    return _review_keyboard(CB_EXTRACTION_CANCEL, CB_EXTRACTION_CORRECT, CB_EXTRACTION_OK)
+
+
+def build_cancel_keyboard(cancel_cb: str = CB_CANCEL) -> InlineKeyboardMarkup:
+    """Teclado con un único botón ``[Cancelar]``."""
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
-            InlineKeyboardButton("Corregir", callback_data=CB_EXTRACTION_CORRECT),
-            InlineKeyboardButton("Confirmar", callback_data=CB_EXTRACTION_OK),
-        ]
+        [InlineKeyboardButton("Cancelar", callback_data=cancel_cb)]
     ])
+
+
+def _pair_rows(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButton]]:
+    """Agrupa botones de a dos por fila."""
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
 
 _TOKEN_RE = re.compile(r"[0-9a-f]{10}")
@@ -292,6 +292,30 @@ async def resolve_item_token(
     return token
 
 
+def _items_keyboard(
+    items: list[dict], prefix: str, back_cb: str, label_max: Optional[int] = None
+) -> InlineKeyboardMarkup:
+    """Lista de proyectos o áreas en pares, con ``[Cancelar] [← Volver]`` al pie.
+
+    El `callback_data` lleva siempre el token de `item_token`, nunca el nombre:
+    Telegram corta el `callback_data` en 64 bytes y un nombre acentuado ya lo
+    superaba (F3/F4). La etiqueta puede truncarse porque es cosmética.
+    """
+    buttons = [
+        InlineKeyboardButton(
+            item["name"][:label_max] if label_max else item["name"],
+            callback_data=f"{prefix}{item_token(item['name'])}",
+        )
+        for item in items
+    ]
+    rows = _pair_rows(buttons)
+    rows.append([
+        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
+        InlineKeyboardButton("← Volver", callback_data=back_cb),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
 async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
     """Construye teclado con áreas existentes. Si no hay áreas, solo muestra Volver."""
     # `_get_existing_items` (subdirectorios) y no `find_by_property` por
@@ -302,19 +326,7 @@ async def build_area_selector(vault_path: Path) -> InlineKeyboardMarkup:
     from adso.bot_utils import _get_existing_items
 
     _, areas = await _get_existing_items(vault_path)
-    buttons = [
-        InlineKeyboardButton(
-            area["name"],
-            callback_data=f"{CB_DEST_AREA_PREFIX}{item_token(area['name'])}",
-        )
-        for area in areas
-    ]
-    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    rows.append([
-        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
-    ])
-    return InlineKeyboardMarkup(rows)
+    return _items_keyboard(areas, CB_DEST_AREA_PREFIX, CB_BACK)
 
 
 async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
@@ -323,19 +335,7 @@ async def build_project_selector(vault_path: Path) -> InlineKeyboardMarkup:
     from adso.bot_utils import _get_existing_items
 
     projects, _ = await _get_existing_items(vault_path)
-    buttons = [
-        InlineKeyboardButton(
-            proj["name"],
-            callback_data=f"{CB_DEST_PROJECT_PREFIX}{item_token(proj['name'])}",
-        )
-        for proj in projects
-    ]
-    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    rows.append([
-        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("← Volver", callback_data=CB_BACK),
-    ])
-    return InlineKeyboardMarkup(rows)
+    return _items_keyboard(projects, CB_DEST_PROJECT_PREFIX, CB_BACK)
 
 
 def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
@@ -350,7 +350,7 @@ def build_intent_keyboard(intents: list[str]) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Crear área", callback_data=CB_INTENT_CREATE_AREA)
         )
 
-    rows = [manage_buttons[i:i+2] for i in range(0, len(manage_buttons), 2)] if manage_buttons else []
+    rows = _pair_rows(manage_buttons)
     rows.append([
         InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
         InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
@@ -377,16 +377,18 @@ def build_save_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_fallback_pdf_keyboard() -> InlineKeyboardMarkup:
-    """Teclado para PDF escaneado sin texto extraíble.
+def build_fallback_pdf_keyboard(with_ocr: bool = True) -> InlineKeyboardMarkup:
+    """Teclado para una imagen o un PDF escaneado sin texto extraíble.
 
-    OCR, Gemini Vision y Describir están implementados (Fase 4 completa).
+    Fila 1: métodos de extracción (``[OCR] [Gemini Vision]``); fila 2:
+    ``[Cancelar] [Describir]``. Con ``with_ocr=False`` (el OCR ya corrió y no
+    encontró texto) la primera fila queda solo con Gemini Vision.
     """
+    methods = [InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION)]
+    if with_ocr:
+        methods.insert(0, InlineKeyboardButton("OCR", callback_data=CB_OCR))
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("OCR", callback_data=CB_OCR),
-            InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION),
-        ],
+        methods,
         [
             InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
             InlineKeyboardButton("Describir", callback_data=CB_DESCRIBE),
@@ -473,7 +475,10 @@ def build_report_items_keyboard(
 ) -> InlineKeyboardMarkup:
     """Lista de proyectos o áreas para seleccionar el scope final de un reporte.
 
-    Trunca nombres a 32 caracteres para respetar el límite de 64 bytes de callback_data.
+    La etiqueta se trunca a 32 chars (es cosmética); el `callback_data` lleva
+    el token de `item_token`, nunca el nombre truncado — antes el truncado
+    viajaba en el callback y `scope_report` armaba un path inexistente. F3 de
+    docs/audit-2026-07-31.md.
 
     Args:
         items: Lista de dicts {name, description}.
@@ -484,25 +489,5 @@ def build_report_items_keyboard(
     Returns:
         InlineKeyboardMarkup.
     """
-    # La etiqueta se trunca (es cosmética); el `callback_data` lleva el token,
-    # nunca el nombre truncado — antes el truncado a 32 chars viajaba en el
-    # callback y `scope_report` armaba un path inexistente. F3 de
-    # docs/audit-2026-07-31.md.
-    _MAX_LABEL = 32
     item_type = "p" if is_project else "a"
-
-    buttons = [
-        InlineKeyboardButton(
-            item["name"][:_MAX_LABEL],
-            callback_data=f"{prefix}{item_type}:{item_token(item['name'])}",
-        )
-        for item in items
-    ]
-
-    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    rows.append([
-        InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-        InlineKeyboardButton("← Volver", callback_data=back_cb),
-    ])
-
-    return InlineKeyboardMarkup(rows)
+    return _items_keyboard(items, f"{prefix}{item_type}:", back_cb, label_max=32)

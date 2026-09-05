@@ -171,8 +171,7 @@ async def _post_init(app: Application) -> None:
     await watcher.start()
     app.bot_data["vault_watcher"] = watcher
 
-    import logging
-    logging.getLogger(__name__).info("ADSO iniciando — vault en %s", settings.vault_path)
+    _bot_logger.info("ADSO iniciando — vault en %s", settings.vault_path)
 
 
 async def _post_shutdown(app: Application) -> None:

@@ -28,7 +28,6 @@ from adso.constants import (
     CB_DEST_AREA_PREFIX,
     CB_DEST_INBOX,
     CB_DEST_PROJECT_PREFIX,
-    CB_DISAMBIG_CAPTURE,
     CB_DISAMBIG_QUERY,
     CB_EXTRACTION_CANCEL,
     CB_EXTRACTION_CORRECT,
@@ -36,7 +35,6 @@ from adso.constants import (
     CB_INTENT_CREATE_AREA,
     CB_INTENT_CREATE_PROJECT,
     CB_INTENT_NOTE,
-    CB_INTENT_SAVE,
     CB_INTENT_TASK,
     CB_MANAGE_CANCEL,
     CB_QUERY_REPORT,
@@ -72,7 +70,6 @@ from adso.handlers.capture import (
     _cb_extraction_ok,
     _cb_note_correct,
     _cb_transcript_ok,
-    _handle_capture_from_callback,
 )
 from adso.bot_utils import _cleanup_pending, render_with_keyboard
 from adso.handlers.commands import handle_clasificar
@@ -80,7 +77,6 @@ from adso.handlers.input import _process_pdf_after_read_status
 from adso.handlers.manage import (
     _cb_intent_create,
     _cb_intent_note,
-    _cb_intent_save,
     _cb_intent_task,
     _cb_manage_confirm,
     pop_manage_state,
@@ -89,7 +85,10 @@ from adso.keyboards import (
     _esc,
     build_area_selector,
     build_capture_keyboard,
+    build_fallback_pdf_keyboard,
+    build_ocr_result_keyboard,
     build_project_selector,
+    build_transcript_keyboard,
     resolve_item_token,
 )
 from adso.handlers.reports import handle_report_callback
@@ -214,9 +213,6 @@ async def handle_callback(
             keyboard = build_capture_keyboard()
             await query.edit_message_reply_markup(reply_markup=keyboard)
 
-    elif data == CB_INTENT_SAVE:
-        await _cb_intent_save(update, context)
-
     elif data == CB_INTENT_TASK:
         await _cb_intent_task(update, context)
 
@@ -228,12 +224,6 @@ async def handle_callback(
 
     elif data == CB_INTENT_CREATE_AREA:
         await _cb_intent_create(update, context, "create_area")
-
-    elif data == CB_DISAMBIG_CAPTURE:
-        pending = context.user_data.get("pending_note")
-        if pending:
-            pending["needs_disambiguation"] = False
-            await _handle_capture_from_callback(query, context, pending)
 
     elif data == CB_DISAMBIG_QUERY:
         from adso.handlers.query import run_query
@@ -265,17 +255,7 @@ async def handle_callback(
         await _cb_transcript_ok(update, context)
 
     elif data == CB_TRANSCRIPT_CORRECT:
-        pt = context.user_data.get("pending_transcript")
-        if pt:
-            pt["awaiting_correction"] = True
-            pt["msg_id"] = query.message.message_id
-            await query.edit_message_text(
-                _build_extract_preview(
-                    "Transcripción actual", pt["text"],
-                    footer="Texto corregido (escribir a continuación):",
-                ),
-                parse_mode="HTML",
-            )
+        await _enter_text_correction(query, context, "pending_transcript", "Transcripción actual")
 
     elif data == CB_TRANSCRIPT_CANCEL:
         _cleanup_pending(context, "pending_transcript")
@@ -291,17 +271,7 @@ async def handle_callback(
         await _cb_extraction_ok(update, context)
 
     elif data == CB_EXTRACTION_CORRECT:
-        pe = context.user_data.get("pending_extraction")
-        if pe:
-            pe["awaiting_correction"] = True
-            pe["msg_id"] = query.message.message_id
-            await query.edit_message_text(
-                _build_extract_preview(
-                    "Texto extraído", pe.get("text", ""),
-                    footer="Texto corregido (escribir a continuación):",
-                ),
-                parse_mode="HTML",
-            )
+        await _enter_text_correction(query, context, "pending_extraction", "Texto extraído")
 
     elif data == CB_EXTRACTION_CANCEL:
         _cleanup_pending(context, "pending_extraction", "pending_description", "pending_fallback_pdf")
@@ -365,6 +335,51 @@ async def handle_callback(
         or data.startswith(CB_REPORT_READING_PREFIX)
     ):
         await handle_report_callback(query, context, data)
+
+
+async def _enter_text_correction(
+    query, context: ContextTypes.DEFAULT_TYPE, state_key: str, label: str
+) -> None:
+    """Activa el modo corrección de un texto extraído (transcripción o extracción).
+
+    Marca el estado con ``awaiting_correction`` y bloquea el mensaje por
+    ``msg_id``: el próximo texto del usuario reemplaza al extraído (ver
+    `handle_text`). Sin estado pendiente no hace nada.
+    """
+    pending = context.user_data.get(state_key)
+    if not pending:
+        return
+    pending["awaiting_correction"] = True
+    pending["msg_id"] = query.message.message_id
+    await query.edit_message_text(
+        _build_extract_preview(
+            label, pending.get("text", ""),
+            footer="Texto corregido (escribir a continuación):",
+        ),
+        parse_mode="HTML",
+    )
+
+
+def _transcript_state(text: str, pending: dict, tmp_path: Path) -> dict:
+    """Estado ``pending_transcript`` que dejan OCR y Gemini Vision al terminar.
+
+    Arrastra del estado de origen todo lo que la captura necesita después:
+    - ``read_status``: la elección de [Ya lo leí]/[Lo quiero leer] hecha antes
+      de saber que el PDF era escaneado (E2 de docs/audit-2026-07-31.md).
+    - ``pdf_metadata``: título/autor literales del PDF, más confiables que lo
+      que el LLM infiere del OCR (#42).
+    """
+    return {
+        "text": text,
+        "media_type": pending.get("media_type", "image"),
+        "user_context": pending.get("user_context"),
+        "read_status": pending.get("read_status"),
+        "pdf_metadata": pending.get("pdf_metadata"),
+        "resource_file": {
+            "temp_path": str(tmp_path),
+            "filename": pending.get("original_filename", "imagen.jpg"),
+        },
+    }
 
 
 _PDF_SCAN_PAGES = 2  # páginas a procesar en OCR y Vision para PDFs escaneados
@@ -442,9 +457,6 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ``build_ocr_result_keyboard`` (que incluye la opción de cambiar a Gemini
     Vision). Si no encuentra texto, ofrece un teclado de fallback sin OCR.
     """
-    import asyncio
-    from pathlib import Path
-
     query = update.callback_query
     pending = context.user_data.get("pending_fallback_pdf")
     if not pending:
@@ -485,7 +497,7 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not text.strip():
             await query.edit_message_text(
                 "OCR no encontró texto. Intentar con Gemini Vision o describir el contenido.",
-                reply_markup=_build_fallback_keyboard_without_ocr(),
+                reply_markup=build_fallback_pdf_keyboard(with_ocr=False),
             )
             return
 
@@ -503,25 +515,8 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     context.user_data.pop("pending_fallback_pdf", None)
-    context.user_data["pending_transcript"] = {
-        "text": text,
-        "media_type": media_type,
-        "user_context": pending.get("user_context"),
-        # El read_status que el usuario eligió con [Ya lo leí]/[Lo quiero leer]
-        # antes de que el PDF resultara escaneado. Sin propagarlo, el paper
-        # terminaba sin read_status pese a la elección explícita. E2 de
-        # docs/audit-2026-07-31.md.
-        "read_status": pending.get("read_status"),
-        # Metadata literal del PDF (title/author): más confiable que lo que el
-        # LLM infiere del OCR, pero se recolectaba y moría acá. #42.
-        "pdf_metadata": pending.get("pdf_metadata"),
-        "resource_file": {
-            "temp_path": str(tmp_path),
-            "filename": pending.get("original_filename", "imagen.jpg"),
-        },
-    }
+    context.user_data["pending_transcript"] = _transcript_state(text, pending, tmp_path)
 
-    from adso.keyboards import build_ocr_result_keyboard
     # El texto del OCR es caro y único: si el edit falla, el resultado tiene que
     # llegar igual con su teclado (#50).
     sent = await render_with_keyboard(
@@ -546,8 +541,6 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     En ambos casos procesa la imagen y reemplaza el estado por un nuevo
     ``pending_transcript`` con el texto de Vision.
     """
-    from pathlib import Path
-
     query = update.callback_query
     from_ocr = False
     pending = context.user_data.get("pending_fallback_pdf")
@@ -604,8 +597,6 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # botones (dead-end hasta /reset). El texto del OCR ya está pago y es
             # lo valioso: se conserva el estado y se repone su teclado. C4 de la
             # auditoría 2026-08.
-            from adso.keyboards import build_ocr_result_keyboard
-
             transcript = context.user_data.get("pending_transcript") or {}
             sent = await query.edit_message_text(
                 f"Error consultando Gemini Vision: {_esc(str(e))}\n\n"
@@ -631,21 +622,8 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     else:
         context.user_data.pop("pending_fallback_pdf", None)
 
-    context.user_data["pending_transcript"] = {
-        "text": text,
-        "media_type": media_type,
-        "user_context": pending.get("user_context"),
-        # Ver E2 en el bloque equivalente de `_cb_ocr`.
-        "read_status": pending.get("read_status"),
-        # Ver #42 en el bloque equivalente de `_cb_ocr`.
-        "pdf_metadata": pending.get("pdf_metadata"),
-        "resource_file": {
-            "temp_path": str(tmp_path),
-            "filename": pending.get("original_filename", "imagen.jpg"),
-        },
-    }
+    context.user_data["pending_transcript"] = _transcript_state(text, pending, tmp_path)
 
-    from adso.keyboards import build_transcript_keyboard
     # Ver #50 en `_cb_ocr`: además de caro, este texto ya consumió quota del
     # modelo de visión.
     sent = await render_with_keyboard(
@@ -729,14 +707,3 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
         if not transferred:
             tmp_path.unlink(missing_ok=True)
 
-
-def _build_fallback_keyboard_without_ocr():
-    """Teclado de fallback cuando OCR no encontró texto (sin botón OCR)."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Gemini Vision", callback_data=CB_VISION)],
-        [
-            InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL),
-            InlineKeyboardButton("Describir", callback_data=CB_DESCRIBE),
-        ],
-    ])

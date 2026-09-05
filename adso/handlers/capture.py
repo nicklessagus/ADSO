@@ -22,12 +22,14 @@ from adso.bot_utils import (
     _cleanup_pending,
     _get_existing_items,
     _get_existing_tags,
+    count_unclassified_inbox,
     mark_bot_written,
     render_with_keyboard,
     spawn_tracked,
 )
 from adso.config import Settings
-from adso.embeddings import EmbeddingsClient
+from adso.constants import STATUS_ON_CONFIRM
+from adso.embeddings import EmbeddingsClient, build_note_metadata
 from adso.keyboards import (
     _esc,
     build_capture_keyboard,
@@ -42,9 +44,8 @@ from adso.llm_client import (
     make_degraded_result,
 )
 from adso.llm_schema import LLMResponseError, _to_kebab, _validate_capture_payload
-from adso.vault_search import find_by_property
 from adso.tasks_client import TasksClient, build_task_notes
-from adso.vault_writer import GitBackup, create_note, read_note, save_resource
+from adso.vault_writer import GitBackup, create_note, now_iso, save_resource
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +54,42 @@ _INJECTION_PREVIEW_WARNING = (
     "instrucciones. Revisar el preview con atención antes de confirmar.\n\n"
 )
 
-# Status que corresponde a cada type cuando el usuario confirma o reubica una
-# nota que venía en `pending-classification`. `VALID_STATUS` (llm_schema.py)
-# define conjuntos disjuntos por tipo: una task nunca puede quedar en `active`
-# ni en `raw`, o los filtros y reportes por `status` dejan de verla. C7 de la
-# auditoría 2026-08.
-STATUS_ON_CONFIRM: dict[str, str] = {
-    "reference": "active",
-    "task": "pending",
-    "idea": "raw",
+# Prioridad en la corrección por texto: acepta español e inglés.
+_PRIORITY_WORDS: dict[str, str] = {
+    "alta": "high", "high": "high",
+    "media": "medium", "medium": "medium",
+    "baja": "low", "low": "low",
 }
+
+
+def _reply_fn(update: Update) -> Any:
+    """Función con la que responder: edita el mensaje del callback o contesta al del usuario."""
+    if update.callback_query:
+        return update.callback_query.edit_message_text
+    return update.message.reply_text
+
+
+def _stamp_new_note(fm: dict, media_type: str) -> None:
+    """Campos automáticos de una nota recién capturada por Telegram."""
+    now = now_iso()
+    fm["date_created"] = now
+    fm["date_modified"] = now
+    fm["source"] = "telegram"
+    fm["media_type"] = media_type
+
+
+def inherit_inbox_frontmatter(new_fm: dict, orig_fm: dict) -> None:
+    """Campos que una nota reclasificada hereda de su versión degradada del Inbox.
+
+    Lo comparten `/clasificar` y el cron `reclassify_inbox`: la fecha de
+    creación y el medio son los de la captura original, y el ``user_context``
+    (el caption guardado para poder reclasificar) ya cumplió su función y no
+    se persiste.
+    """
+    new_fm["date_created"] = orig_fm.get("date_created", "")
+    new_fm["source"] = "telegram"
+    new_fm["media_type"] = orig_fm.get("media_type", "text")
+    new_fm.pop("user_context", None)
 
 
 def _with_injection_warning(pending: dict, preview: str) -> str:
@@ -312,13 +339,7 @@ async def _classify_and_preview(
     if mode == "degraded":
         payload = result["payload"]
         fm = payload["frontmatter"]
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        fm["date_created"] = now
-        fm["date_modified"] = now
-        fm["source"] = "telegram"
-        fm["media_type"] = media_type
-        if extra_fm:
-            fm.update(extra_fm)
+        _stamp_new_note(fm, media_type)
         if user_context:
             fm["user_context"] = user_context
 
@@ -328,9 +349,8 @@ async def _classify_and_preview(
         preview = build_preview(fm, payload.get("body", text), [])
         keyboard = build_capture_keyboard()
 
-        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         sent = await render_with_keyboard(
-            reply_fn,
+            _reply_fn(update),
             _fallback_msg(update),
             "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
             "Confirmar, corregir o cancelar.\n\n" + preview,
@@ -364,16 +384,14 @@ async def _classify_and_preview(
             result["payload"]["body"] = text
 
     if mode != "capture":
-        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        await reply_fn("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
+        await _reply_fn(update)("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
         _log_timing()
         return
 
     payload = result["payload"]
     fm = payload.get("frontmatter")
     if not isinstance(fm, dict):
-        reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-        await reply_fn("Respuesta inesperada del LLM. Intentar de nuevo.")
+        await _reply_fn(update)("Respuesta inesperada del LLM. Intentar de nuevo.")
         _log_timing()
         return
     suggested_links: list[dict] = []
@@ -389,11 +407,7 @@ async def _classify_and_preview(
     else:
         body = payload.get("body", "")
 
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    fm["date_created"] = now
-    fm["date_modified"] = now
-    fm["source"] = "telegram"
-    fm["media_type"] = media_type
+    _stamp_new_note(fm, media_type)
 
     # El usuario eligió explícitamente el tipo — ignorar lo que infirió el LLM
     if forced_type:
@@ -439,9 +453,8 @@ async def _classify_and_preview(
         result["injection_risk"] = True
         preview = _INJECTION_PREVIEW_WARNING + preview
 
-    reply_fn = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
     sent = await render_with_keyboard(
-        reply_fn,
+        _reply_fn(update),
         _fallback_msg(update),
         preview,
         reply_markup=keyboard,
@@ -614,12 +627,8 @@ def _apply_note_corrections(fm: dict, text: str, text_lower: str) -> bool:
         return True
     if text_lower.startswith("prioridad "):
         prio = text_lower.split(" ", 1)[1].strip()
-        if prio in ("alta", "high"):
-            fm["priority"] = "high"
-        elif prio in ("media", "medium"):
-            fm["priority"] = "medium"
-        elif prio in ("baja", "low"):
-            fm["priority"] = "low"
+        if prio in _PRIORITY_WORDS:
+            fm["priority"] = _PRIORITY_WORDS[prio]
         return True
     if text_lower.startswith("tag ") or text_lower.startswith("agregar tag "):
         _add_tag(fm, text_lower.split("tag ", 1)[1].strip())
@@ -712,12 +721,7 @@ def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
     # Prioridad
     prio_m = re.search(r'\bprioridad\s+(alta|high|media|medium|baja|low)\b', text_lower)
     if prio_m:
-        prio_map = {
-            "alta": "high", "high": "high",
-            "media": "medium", "medium": "medium",
-            "baja": "low", "low": "low",
-        }
-        fm["priority"] = prio_map[prio_m.group(1)]
+        fm["priority"] = _PRIORITY_WORDS[prio_m.group(1)]
         changed = True
 
     # Tag
@@ -783,7 +787,7 @@ async def _handle_text_correction(
             pending["error_user_msg_id"] = update.message.message_id
             return
 
-    fm["date_modified"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    fm["date_modified"] = now_iso()
 
     body = payload.get("body", "")
     suggested_links = payload.get("suggested_links", [])
@@ -827,67 +831,6 @@ async def _handle_text_correction(
         _remember_preview_msg(pending, sent)
 
 
-async def _handle_capture_from_callback(
-    query: Any,
-    context: ContextTypes.DEFAULT_TYPE,
-    result: dict,
-) -> None:
-    """Procesa captura desde un callback (ej: desambiguación).
-
-    Si el resultado del LLM no es capture (ej: fue clasificado como query),
-    construye una nota inbox mínima con el texto original para que el usuario
-    pueda corregirla antes de confirmar.
-    """
-    payload = result["payload"]
-
-    if "frontmatter" not in payload:
-        original_text = context.user_data.get("original_content", "")
-        payload = {
-            "frontmatter": {
-                "title": original_text[:80].strip(),
-                "type": "idea",
-                "tags": [],
-                "status": "pending-classification",
-            },
-            "body": original_text,
-            "suggested_links": [],
-        }
-        result["payload"] = payload
-        result["mode"] = "capture"
-
-    fm = payload["frontmatter"]
-    body = payload.get("body", "")
-    suggested_links: list[dict] = payload.get("suggested_links", [])
-
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    fm.setdefault("date_created", now)
-    fm.setdefault("date_modified", now)
-    fm.setdefault("source", "telegram")
-    fm.setdefault("media_type", "text")
-
-    if not suggested_links and body:
-        # `query_text` es el body, así que el vector devuelto SÍ puede guardarse
-        # como `_body_embedding` para que `_cb_confirm` lo reutilice.
-        suggested_links, body_embedding = await _suggest_links(
-            context, body, embedding=payload.get("_body_embedding")
-        )
-        if body_embedding is not None:
-            payload["_body_embedding"] = body_embedding
-        payload["suggested_links"] = suggested_links
-
-    context.user_data["pending_note"] = result
-
-    preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard()
-
-    sent = await query.edit_message_text(
-        preview,
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-    _remember_preview_msg(result, sent)
-
-
 async def _index_note_safe(
     embeddings: EmbeddingsClient,
     note_path: Path,
@@ -902,22 +845,10 @@ async def _index_note_safe(
         embedding: Vector precomputado de `body` (ej: el del preview de captura,
             si el body no cambió al confirmar). Si None, index_note lo computa.
     """
-    import hashlib
-
     try:
         rel = note_path.relative_to(vault_path)
         note_id = str(rel.with_suffix(""))
-        metadata = {
-            "path": str(rel),
-            "type": fm.get("type", ""),
-            "status": fm.get("status", ""),
-            "project": fm.get("project", ""),
-            "area": fm.get("area", ""),
-            "tags": fm.get("tags", []),
-            "media_type": fm.get("media_type", ""),
-            "title": fm.get("title", ""),
-            "content_hash": hashlib.md5(body.encode()).hexdigest(),
-        }
+        metadata = build_note_metadata(rel, fm, body)
         await embeddings.index_note(note_id, body, metadata, embedding=embedding)
     except Exception as e:
         logger.warning("Error indexando embedding para %s: %s", note_path, e)
@@ -1147,20 +1078,9 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     context.user_data.pop("original_content", None)
 
     if inbox_path_str:
-        # Recalcular pendientes tras confirmar — mismo filtro que handle_clasificar:
-        # pending-classification + sin project ni area (caso B)
+        # Recalcular pendientes tras confirmar — misma regla que handle_clasificar.
         try:
-            all_pending = await find_by_property(
-                "status", "pending-classification", vault_path, scope="00-Inbox"
-            )
-            remaining = 0
-            for ref in all_pending:
-                try:
-                    n = await read_note(ref.path)
-                    if not n.frontmatter.get("project") and not n.frontmatter.get("area"):
-                        remaining += 1
-                except Exception:
-                    pass
+            remaining = await count_unclassified_inbox(vault_path)
             if remaining > 0:
                 await query.message.reply_text(
                     f"Quedan {remaining} nota{'s' if remaining > 1 else ''} más. "
@@ -1464,12 +1384,9 @@ async def _classify_and_preview_arxiv(
     content = build_arxiv_classify_content(metadata)
 
     async def on_retry(attempt: int, max_attempts: int) -> None:
-        reply_fn = (
-            update.callback_query.edit_message_text
-            if update.callback_query
-            else update.message.reply_text
+        await _reply_fn(update)(
+            f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}..."
         )
-        await reply_fn(f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}...")
 
     result = await classify(
         content=content,
@@ -1485,12 +1402,7 @@ async def _classify_and_preview_arxiv(
     mode = _redirect_unimplemented_mode(result, content)
 
     if mode not in ("capture", "degraded"):
-        reply_fn = (
-            update.callback_query.edit_message_text
-            if update.callback_query
-            else update.message.reply_text
-        )
-        await reply_fn("No se pudo clasificar el paper. Intentar de nuevo.")
+        await _reply_fn(update)("No se pudo clasificar el paper. Intentar de nuevo.")
         return
 
     payload = result["payload"]
@@ -1505,7 +1417,6 @@ async def _classify_and_preview_arxiv(
     fm["title"] = metadata["title"] or fm.get("title", "")
     fm["type"] = "reference"
     fm["source_url"] = url
-    fm["media_type"] = "link"
     if metadata.get("authors"):
         fm["authors"] = metadata["authors"]
     if metadata.get("year"):
@@ -1527,11 +1438,7 @@ async def _classify_and_preview_arxiv(
     body = build_arxiv_body(metadata, llm_summary)
     payload["body"] = body
     payload["frontmatter"] = fm
-
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    fm["date_created"] = now
-    fm["date_modified"] = now
-    fm["source"] = "telegram"
+    _stamp_new_note(fm, "link")
 
     # Los links se buscan por el ABSTRACT, no por el body (que es callout +
     # abstract + Personal Notes). El vector devuelto se descarta a propósito:

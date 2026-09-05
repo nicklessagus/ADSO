@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from adso.constants import DEFAULT_EXCLUDE_DIRS
+
 logger = logging.getLogger(__name__)
 
 # Modelo de embeddings
@@ -85,7 +87,32 @@ def similarity_to_distance(similarity: float) -> float:
     return 2.0 * (1.0 - similarity)
 
 
-DEFAULT_EXCLUDE_DIRS = ["05-Archive", ".obsidian", ".trash"]
+def build_note_metadata(rel_path: Path, fm: dict, body: str) -> dict:
+    """Metadata que ChromaDB guarda junto al embedding de una nota.
+
+    Único constructor: lo usan el reindex nocturno y el indexado inline al
+    confirmar (`_index_note_safe`). El ``content_hash`` es lo que permite al
+    reindex saltear notas cuyo cuerpo no cambió.
+
+    Args:
+        rel_path: Ruta de la nota relativa al vault.
+        fm: Frontmatter de la nota.
+        body: Cuerpo que se embebe.
+
+    Returns:
+        Dict listo para `index_note` (se serializa allí).
+    """
+    return {
+        "path": str(rel_path),
+        "type": fm.get("type", ""),
+        "status": fm.get("status", ""),
+        "project": fm.get("project", ""),
+        "area": fm.get("area", ""),
+        "tags": fm.get("tags", []),
+        "media_type": fm.get("media_type", ""),
+        "title": fm.get("title", ""),
+        "content_hash": hashlib.md5(body.encode()).hexdigest(),
+    }
 
 
 def should_index(
@@ -113,7 +140,7 @@ def should_index(
         conflictos de Syncthing o cualquier archivo que no sea `.md`.
     """
     if exclude_dirs is None:
-        exclude_dirs = DEFAULT_EXCLUDE_DIRS
+        exclude_dirs = list(DEFAULT_EXCLUDE_DIRS)
     try:
         rel = md_path.relative_to(vault_path)
     except ValueError:
@@ -411,7 +438,7 @@ class EmbeddingsClient:
         self._ensure_initialized()
 
         if exclude_dirs is None:
-            exclude_dirs = DEFAULT_EXCLUDE_DIRS
+            exclude_dirs = list(DEFAULT_EXCLUDE_DIRS)
 
         from adso import vault_cache
 
@@ -476,22 +503,10 @@ class EmbeddingsClient:
                 vault_note_ids.add(note_id)
 
                 # Comparar hash para evitar re-embeds innecesarios
-                content_hash = hashlib.md5(body.encode()).hexdigest()
-                if existing_hashes.get(note_id) == content_hash:
+                metadata = build_note_metadata(rel, fm, body)
+                if existing_hashes.get(note_id) == metadata["content_hash"]:
                     stats["skipped"] += 1
                     continue
-
-                metadata = {
-                    "path": str(rel),
-                    "type": fm.get("type", ""),
-                    "status": fm.get("status", ""),
-                    "project": fm.get("project", ""),
-                    "area": fm.get("area", ""),
-                    "tags": fm.get("tags", []),
-                    "media_type": fm.get("media_type", ""),
-                    "title": fm.get("title", ""),
-                    "content_hash": content_hash,
-                }
 
                 await self.index_note(note_id, body, metadata)
                 stats["indexed"] += 1

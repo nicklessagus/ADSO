@@ -197,21 +197,23 @@ def _build_report(result: QueryResult, vault_path) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
+async def _send_report_to(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, result: QueryResult
+) -> None:
+    """Construye el informe .md de una consulta y lo manda como documento a ``chat_id``."""
+    settings: Settings = context.bot_data["settings"]
+    doc = io.BytesIO(_build_report(result, settings.vault_path))
+    doc.name = "consulta.md"
+    await context.bot.send_document(chat_id=chat_id, document=doc, filename="consulta.md")
+
+
 async def _send_report(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     result: QueryResult,
 ) -> None:
     """Envía el informe .md de una consulta como documento."""
-    settings: Settings = context.bot_data["settings"]
-    report_bytes = _build_report(result, settings.vault_path)
-    doc = io.BytesIO(report_bytes)
-    doc.name = "consulta.md"
-    await context.bot.send_document(
-        chat_id=update.effective_chat.id,
-        document=doc,
-        filename="consulta.md",
-    )
+    await _send_report_to(context, update.effective_chat.id, result)
 
 
 async def cb_query_report(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -234,16 +236,8 @@ async def cb_query_report(query: Any, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("La consulta expiró.", show_alert=True)
         return
 
-    settings: Settings = context.bot_data["settings"]
-    report_bytes = _build_report(result, settings.vault_path)
-    doc = io.BytesIO(report_bytes)
-    doc.name = "consulta.md"
-    await context.bot.send_document(
-        # `.chat.id` y no `.chat_id`: un mensaje de más de 48 h llega como
-        # `InaccessibleMessage`, que no expone `chat_id` (E7). Los botones
-        # [Generar informe .md] viven en el historial indefinidamente.
-        chat_id=query.message.chat.id,
-        document=doc,
-        filename="consulta.md",
-    )
+    # `.chat.id` y no `.chat_id`: un mensaje de más de 48 h llega como
+    # `InaccessibleMessage`, que no expone `chat_id` (E7). Los botones
+    # [Generar informe .md] viven en el historial indefinidamente.
+    await _send_report_to(context, query.message.chat.id, result)
     await query.answer("Informe generado.")

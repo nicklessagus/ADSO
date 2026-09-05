@@ -8,13 +8,19 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _detect_manage_keywords, _has_pending_keyboard, _is_awaiting_text_input
+from adso.bot_utils import (
+    _detect_manage_keywords,
+    _has_pending_keyboard,
+    _is_awaiting_text_input,
+    reply_blocked,
+)
 from adso.config import Settings
 from adso.constants import CB_EXTRACTION_CANCEL
 from adso.document_extractor import (
@@ -28,6 +34,7 @@ from adso.document_extractor import (
 )
 from adso.keyboards import (
     _esc,
+    build_cancel_keyboard,
     build_extraction_keyboard,
     build_fallback_pdf_keyboard,
     build_intent_keyboard,
@@ -56,6 +63,36 @@ _TRUNCATION_NOTICE = (
 def _format_miles(n: int) -> str:
     """Formatea un entero con punto como separador de miles (50000 → 50.000)."""
     return f"{n:,}".replace(",", ".")
+
+
+def _snippet(text: str, limit: int = 500) -> str:
+    """Primeros ``limit`` caracteres, con puntos suspensivos si se recortó."""
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def _too_large_msg(settings: Settings, label: str) -> str:
+    """Aviso de archivo que excede ``documents.max_size_mb``."""
+    return f"{label} demasiado grande (máx {settings.documents.max_size_mb}MB)."
+
+
+async def _download_to_tmp(tg_media: Any, suffix: Optional[str]) -> Path:
+    """Descarga un archivo de Telegram a un temporal y devuelve su path.
+
+    El caller es dueño del temporal: lo borra o lo transfiere a un estado
+    pendiente. Los tres handlers de medios repetían este bloque.
+
+    Args:
+        tg_media: Objeto de PTB con ``get_file()`` (Voice, Audio, Document, PhotoSize).
+        suffix: Extensión del temporal. ``None`` la toma del ``file_path`` que
+            devuelve Telegram (un audio que no es nota de voz).
+    """
+    tg_file = await tg_media.get_file()
+    if suffix is None:
+        suffix = Path(tg_file.file_path or "audio.ogg").suffix
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    await tg_file.download_to_drive(str(tmp_path))
+    return tmp_path
 
 
 def _solo_mensajes_nuevos(handler):
@@ -123,14 +160,13 @@ async def handle_text(
         pt = context.user_data["pending_transcript"]
         pt["text"] = text
         pt["awaiting_correction"] = False
-        snippet = text[:500] + ("..." if len(text) > 500 else "")
         msg_id = pt.get("msg_id")
         if msg_id:
             try:
                 await context.bot.edit_message_text(
                     chat_id=update.message.chat_id,
                     message_id=msg_id,
-                    text=f"<b>Transcripción corregida:</b>\n\n<code>{_esc(snippet)}</code>",
+                    text=f"<b>Transcripción corregida:</b>\n\n<code>{_esc(_snippet(text))}</code>",
                     reply_markup=build_transcript_keyboard(),
                     parse_mode="HTML",
                 )
@@ -145,14 +181,13 @@ async def handle_text(
         pe["text"] = text
         pe["awaiting_correction"] = False
         pe.pop("classify_content", None)
-        snippet = text[:500] + ("..." if len(text) > 500 else "")
         msg_id = pe.get("msg_id")
         if msg_id:
             try:
                 await context.bot.edit_message_text(
                     chat_id=update.message.chat_id,
                     message_id=msg_id,
-                    text=f"<b>Texto corregido:</b>\n\n<code>{_esc(snippet)}</code>",
+                    text=f"<b>Texto corregido:</b>\n\n<code>{_esc(_snippet(text))}</code>",
                     reply_markup=build_extraction_keyboard(),
                     parse_mode="HTML",
                 )
@@ -209,12 +244,7 @@ async def handle_text(
 
     # Bloquear si hay cualquier teclado pendiente de resolución
     if _has_pending_keyboard(context):
-        ids = context.user_data.setdefault("block_msg_ids", [])
-        ids.append(update.message.message_id)  # mensaje del usuario
-        sent = await update.message.reply_text(
-            "Hay una acción pendiente. Resolver los botones antes de continuar."
-        )
-        ids.append(sent.message_id)  # respuesta del bot
+        await reply_blocked(context, update.message.reply_text, update.message)
         return
 
     # Detectar URL de arXiv antes del flujo genérico
@@ -235,14 +265,10 @@ async def handle_text(
 
     if check_injection_risk(text):
         logger.warning("Patrón de inyección detectado en mensaje")
-        from adso.constants import CB_CANCEL, CB_INTENT_NOTE, CB_INTENT_TASK
+        # Sin la fila de búsqueda: el texto es sospechoso, no una consulta.
         await update.message.reply_text(
             "Contenido con patrón sospechoso. ¿Guardar de todas formas?",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Cancelar", callback_data=CB_CANCEL),
-                InlineKeyboardButton("Tarea", callback_data=CB_INTENT_TASK),
-                InlineKeyboardButton("Nota", callback_data=CB_INTENT_NOTE),
-            ]]),
+            reply_markup=build_intent_keyboard([]),
         )
         return
 
@@ -354,12 +380,7 @@ async def handle_audio(
     msg = update.message
 
     if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
-        ids = context.user_data.setdefault("block_msg_ids", [])
-        ids.append(msg.message_id)
-        sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolver los botones antes de continuar."
-        )
-        ids.append(sent.message_id)
+        await reply_blocked(context, msg.reply_text, msg)
         return
 
     audio_file = msg.voice or msg.audio
@@ -369,25 +390,17 @@ async def handle_audio(
 
     max_bytes = settings.documents.max_size_mb * 1024 * 1024
     if audio_file.file_size and audio_file.file_size > max_bytes:
-        await msg.reply_text(
-            f"Audio demasiado grande (máx {settings.documents.max_size_mb}MB)."
-        )
+        await msg.reply_text(_too_large_msg(settings, "Audio"))
         return
 
     await msg.reply_text("Transcribiendo audio...")
 
+    tmp_path: Optional[Path] = None
     try:
-        import tempfile
-        tg_file = await audio_file.get_file()
-        suffix = ".ogg" if msg.voice else Path(tg_file.file_path or "audio.ogg").suffix
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        await tg_file.download_to_drive(str(tmp_path))
+        tmp_path = await _download_to_tmp(audio_file, ".ogg" if msg.voice else None)
 
         if await _exceeds_size_after_download(tmp_path, audio_file.file_size, max_bytes):
-            await msg.reply_text(
-                f"Audio demasiado grande (máx {settings.documents.max_size_mb}MB)."
-            )
+            await msg.reply_text(_too_large_msg(settings, "Audio"))
             return
 
         text = await transcribe_audio(
@@ -408,9 +421,8 @@ async def handle_audio(
             "media_type": "audio",
         }
 
-        snippet = text[:500] + ("..." if len(text) > 500 else "")
         sent = await msg.reply_text(
-            f"<b>Transcripción:</b>\n\n<code>{_esc(snippet)}</code>",
+            f"<b>Transcripción:</b>\n\n<code>{_esc(_snippet(text))}</code>",
             reply_markup=build_transcript_keyboard(),
             parse_mode="HTML",
         )
@@ -425,7 +437,7 @@ async def handle_audio(
         logger.error("Error transcribiendo audio: %s", e)
         context.user_data.pop("pending_transcript", None)
         await msg.reply_text(f"Error al transcribir: {e}")
-        if "tmp_path" in dir():
+        if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
 
@@ -589,9 +601,6 @@ async def _dispatch_document(
                 "preserve_body": True,  # texto plano: body verbatim, LLM solo genera frontmatter
             }
 
-            snippet = text[:500]
-            if len(text) > 500:
-                snippet += "..."
             aviso = (
                 _TRUNCATION_NOTICE.format(limite=_format_miles(_TEXT_FILE_MAX_CHARS))
                 if getattr(text, "truncated", False)
@@ -600,7 +609,7 @@ async def _dispatch_document(
             try:
                 await msg.reply_text(
                     f"<b>Contenido de {_esc(filename)}:</b>\n\n"
-                    f"<code>{_esc(snippet)}</code>{aviso}\n\n"
+                    f"<code>{_esc(_snippet(text))}</code>{aviso}\n\n"
                     "Confirmar, o enviar texto corregido.",
                     reply_markup=build_extraction_keyboard(),
                     parse_mode="HTML",
@@ -625,9 +634,7 @@ async def _dispatch_document(
         await msg.reply_text(
             f"Archivo recibido: <b>{_esc(filename)}</b>\n\n"
             "Formato no compatible. Describir el contenido para clasificarlo, o cancelar.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Cancelar", callback_data=CB_EXTRACTION_CANCEL)]
-            ]),
+            reply_markup=build_cancel_keyboard(CB_EXTRACTION_CANCEL),
             parse_mode="HTML",
         )
     except Exception:
@@ -650,12 +657,7 @@ async def handle_document(
     doc = msg.document
 
     if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
-        ids = context.user_data.setdefault("block_msg_ids", [])
-        ids.append(msg.message_id)
-        sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolver los botones antes de continuar."
-        )
-        ids.append(sent.message_id)
+        await reply_blocked(context, msg.reply_text, msg)
         return
 
     if not doc:
@@ -666,25 +668,16 @@ async def handle_document(
 
     max_bytes = settings.documents.max_size_mb * 1024 * 1024
     if doc.file_size and doc.file_size > max_bytes:
-        await msg.reply_text(
-            f"Archivo demasiado grande (máx {settings.documents.max_size_mb}MB)."
-        )
+        await msg.reply_text(_too_large_msg(settings, "Archivo"))
         return
 
-    import tempfile
     tmp_path: Optional[Path] = None
     transferred = False
     try:
-        tg_file = await doc.get_file()
-        suffix = Path(filename).suffix or ""
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        await tg_file.download_to_drive(str(tmp_path))
+        tmp_path = await _download_to_tmp(doc, Path(filename).suffix or "")
 
         if await _exceeds_size_after_download(tmp_path, doc.file_size, max_bytes):
-            await msg.reply_text(
-                f"Archivo demasiado grande (máx {settings.documents.max_size_mb}MB)."
-            )
+            await msg.reply_text(_too_large_msg(settings, "Archivo"))
             return
 
         caption = msg.caption or None
@@ -738,12 +731,7 @@ async def handle_photo(
     msg = update.message
 
     if _has_pending_keyboard(context) or _is_awaiting_text_input(context):
-        ids = context.user_data.setdefault("block_msg_ids", [])
-        ids.append(msg.message_id)
-        sent = await msg.reply_text(
-            "Hay una acción pendiente. Resolver los botones antes de continuar."
-        )
-        ids.append(sent.message_id)
+        await reply_blocked(context, msg.reply_text, msg)
         return
 
     photo = msg.photo[-1] if msg.photo else None  # mayor resolución disponible
@@ -753,21 +741,13 @@ async def handle_photo(
 
     max_bytes = settings.documents.max_size_mb * 1024 * 1024
     if photo.file_size and photo.file_size > max_bytes:
-        await msg.reply_text(
-            f"Imagen demasiado grande (máx {settings.documents.max_size_mb}MB)."
-        )
+        await msg.reply_text(_too_large_msg(settings, "Imagen"))
         return
 
-    import tempfile
-    tg_file = await photo.get_file()
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-    await tg_file.download_to_drive(str(tmp_path))
+    tmp_path = await _download_to_tmp(photo, ".jpg")
 
     if await _exceeds_size_after_download(tmp_path, photo.file_size, max_bytes):
-        await msg.reply_text(
-            f"Imagen demasiado grande (máx {settings.documents.max_size_mb}MB)."
-        )
+        await msg.reply_text(_too_large_msg(settings, "Imagen"))
         return
 
     context.user_data["pending_fallback_pdf"] = {
@@ -874,11 +854,8 @@ async def _process_pdf_after_read_status(
                 preview_parts.append(f"\n<i>{_esc(abstract_snippet)}</i>")
             preview_text = "\n".join(preview_parts) or "<i>(sin secciones detectadas)</i>"
         else:
-            snippet = text[:500]
-            if len(text) > 500:
-                snippet += "..."
             pages = pdf_meta.get("pages", "?")
-            preview_text = f"Páginas: {pages}\n\n<code>{_esc(snippet)}</code>"
+            preview_text = f"Páginas: {pages}\n\n<code>{_esc(_snippet(text))}</code>"
 
         await query.edit_message_text(
             f"<b>PDF extraído:</b>\n\n{preview_text}\n\n"

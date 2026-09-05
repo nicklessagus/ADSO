@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -214,21 +215,19 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: s
     if fm.get("priority"):
         parts.append(f"Prioridad: {fm['priority']}")
 
-    # Mostrar hora si está en `scheduled` o en `due_date` con componente horario
-    _time_source = fm.get("scheduled") or fm.get("due_date")
-    if _time_source:
+    # Mostrar hora si `scheduled` o `due_date` traen un componente horario que
+    # no sea medianoche (una fecha sola llega como `date` o como datetime 00:00).
+    time_source = fm.get("scheduled") or fm.get("due_date")
+    if time_source:
         try:
-            from datetime import datetime as _dt, date as _date
-            if hasattr(_time_source, "strftime"):
-                dt = _time_source
-            else:
-                dt = _dt.fromisoformat(str(_time_source))
-            # Solo mostrar si tiene hora no-medianoche
-            if isinstance(dt, _dt) and not isinstance(dt, _date) or (
-                hasattr(dt, "hour") and (dt.hour != 0 or dt.minute != 0)
-            ):
+            dt = (
+                time_source
+                if isinstance(time_source, datetime)
+                else datetime.fromisoformat(str(time_source))
+            )
+            if dt.hour != 0 or dt.minute != 0:
                 parts.append(f"Horario: {dt.strftime('%d/%m/%Y %H:%M')}")
-        except Exception:
+        except (TypeError, ValueError):
             pass
 
     return "\n".join(parts)

@@ -30,9 +30,10 @@ from pathlib import Path
 
 import chromadb
 
+from adso.constants import DEFAULT_EXCLUDE_DIRS
 from adso.embeddings import COLLECTION_NAME, should_index
 
-EXCLUDE_DIRS = ["05-Archive", ".obsidian", ".trash"]
+EXCLUDE_DIRS = list(DEFAULT_EXCLUDE_DIRS)
 
 
 def main() -> int:

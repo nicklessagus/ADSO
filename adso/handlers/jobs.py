@@ -11,8 +11,13 @@ from telegram.ext import ContextTypes
 
 from adso.bot_utils import _get_existing_items, _get_existing_tags, mark_bot_written, spawn_tracked
 from adso.config import Settings
+from adso.constants import STATUS_ON_CONFIRM
 from adso.embeddings import EmbeddingsClient
-from adso.handlers.capture import _index_note_safe, _redirect_unimplemented_mode
+from adso.handlers.capture import (
+    _index_note_safe,
+    _redirect_unimplemented_mode,
+    inherit_inbox_frontmatter,
+)
 from adso.keyboards import _esc
 from adso.llm_client import classify, extract_original_from_degraded
 from adso.vault_search import find_by_property
@@ -37,8 +42,6 @@ _PENDING_FLOW_KEYS = {
     "manage_missing_fields", "pending_fallback_pdf", "pending_read_status",
     "pending_arxiv", "pending_duplicate_doc", "pending_report",
 }
-
-_STATUS_DEFAULT = {"reference": "active", "task": "pending", "idea": "raw"}
 
 # Lock compartido entre los jobs pesados sobre el vault (reclassify_inbox y
 # reindex_job). Evita: (a) dos invocaciones del mismo job en paralelo si una
@@ -141,14 +144,11 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
             new_fm["project"] = orig_fm.get("project")
             new_fm["section"] = orig_fm.get("section")
             new_fm["area"] = orig_fm.get("area")
-            new_fm["date_created"] = orig_fm.get("date_created", "")
-            new_fm["source"] = "telegram"
-            new_fm["media_type"] = orig_fm.get("media_type", "text")
-            new_fm.pop("user_context", None)
+            inherit_inbox_frontmatter(new_fm, orig_fm)
 
             note_type = new_fm.get("type", "reference")
             if new_fm.get("status") in (None, "pending-classification"):
-                new_fm["status"] = _STATUS_DEFAULT.get(note_type, "active")
+                new_fm["status"] = STATUS_ON_CONFIRM.get(note_type, "active")
 
             if orig_fm.get("media_type") == "audio":
                 body = extract_original_from_degraded(note.body)

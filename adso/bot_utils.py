@@ -15,9 +15,9 @@ from typing import Any, Awaitable, Callable, Iterator, Optional
 
 from telegram.ext import ContextTypes
 
-from adso.constants import MANAGE_KEYWORDS
+from adso.constants import DEFAULT_EXCLUDE_DIRS, MANAGE_KEYWORDS
 from adso.vault_cache import parse_cached
-from adso.vault_search import get_all_tags
+from adso.vault_search import find_by_property, get_all_tags
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,14 @@ def mark_bot_written(bot_data: dict, path: Path) -> None:
             paths.discard(stale)
 
 
+# Estados que dejan un teclado inline a la vista y bloquean todo input nuevo.
+_KEYBOARD_STATE_KEYS = (
+    "pending_note", "pending_raw_content", "pending_fallback_pdf",
+    "pending_report", "pending_read_status", "pending_arxiv",
+    "pending_duplicate_doc", "pending_operation",
+)
+
+
 def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """True si hay una acción con teclado inline pendiente de resolución.
 
@@ -141,29 +149,13 @@ def _has_pending_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     pending_description, manage_missing_fields).
     """
     ud = context.user_data
-    if ud.get("pending_note"):
+    if any(ud.get(key) for key in _KEYBOARD_STATE_KEYS):
         return True
-    if ud.get("pending_raw_content"):
-        return True
-    pt = ud.get("pending_transcript", {})
-    if pt and not pt.get("awaiting_correction"):
-        return True
-    pe = ud.get("pending_extraction")
-    if pe and not pe.get("awaiting_correction"):
-        return True
-    if ud.get("pending_fallback_pdf"):
-        return True
-    if ud.get("pending_report"):
-        return True
-    if ud.get("pending_read_status"):
-        return True
-    if ud.get("pending_arxiv"):
-        return True
-    if ud.get("pending_duplicate_doc"):
-        return True
-    if ud.get("pending_operation"):
-        return True
-    return False
+    # Estos dos muestran teclado salvo mientras esperan el texto corregido.
+    return any(
+        ud.get(key) and not ud[key].get("awaiting_correction")
+        for key in ("pending_transcript", "pending_extraction")
+    )
 
 
 def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -174,20 +166,17 @@ def _is_awaiting_text_input(context: ContextTypes.DEFAULT_TYPE) -> bool:
     bloquear audio, fotos, documentos y comandos en esos mismos estados.
     """
     ud = context.user_data
-    if ud.get("pending_transcript", {}).get("awaiting_correction"):
-        return True
-    if ud.get("pending_extraction", {}).get("awaiting_correction"):
-        return True
-    if ud.get("pending_note", {}).get("awaiting_correction"):
+    if any(
+        (ud.get(key) or {}).get("awaiting_correction")
+        for key in ("pending_transcript", "pending_extraction", "pending_note")
+    ):
         return True
     # `pending_description` espera texto (la descripción de un archivo sin
     # caption), así que `_has_pending_keyboard` lo excluye a propósito. Pero sin
     # incluirlo acá, mandar un segundo binario pasaba todos los guards y
     # sobreescribía el estado: el temporal del primer archivo quedaba huérfano
     # y el archivo se perdía sin aviso. E6 de docs/audit-2026-07-31.md.
-    if ud.get("pending_description"):
-        return True
-    return False
+    return bool(ud.get("pending_description"))
 
 
 def _extract_name_from_command(text: str, operation: str) -> str:
@@ -287,6 +276,27 @@ async def render_with_keyboard(
         return await fallback_msg.reply_text(text, **kwargs)
 
 
+async def reply_blocked(
+    context: ContextTypes.DEFAULT_TYPE, reply: Callable[..., Awaitable[Any]], message: Any
+) -> None:
+    """Rechaza un input porque hay un teclado pendiente, dejando rastro para borrarlo.
+
+    El mensaje del usuario y el aviso del bot se anotan en ``block_msg_ids``:
+    `handle_callback` los borra del chat al resolver el teclado. Antes cada
+    handler de entrada repetía las cuatro líneas.
+
+    Args:
+        context: Bot context (``user_data``).
+        reply: Corrutina con la que contestar (``msg.reply_text`` o equivalente).
+        message: Mensaje del usuario que se rechaza; puede ser None.
+    """
+    ids = context.user_data.setdefault("block_msg_ids", [])
+    if message is not None:
+        ids.append(message.message_id)
+    sent = await reply("Hay una acción pendiente. Resolver los botones antes de continuar.")
+    ids.append(sent.message_id)
+
+
 def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
     """Limpia estados pendientes del user_data y archivos temporales asociados.
 
@@ -379,6 +389,34 @@ async def _get_existing_tags(vault_path: Path, limit: int = 100) -> list[str]:
     Excluye 00-Inbox para que solo se propaguen tags de notas ya confirmadas por
     el usuario. Limita a `limit` tags para no inflar el system prompt.
     """
-    exclude = ["05-Archive", ".obsidian", ".trash", "00-Inbox"]
+    exclude = [*DEFAULT_EXCLUDE_DIRS, "00-Inbox"]
     tag_counts = await get_all_tags(vault_path, exclude_dirs=exclude)
     return list(tag_counts.keys())[:limit]
+
+
+async def count_unclassified_inbox(vault_path: Path) -> int:
+    """Cuenta las notas del Inbox pendientes de clasificar y sin destino (Caso B).
+
+    Es la regla que comparten `/clasificar` (para elegir qué nota procesar) y
+    `_cb_confirm` (para avisar cuántas quedan): `status: pending-classification`
+    en `00-Inbox/` y ni `project` ni `area` en el frontmatter. Antes cada uno
+    la tenía copiada.
+
+    Comportamiento ante error: una nota ilegible no cuenta y no interrumpe el
+    conteo.
+    """
+    refs = await find_by_property(
+        "status", "pending-classification", vault_path, scope="00-Inbox"
+    )
+
+    def _count() -> int:
+        total = 0
+        for ref in refs:
+            note = parse_cached(ref.path)
+            if note is None:
+                continue
+            if not note.frontmatter.get("project") and not note.frontmatter.get("area"):
+                total += 1
+        return total
+
+    return await asyncio.to_thread(_count)

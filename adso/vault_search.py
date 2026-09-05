@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from adso.constants import DEFAULT_EXCLUDE_DIRS
 from adso.vault_cache import parse_cached
 from adso.vault_writer import NoteRef, NoteData
 
@@ -28,8 +29,11 @@ _INLINE_TAG_RE = re.compile(r"(?<!\[)#([\w/-]+)")
 _CHECKBOX_PENDING_RE = re.compile(r"^- \[ ] (.+)$", re.MULTILINE)
 _CHECKBOX_DONE_RE = re.compile(r"^- \[x] (.+)$", re.MULTILINE)
 
-# Default exclude dirs
-_DEFAULT_EXCLUDE = ["05-Archive", ".obsidian", ".trash"]
+# Default exclude dirs (la taxonomía vive en constants.py)
+_DEFAULT_EXCLUDE = list(DEFAULT_EXCLUDE_DIRS)
+
+# Tokens de `search()` que filtran por un campo del frontmatter con igualdad.
+_FRONTMATTER_TOKENS = ("type", "status", "project", "area")
 
 # `03-Resources/` es la carpeta de adjuntos según la taxonomía: un `.md` ahí no
 # es una nota del vault. Se excluye **siempre**, no vía `exclude_dirs`, porque
@@ -114,8 +118,7 @@ def _strip_code_blocks(text: str) -> str:
     # Inline code
     text = re.sub(r"`[^`]+`", "", text)
     # Obsidian comments %%...%%
-    text = re.sub(r"%%[\s\S]*?%%", "", text)
-    return text
+    return re.sub(r"%%[\s\S]*?%%", "", text)
 
 
 def _extract_tags_from_note(note: NoteData) -> set[str]:
@@ -220,7 +223,7 @@ async def search(
         if ":" in word and not word.startswith("http"):
             key, value = word.split(":", 1)
             key_lower = key.lower()
-            if key_lower in ("tag", "type", "status", "project", "area", "path", "file"):
+            if key_lower in (*_FRONTMATTER_TOKENS, "tag", "path", "file"):
                 tokens.setdefault(key_lower, []).append(value.lower())
                 continue
         free_text_parts.append(word)
@@ -240,20 +243,11 @@ async def search(
             fm = note.frontmatter
 
             # Aplicar filtros por tokens
-            skip = False
-
-            if "type" in tokens:
-                if str(fm.get("type") or "").lower() not in tokens["type"]:
-                    skip = True
-            if "status" in tokens:
-                if str(fm.get("status") or "").lower() not in tokens["status"]:
-                    skip = True
-            if "project" in tokens:
-                if str(fm.get("project") or "").lower() not in tokens["project"]:
-                    skip = True
-            if "area" in tokens:
-                if str(fm.get("area") or "").lower() not in tokens["area"]:
-                    skip = True
+            skip = any(
+                str(fm.get(field) or "").lower() not in tokens[field]
+                for field in _FRONTMATTER_TOKENS
+                if field in tokens
+            )
             if "tag" in tokens:
                 note_tags = _extract_tags_from_note(note)
                 if not any(t in note_tags for t in tokens["tag"]):
@@ -262,10 +256,10 @@ async def search(
                 rel = str(md_path.relative_to(vault_path)).lower()
                 if not any(p in rel for p in tokens["path"]):
                     skip = True
-            if "file" in tokens:
-                fname = md_path.stem.lower()
-                if not any(f in fname for f in tokens["file"]):
-                    skip = True
+            if "file" in tokens and not any(
+                f in md_path.stem.lower() for f in tokens["file"]
+            ):
+                skip = True
 
             if skip:
                 continue
@@ -332,17 +326,10 @@ async def find_by_tag(
 
             note_tags = _extract_tags_from_note(note)
 
-            matched = False
-            for nt in note_tags:
-                if hierarchical:
-                    if nt == normalized or nt.startswith(normalized + "/"):
-                        matched = True
-                        break
-                else:
-                    if nt == normalized:
-                        matched = True
-                        break
-
+            matched = any(
+                nt == normalized or (hierarchical and nt.startswith(normalized + "/"))
+                for nt in note_tags
+            )
             if matched:
                 results.append(_note_ref_from_data(note))
 

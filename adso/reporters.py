@@ -18,6 +18,7 @@ from typing import Optional
 
 from adso import __version__ as ADSO_VERSION
 from adso.config import GEMINI_MODEL
+from adso.constants import DEFAULT_EXCLUDE_DIRS
 from adso.vault_search import scan_notes
 from adso.vault_writer import NoteData
 
@@ -43,6 +44,9 @@ _ASCII_HEADER = """\
 
 # Priority ordering for sort
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2, None: 3, "": 3}
+
+# Carpetas fuera de todo reporte.
+_EXCLUDE = list(DEFAULT_EXCLUDE_DIRS)
 
 
 class ReportBytes(bytes):
@@ -185,6 +189,48 @@ def _priority_key(note: NoteData) -> int:
     return _PRIORITY_ORDER.get(p.lower() if isinstance(p, str) else p, 3)
 
 
+def _title_key(note: NoteData) -> str:
+    """Clave de ordenamiento alfabético por título (coaccionado a str)."""
+    return str(note.frontmatter.get("title") or "")
+
+
+def _fm_lower(note: NoteData, field: str) -> str:
+    """Valor de un campo del frontmatter como string en minúsculas ("" si falta)."""
+    return str(note.frontmatter.get(field, "") or "").lower()
+
+
+def _scope_label(project: Optional[str], area: Optional[str], inbox: bool = False) -> str:
+    """Etiqueta del scope de un reporte, en orden de precedencia inbox > proyecto > área."""
+    if inbox:
+        return "Inbox"
+    if project:
+        return f"Proyecto: {project}"
+    if area:
+        return f"Área: {area}"
+    return "Vault completo"
+
+
+def _filter_scope(
+    notes: list[NoteData], project: Optional[str], area: Optional[str]
+) -> list[NoteData]:
+    """Filtra notas por proyecto o área (case-insensitive). Sin scope devuelve todas."""
+    if project:
+        return [n for n in notes if _fm_lower(n, "project") == project.lower()]
+    if area:
+        return [n for n in notes if _fm_lower(n, "area") == area.lower()]
+    return notes
+
+
+def _authors_year(fm: dict) -> str:
+    """``"Autor1, Autor2 (año)"`` para la línea de un paper; "" si no hay nada."""
+    authors = _normalize_authors(fm.get("authors"))
+    year = fm.get("year") or ""
+    text = ", ".join(authors[:2])
+    if year:
+        text = f"{text} ({year})" if text else str(year)
+    return text
+
+
 async def _llm_synthesis(report_summary: str) -> Optional[str]:
     """Genera una síntesis breve del reporte usando Gemini (texto libre).
 
@@ -300,8 +346,6 @@ async def scope_report(
         entraron). `item_count == 0` es lo que usa `_send_report` para avisar
         "no hay nada" en vez de mandar un adjunto vacío.
     """
-    exclude = ["05-Archive", ".obsidian", ".trash"]
-
     if inbox:
         scope_path = "00-Inbox"
     elif project:
@@ -311,16 +355,13 @@ async def scope_report(
     else:
         scope_path = None
 
-    all_notes = await scan_notes(vault_path, scope=scope_path, exclude_dirs=exclude)
+    all_notes = await scan_notes(vault_path, scope=scope_path, exclude_dirs=_EXCLUDE)
 
     # Separar por tipo
     references = [n for n in all_notes if n.frontmatter.get("type") == "reference"]
     tasks = [n for n in all_notes if n.frontmatter.get("type") == "task"]
     ideas = [n for n in all_notes if n.frontmatter.get("type") == "idea"]
-    papers_unread = [
-        n for n in references
-        if str(n.frontmatter.get("read_status", "")).lower() == "unread"
-    ]
+    papers_unread = [n for n in references if _fm_lower(n, "read_status") == "unread"]
 
     # Última actividad
     last_modified: Optional[datetime] = None
@@ -329,16 +370,7 @@ async def scope_report(
         if dt and (last_modified is None or dt > last_modified):
             last_modified = dt
 
-    # Título del scope
-    if inbox:
-        scope_label = "Inbox"
-    elif project:
-        scope_label = f"Proyecto: {project}"
-    elif area:
-        scope_label = f"Área: {area}"
-    else:
-        scope_label = "Vault completo"
-
+    scope_label = _scope_label(project, area, inbox)
     title = f"Reporte de scope — {scope_label}"
 
     # Construir resumen para síntesis LLM
@@ -365,7 +397,7 @@ async def scope_report(
     active_refs = [n for n in references if n.frontmatter.get("status") != "pending-classification"]
     lines.append(f"## Referencias activas ({len(active_refs)})\n")
     if active_refs:
-        for n in sorted(active_refs, key=lambda x: str(x.frontmatter.get("title") or "")):
+        for n in sorted(active_refs, key=_title_key):
             lines.append(_render(vault_path, n))
     else:
         lines.append("_Sin referencias activas._")
@@ -376,7 +408,7 @@ async def scope_report(
     lines.append("## Tareas\n")
     has_tasks = False
     for st in task_statuses:
-        group = [n for n in tasks if str(n.frontmatter.get("status", "")).lower() == st]
+        group = [n for n in tasks if _fm_lower(n, "status") == st]
         if group:
             has_tasks = True
             lines.append(f"### {st.capitalize()} ({len(group)})\n")
@@ -394,11 +426,11 @@ async def scope_report(
     lines.append("## Ideas\n")
     has_ideas = False
     for st in idea_statuses:
-        group = [n for n in ideas if str(n.frontmatter.get("status", "")).lower() == st]
+        group = [n for n in ideas if _fm_lower(n, "status") == st]
         if group:
             has_ideas = True
             lines.append(f"### {st.capitalize()} ({len(group)})\n")
-            for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
+            for n in sorted(group, key=_title_key):
                 lines.append(_render(vault_path, n))
             lines.append("")
     if not has_ideas:
@@ -408,12 +440,7 @@ async def scope_report(
     lines.append(f"## Papers sin leer ({len(papers_unread)})\n")
     if papers_unread:
         for n in sorted(papers_unread, key=_priority_key):
-            authors = _normalize_authors(n.frontmatter.get("authors"))
-            year = n.frontmatter.get("year") or ""
-            extra = ", ".join(str(a) for a in authors[:2])
-            if year:
-                extra = f"{extra} ({year})" if extra else str(year)
-            lines.append(_render(vault_path, n, extra))
+            lines.append(_render(vault_path, n, _authors_year(n.frontmatter)))
     else:
         lines.append("_Sin papers pendientes._")
     lines.append("")
@@ -452,23 +479,11 @@ async def ideas_report(
         entraron). `item_count == 0` es lo que usa `_send_report` para avisar
         "no hay nada" en vez de mandar un adjunto vacío.
     """
-    exclude = ["05-Archive", ".obsidian", ".trash"]
-    all_notes = await scan_notes(vault_path, exclude_dirs=exclude, filters={"type": "idea"})
-
-    # Filtrar por scope
-    if project:
-        all_notes = [n for n in all_notes if str(n.frontmatter.get("project", "")).lower() == project.lower()]
-    elif area:
-        all_notes = [n for n in all_notes if str(n.frontmatter.get("area", "")).lower() == area.lower()]
-
-    # Scope label
-    if project:
-        scope_label = f"Proyecto: {project}"
-    elif area:
-        scope_label = f"Área: {area}"
-    else:
-        scope_label = "Vault completo"
-
+    all_notes = _filter_scope(
+        await scan_notes(vault_path, exclude_dirs=_EXCLUDE, filters={"type": "idea"}),
+        project, area,
+    )
+    scope_label = _scope_label(project, area)
     title = f"Reporte de ideas — {scope_label}"
 
     idea_statuses = ["raw", "implemented", "discarded", "pending-classification"]
@@ -476,7 +491,7 @@ async def ideas_report(
     # Síntesis LLM
     summary_parts = [f"Ideas en {scope_label}: {len(all_notes)} total"]
     for st in idea_statuses:
-        count = sum(1 for n in all_notes if str(n.frontmatter.get("status", "")).lower() == st)
+        count = sum(1 for n in all_notes if _fm_lower(n, "status") == st)
         if count:
             summary_parts.append(f"  {st}: {count}")
     synthesis = await _llm_synthesis("\n".join(summary_parts))
@@ -490,11 +505,11 @@ async def ideas_report(
     lines.append(f"**Total:** {len(all_notes)} ideas\n")
 
     for st in idea_statuses:
-        group = [n for n in all_notes if str(n.frontmatter.get("status", "")).lower() == st]
+        group = [n for n in all_notes if _fm_lower(n, "status") == st]
         if not group:
             continue
         lines.append(f"## {st.capitalize()} ({len(group)})\n")
-        for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
+        for n in sorted(group, key=_title_key):
             proj = n.frontmatter.get("project") or ""
             ar = n.frontmatter.get("area") or ""
             loc = proj or ar
@@ -504,10 +519,7 @@ async def ideas_report(
 
     # Ideas sin status conocido
     known = set(idea_statuses)
-    orphan = [
-        n for n in all_notes
-        if str(n.frontmatter.get("status", "")).lower() not in known
-    ]
+    orphan = [n for n in all_notes if _fm_lower(n, "status") not in known]
     if orphan:
         lines.append(f"## Sin status ({len(orphan)})\n")
         for n in orphan:
@@ -542,11 +554,10 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         entraron). `item_count == 0` es lo que usa `_send_report` para avisar
         "no hay nada" en vez de mandar un adjunto vacío.
     """
-    exclude = ["05-Archive", ".obsidian", ".trash"]
     today = date.today()
     today_dt = datetime(today.year, today.month, today.day)
 
-    all_notes = await scan_notes(vault_path, exclude_dirs=exclude)
+    all_notes = await scan_notes(vault_path, exclude_dirs=_EXCLUDE)
 
     # --- Tareas vencidas ---
     overdue: list[NoteData] = []
@@ -554,16 +565,10 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         fm = note.frontmatter
         if fm.get("type") != "task":
             continue
-        status = str(fm.get("status", "")).lower()
-        if status not in ("pending", "in-progress"):
+        if _fm_lower(note, "status") not in ("pending", "in-progress"):
             continue
-        due_dt = _parse_fm_date(fm.get("due_date"))
-        if due_dt is None:
-            continue
-        # Normalizar a naive para comparar
-        if due_dt.tzinfo is not None:
-            due_dt = due_dt.replace(tzinfo=None)
-        if due_dt < today_dt:
+        due_dt = _to_naive(_parse_fm_date(fm.get("due_date")))
+        if due_dt is not None and due_dt < today_dt:
             overdue.append(note)
 
     # --- Inbox acumulado ---
@@ -571,16 +576,12 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
     inbox_notes = await scan_notes(
         vault_path,
         scope="00-Inbox",
-        exclude_dirs=exclude,
+        exclude_dirs=_EXCLUDE,
         filters={"status": "pending-classification"},
     )
     for note in inbox_notes:
-        created_dt = _parse_fm_date(note.frontmatter.get("date_created"))
-        days_old: Optional[int] = None
-        if created_dt:
-            if created_dt.tzinfo is not None:
-                created_dt = created_dt.replace(tzinfo=None)
-            days_old = (today_dt - created_dt).days
+        created_dt = _to_naive(_parse_fm_date(note.frontmatter.get("date_created")))
+        days_old = (today_dt - created_dt).days if created_dt else None
         inbox_pending.append((note, days_old))
 
     # --- Proyectos y áreas sin actividad ---
@@ -590,44 +591,33 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
 
     for note in all_notes:
         fm = note.frontmatter
-        dt = _parse_fm_date(fm.get("date_modified"))
-        if dt is None:
-            dt = _parse_fm_date(fm.get("date_created"))
+        dt = _to_naive(
+            _parse_fm_date(fm.get("date_modified")) or _parse_fm_date(fm.get("date_created"))
+        )
         if dt is None:
             continue
-        if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
+        for field, activity in (("project", project_activity), ("area", area_activity)):
+            key = str(fm.get(field) or "")
+            if key and (key not in activity or dt > activity[key]):
+                activity[key] = dt
 
-        proj = str(fm.get("project") or "")
-        if proj:
-            if proj not in project_activity or dt > project_activity[proj]:
-                project_activity[proj] = dt
-        ar = str(fm.get("area") or "")
-        if ar:
-            if ar not in area_activity or dt > area_activity[ar]:
-                area_activity[ar] = dt
+    def _stale(activity: dict[str, datetime]) -> list[tuple[str, int]]:
+        """(nombre, días sin actividad) de los scopes que superan el umbral, peor primero."""
+        stale = [
+            (name, (today_dt - last_dt).days)
+            for name, last_dt in activity.items()
+            if (today_dt - last_dt).days >= stale_days
+        ]
+        return sorted(stale, key=lambda x: -x[1])
 
-    stale_projects: list[tuple[str, int]] = []  # (name, days_inactive)
-    for proj, last_dt in project_activity.items():
-        days = (today_dt - last_dt).days
-        if days >= stale_days:
-            stale_projects.append((proj, days))
-    stale_projects.sort(key=lambda x: -x[1])
-
-    stale_areas: list[tuple[str, int]] = []
-    for ar, last_dt in area_activity.items():
-        days = (today_dt - last_dt).days
-        if days >= stale_days:
-            stale_areas.append((ar, days))
-    stale_areas.sort(key=lambda x: -x[1])
+    stale_projects = _stale(project_activity)
+    stale_areas = _stale(area_activity)
 
     # --- Ideas raw por proyecto/área ---
     raw_ideas_by_scope: dict[str, list[NoteData]] = {}
     for note in all_notes:
         fm = note.frontmatter
-        if fm.get("type") != "idea":
-            continue
-        if str(fm.get("status", "")).lower() != "raw":
+        if fm.get("type") != "idea" or _fm_lower(note, "status") != "raw":
             continue
         # str(): una nota editada a mano puede traer `project: 2024` (int) y
         # `sorted()` sobre keys mixtas str/int lanza TypeError.
@@ -702,7 +692,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         for scope_key in sorted(raw_ideas_by_scope):
             group = raw_ideas_by_scope[scope_key]
             lines.append(f"### {scope_key} ({len(group)})\n")
-            for n in sorted(group, key=lambda x: str(x.frontmatter.get("title") or "")):
+            for n in sorted(group, key=_title_key):
                 lines.append(_render(vault_path, n))
             lines.append("")
     else:
@@ -738,33 +728,17 @@ async def reading_queue(
         entraron). `item_count == 0` es lo que usa `_send_report` para avisar
         "no hay nada" en vez de mandar un adjunto vacío.
     """
-    exclude = ["05-Archive", ".obsidian", ".trash"]
-    all_notes = await scan_notes(
-        vault_path,
-        exclude_dirs=exclude,
-        filters={"read_status": "unread"},
+    all_notes = _filter_scope(
+        await scan_notes(vault_path, exclude_dirs=_EXCLUDE, filters={"read_status": "unread"}),
+        project, area,
     )
-
-    # Filtrar por scope
-    if project:
-        all_notes = [n for n in all_notes if str(n.frontmatter.get("project", "")).lower() == project.lower()]
-    elif area:
-        all_notes = [n for n in all_notes if str(n.frontmatter.get("area", "")).lower() == area.lower()]
-
-    # Scope label
-    if project:
-        scope_label = f"Proyecto: {project}"
-    elif area:
-        scope_label = f"Área: {area}"
-    else:
-        scope_label = "Vault completo"
-
+    scope_label = _scope_label(project, area)
     title = f"Cola de lectura — {scope_label}"
 
     # Síntesis LLM
-    high = sum(1 for n in all_notes if str(n.frontmatter.get("priority", "")).lower() == "high")
-    medium = sum(1 for n in all_notes if str(n.frontmatter.get("priority", "")).lower() == "medium")
-    low = sum(1 for n in all_notes if str(n.frontmatter.get("priority", "")).lower() not in ("high", "medium"))
+    high = sum(1 for n in all_notes if _fm_lower(n, "priority") == "high")
+    medium = sum(1 for n in all_notes if _fm_lower(n, "priority") == "medium")
+    low = len(all_notes) - high - medium
     summary_parts = [
         f"Cola de lectura en {scope_label}: {len(all_notes)} papers sin leer",
         f"  high: {high}, medium: {medium}, low/sin prioridad: {low}",
@@ -800,12 +774,7 @@ async def reading_queue(
         for n in group_sorted:
             fm = n.frontmatter
             priority = fm.get("priority") or ""
-            authors = _normalize_authors(fm.get("authors"))
-            year = fm.get("year") or ""
-            author_str = ", ".join(str(a) for a in authors[:2])
-            if year:
-                author_str = f"{author_str} ({year})" if author_str else str(year)
-            extra = " | ".join(x for x in [priority, author_str] if x)
+            extra = " | ".join(x for x in [priority, _authors_year(fm)] if x)
             lines.append(_render(vault_path, n, extra))
         lines.append("")
 

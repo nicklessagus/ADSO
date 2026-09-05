@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from adso.handlers.input import handle_text
 from adso.handlers.callbacks import handle_callback
-from adso.constants import CB_CONFIRM, CB_INTENT_SAVE
+from adso.constants import CB_CONFIRM, CB_INTENT_NOTE
 from adso.vault_writer import read_note
 
 
@@ -48,8 +48,8 @@ class TestCaptureMessage:
         await handle_text(update, mock_context)
         assert "pending_raw_content" in mock_context.user_data
 
-        # Paso 2: click "Guardar como nota" → LLM clasifica → preview
-        cb_save = make_callback_query(data=CB_INTENT_SAVE)
+        # Paso 2: click [Nota] → LLM clasifica → preview
+        cb_save = make_callback_query(data=CB_INTENT_NOTE)
         await handle_callback(cb_save, mock_context)
         assert "pending_note" in mock_context.user_data
 
@@ -97,8 +97,8 @@ class TestCaptureMessage:
         update = make_update(text="algo random")
         await handle_text(update, mock_context)
 
-        # Paso 2: click "Guardar como nota" → LLM degradado → preview pendiente
-        cb_save = make_callback_query(data=CB_INTENT_SAVE)
+        # Paso 2: click [Nota] → LLM degradado → preview pendiente
+        cb_save = make_callback_query(data=CB_INTENT_NOTE)
         await handle_callback(cb_save, mock_context)
 
         # El modo degradado muestra preview (pending_note) en lugar de auto-guardar

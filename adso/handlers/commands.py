@@ -11,10 +11,21 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from adso import __version__ as ADSO_VERSION
-from adso.bot_utils import _cleanup_pending, _get_existing_items, _get_existing_tags, _has_pending_keyboard, _is_awaiting_text_input
+from adso.bot_utils import (
+    _cleanup_pending,
+    _get_existing_items,
+    _get_existing_tags,
+    _has_pending_keyboard,
+    _is_awaiting_text_input,
+    reply_blocked,
+)
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
-from adso.handlers.capture import _redirect_unimplemented_mode, _remember_preview_msg
+from adso.handlers.capture import (
+    _redirect_unimplemented_mode,
+    _remember_preview_msg,
+    inherit_inbox_frontmatter,
+)
 from adso.keyboards import build_capture_keyboard, build_preview
 from adso.llm_client import classify, extract_original_from_degraded
 from adso import vault_cache
@@ -214,11 +225,7 @@ async def handle_clasificar(
         return
 
     if _has_pending_keyboard(context):
-        ids = context.user_data.setdefault("block_msg_ids", [])
-        if update.effective_message:
-            ids.append(update.effective_message.message_id)
-        sent = await reply("Hay una acción pendiente. Resolver los botones antes de continuar.")
-        ids.append(sent.message_id)
+        await reply_blocked(context, reply, update.effective_message)
         return
 
     inbox_notes = await find_by_property(
@@ -292,11 +299,8 @@ async def handle_clasificar(
 
     payload = result["payload"]
     new_fm = payload["frontmatter"]
-    new_fm["date_created"] = orig_fm.get("date_created", "")
-    new_fm["source"] = "telegram"
-    new_fm["media_type"] = orig_fm.get("media_type", "text")
-    new_fm.pop("user_context", None)
-    body = extract_original_from_degraded(note.body)
+    inherit_inbox_frontmatter(new_fm, orig_fm)
+    body = contenido
     payload["body"] = body
 
     context.user_data["pending_note"] = result

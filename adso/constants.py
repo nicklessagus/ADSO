@@ -1,7 +1,48 @@
-"""Constantes de callback data para inline keyboards de Telegram.
+"""Constantes compartidas: taxonomía del vault y callback data de los teclados.
 
 Este módulo no tiene imports locales — es la raíz del grafo de dependencias.
 """
+
+# ---------------------------------------------------------------------------
+# Taxonomía del vault
+# ---------------------------------------------------------------------------
+#
+# Única fuente de verdad para los enums del frontmatter. `llm_schema.py` (lo
+# que el LLM puede proponer) y `vault_writer.py` (lo que se puede persistir)
+# derivan sus sets de acá en vez de repetirlos: antes cada uno tenía su copia y
+# `STATUS_ON_CONFIRM` vivía dos veces con dos nombres (capture.py y jobs.py).
+
+# Tipos persistibles. `project-index` y `area-index` los genera el bot, no el LLM.
+NOTE_TYPES = frozenset({"reference", "task", "idea", "project-index", "area-index"})
+
+# Tipos que el LLM puede proponer en una captura.
+LLM_NOTE_TYPES = frozenset({"reference", "task", "idea"})
+
+# `status` válidos por tipo. `area-index` no tiene ciclo de vida (set vacío).
+STATUS_BY_TYPE: dict[str, frozenset[str]] = {
+    "reference": frozenset({"active", "pending-classification"}),
+    "task": frozenset({"pending", "in-progress", "done", "pending-classification"}),
+    "idea": frozenset({"raw", "implemented", "discarded", "pending-classification"}),
+    "project-index": frozenset({"active", "on-hold", "completed", "archived"}),
+    "area-index": frozenset(),
+}
+
+VALID_PRIORITY = frozenset({"low", "medium", "high"})
+
+# Status que corresponde a cada type cuando una nota deja de estar en
+# `pending-classification` (el usuario la confirma, la reubica o el cron la
+# reclasifica). Los sets de `STATUS_BY_TYPE` son disjuntos por tipo: una task
+# nunca puede quedar en `active` ni en `raw`, o los filtros y reportes por
+# `status` dejan de verla.
+STATUS_ON_CONFIRM: dict[str, str] = {
+    "reference": "active",
+    "task": "pending",
+    "idea": "raw",
+}
+
+# Carpetas que ningún scan ni índice debe mirar por defecto. Es el mismo valor
+# que el default de `vault.exclude_dirs` en config.yaml.
+DEFAULT_EXCLUDE_DIRS = ("05-Archive", ".obsidian", ".trash")
 
 # ---------------------------------------------------------------------------
 # Callback data constants
@@ -11,12 +52,10 @@ CB_CONFIRM = "confirm"
 CB_CANCEL = "cancel"
 CB_CORRECT = "correct"
 CB_DEST_INBOX = "dest:inbox"
-CB_DISAMBIG_CAPTURE = "disambig:capture"
 CB_DISAMBIG_QUERY = "disambig:query"
 CB_QUERY_REPORT = "query:report"
 CB_MANAGE_CONFIRM = "manage:confirm"
 CB_MANAGE_CANCEL = "manage:cancel"
-CB_INTENT_SAVE = "intent:save"
 CB_INTENT_TASK = "intent:task"
 CB_INTENT_NOTE = "intent:note"
 CB_INTENT_CREATE_PROJECT = "intent:project"
@@ -52,10 +91,6 @@ CB_DEST_PROJECT_PREFIX = "dest:project:"
 CB_CHOOSE_AREA = "choose:area"
 CB_CHOOSE_PROJECT = "choose:project"
 CB_BACK = "back"
-
-# ---------------------------------------------------------------------------
-# Keywords de gestión para detección sin LLM
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Report callback constants

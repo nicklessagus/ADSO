@@ -53,28 +53,68 @@ from adso.security import authorized
 logger = logging.getLogger(__name__)
 
 
-@authorized
-async def handle_reporte_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+# Paso 1 de cada tipo de reporte con scope: pregunta, callbacks de "mostrar
+# proyectos" / "mostrar áreas" y la opción extra (Inbox / todo).
+_CATEGORY_STEP: dict[str, tuple[str, str, str, str, str]] = {
+    CB_REPORT_SCOPE: (
+        "¿Reporte de un proyecto, un área o el inbox?",
+        CB_REPORT_SCOPE_SHOW_P, CB_REPORT_SCOPE_SHOW_A,
+        f"{CB_REPORT_SCOPE_PREFIX}inbox", "Inbox",
+    ),
+    CB_REPORT_IDEAS: (
+        "¿Filtrar ideas por proyecto, área o ver todas?",
+        CB_REPORT_IDEAS_SHOW_P, CB_REPORT_IDEAS_SHOW_A,
+        f"{CB_REPORT_IDEAS_PREFIX}all", "Todas",
+    ),
+    CB_REPORT_READING: (
+        "¿Filtrar la cola de lectura por proyecto, área o ver toda?",
+        CB_REPORT_READING_SHOW_P, CB_REPORT_READING_SHOW_A,
+        f"{CB_REPORT_READING_PREFIX}all", "Toda la cola",
+    ),
+}
+
+# Paso 2: qué lista mostrar (proyectos o áreas), con qué prefijo final y a
+# dónde vuelve [← Volver].
+_ITEMS_STEP: dict[str, tuple[bool, str, str, str]] = {
+    CB_REPORT_SCOPE_SHOW_P: (True, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE, "¿Qué proyecto?"),
+    CB_REPORT_SCOPE_SHOW_A: (False, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE, "¿Qué área?"),
+    CB_REPORT_IDEAS_SHOW_P: (True, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS, "¿Ideas de qué proyecto?"),
+    CB_REPORT_IDEAS_SHOW_A: (False, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS, "¿Ideas de qué área?"),
+    CB_REPORT_READING_SHOW_P: (
+        True, CB_REPORT_READING_PREFIX, CB_REPORT_READING, "¿Cola de lectura de qué proyecto?"
+    ),
+    CB_REPORT_READING_SHOW_A: (
+        False, CB_REPORT_READING_PREFIX, CB_REPORT_READING, "¿Cola de lectura de qué área?"
+    ),
+}
+
+
+async def _start_report_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, full: bool
 ) -> None:
-    """Handler de /reporte — muestra el menú de tipos de reporte.
+    """Muestra el menú de tipos de reporte y bloquea texto mientras esté activo.
 
-    Setea pending_report=True para bloquear texto mientras el menú está activo.
-
-    Args:
-        update: Telegram update.
-        context: Bot context.
+    `pending_report=True` bloquea texto entrante; `report_full` lo leen los
+    callbacks para pasarlo a los reporters.
     """
     if _is_awaiting_text_input(context):
         await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
         return
     context.user_data["pending_report"] = True
-    context.user_data["report_full"] = False
-    await update.message.reply_text(
-        "¿Qué reporte generar?",
-        reply_markup=build_report_type_keyboard(),
-    )
+    context.user_data["report_full"] = full
+    prompt = "¿Qué reporte generar?"
+    if full:
+        prompt += " (modo completo — incluye contenido de cada nota)"
+    await update.message.reply_text(prompt, reply_markup=build_report_type_keyboard())
+
+
+@authorized
+async def handle_reporte_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handler de /reporte — muestra el menú de tipos de reporte."""
+    await _start_report_menu(update, context, full=False)
 
 
 @authorized
@@ -82,23 +122,8 @@ async def handle_reporte_full_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """Handler de /reporte_full — igual a /reporte pero con detalle completo de cada nota.
-
-    Setea report_full=True para que los reporters incluyan el cuerpo de cada nota.
-
-    Args:
-        update: Telegram update.
-        context: Bot context.
-    """
-    if _is_awaiting_text_input(context):
-        await update.message.reply_text("Hay una corrección pendiente. Escribir el texto primero.")
-        return
-    context.user_data["pending_report"] = True
-    context.user_data["report_full"] = True
-    await update.message.reply_text(
-        "¿Qué reporte generar? (modo completo — incluye contenido de cada nota)",
-        reply_markup=build_report_type_keyboard(),
-    )
+    """Handler de /reporte_full — igual a /reporte pero con el cuerpo completo de cada nota."""
+    await _start_report_menu(update, context, full=True)
 
 
 async def handle_report_callback(
@@ -129,49 +154,20 @@ async def handle_report_callback(
         )
         return
 
-    # --- Tipo: Proyecto/Área → paso 1: elegir categoría ---
-    if data == CB_REPORT_SCOPE:
+    # --- Paso 1: elegir categoría (proyectos / áreas / extra) ---
+    if data in _CATEGORY_STEP:
+        prompt, show_p_cb, show_a_cb, extra_cb, extra_label = _CATEGORY_STEP[data]
         await query.edit_message_text(
-            "¿Reporte de un proyecto, un área o el inbox?",
+            prompt,
             reply_markup=build_report_category_keyboard(
-                show_p_cb=CB_REPORT_SCOPE_SHOW_P,
-                show_a_cb=CB_REPORT_SCOPE_SHOW_A,
-                extra_cb=f"{CB_REPORT_SCOPE_PREFIX}inbox",
-                extra_label="Inbox",
-            ),
-        )
-        return
-
-    # --- Tipo: Ideas → paso 1: elegir categoría ---
-    if data == CB_REPORT_IDEAS:
-        await query.edit_message_text(
-            "¿Filtrar ideas por proyecto, área o ver todas?",
-            reply_markup=build_report_category_keyboard(
-                show_p_cb=CB_REPORT_IDEAS_SHOW_P,
-                show_a_cb=CB_REPORT_IDEAS_SHOW_A,
-                extra_cb=f"{CB_REPORT_IDEAS_PREFIX}all",
-                extra_label="Todas",
-            ),
-        )
-        return
-
-    # --- Tipo: Cola de lectura → paso 1: elegir categoría ---
-    if data == CB_REPORT_READING:
-        await query.edit_message_text(
-            "¿Filtrar la cola de lectura por proyecto, área o ver toda?",
-            reply_markup=build_report_category_keyboard(
-                show_p_cb=CB_REPORT_READING_SHOW_P,
-                show_a_cb=CB_REPORT_READING_SHOW_A,
-                extra_cb=f"{CB_REPORT_READING_PREFIX}all",
-                extra_label="Toda la cola",
+                show_p_cb=show_p_cb, show_a_cb=show_a_cb,
+                extra_cb=extra_cb, extra_label=extra_label,
             ),
         )
         return
 
     # --- Paso 2: lista de proyectos o áreas ---
-    if data in (CB_REPORT_SCOPE_SHOW_P, CB_REPORT_SCOPE_SHOW_A,
-                CB_REPORT_IDEAS_SHOW_P, CB_REPORT_IDEAS_SHOW_A,
-                CB_REPORT_READING_SHOW_P, CB_REPORT_READING_SHOW_A):
+    if data in _ITEMS_STEP:
         await _show_items_keyboard(query, context, vault_path, data)
         return
 
@@ -187,48 +183,27 @@ async def handle_report_callback(
         )
         return
 
-    # --- Scope final: generar reporte de proyecto/área/inbox ---
-    if data.startswith(CB_REPORT_SCOPE_PREFIX):
-        suffix = data[len(CB_REPORT_SCOPE_PREFIX):]
+    # --- Scope final: generar el reporte con scope (proyecto/área/inbox/todo) ---
+    for prefix, progress, stem, reporter in (
+        (CB_REPORT_SCOPE_PREFIX, "Generando reporte...", "scope", scope_report),
+        (CB_REPORT_IDEAS_PREFIX, "Generando reporte de ideas...", "ideas", ideas_report),
+        (CB_REPORT_READING_PREFIX, "Generando cola de lectura...", "lectura", reading_queue),
+    ):
+        if not data.startswith(prefix):
+            continue
+        suffix = data[len(prefix):]
         project, area, inbox, missing = await _parse_scope_suffix(suffix, vault_path)
         if missing:
             await _aviso_scope_borrado(query, context, suffix)
             return
-        await query.edit_message_text("Generando reporte...")
+        kwargs: dict = {"project": project, "area": area, "full": full}
+        if reporter is scope_report:
+            kwargs["inbox"] = inbox
+        await query.edit_message_text(progress)
         await _send_report(
             query, context,
-            report_bytes_coro=scope_report(vault_path, project=project, area=area, inbox=inbox, full=full),
-            filename=f"scope-{suffix.replace(':', '-')}-{date.today()}.md",
-        )
-        return
-
-    # --- Scope final: generar reporte de ideas ---
-    if data.startswith(CB_REPORT_IDEAS_PREFIX):
-        suffix = data[len(CB_REPORT_IDEAS_PREFIX):]
-        project, area, _, missing = await _parse_scope_suffix(suffix, vault_path)
-        if missing:
-            await _aviso_scope_borrado(query, context, suffix)
-            return
-        await query.edit_message_text("Generando reporte de ideas...")
-        await _send_report(
-            query, context,
-            report_bytes_coro=ideas_report(vault_path, project=project, area=area, full=full),
-            filename=f"ideas-{suffix.replace(':', '-')}-{date.today()}.md",
-        )
-        return
-
-    # --- Scope final: generar cola de lectura ---
-    if data.startswith(CB_REPORT_READING_PREFIX):
-        suffix = data[len(CB_REPORT_READING_PREFIX):]
-        project, area, _, missing = await _parse_scope_suffix(suffix, vault_path)
-        if missing:
-            await _aviso_scope_borrado(query, context, suffix)
-            return
-        await query.edit_message_text("Generando cola de lectura...")
-        await _send_report(
-            query, context,
-            report_bytes_coro=reading_queue(vault_path, project=project, area=area, full=full),
-            filename=f"lectura-{suffix.replace(':', '-')}-{date.today()}.md",
+            report_bytes_coro=reporter(vault_path, **kwargs),
+            filename=f"{stem}-{suffix.replace(':', '-')}-{date.today()}.md",
         )
         return
 
@@ -248,26 +223,8 @@ async def _show_items_keyboard(
         data: callback_data que indica tipo de reporte y categoría.
     """
     projects, areas = await _get_existing_items(vault_path)
-
-    # Determinar si es proyectos o áreas, el prefijo final y el back_cb
-    if data == CB_REPORT_SCOPE_SHOW_P:
-        items, is_project, prefix, back_cb = projects, True, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE
-        label = "¿Qué proyecto?"
-    elif data == CB_REPORT_SCOPE_SHOW_A:
-        items, is_project, prefix, back_cb = areas, False, CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE
-        label = "¿Qué área?"
-    elif data == CB_REPORT_IDEAS_SHOW_P:
-        items, is_project, prefix, back_cb = projects, True, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS
-        label = "¿Ideas de qué proyecto?"
-    elif data == CB_REPORT_IDEAS_SHOW_A:
-        items, is_project, prefix, back_cb = areas, False, CB_REPORT_IDEAS_PREFIX, CB_REPORT_IDEAS
-        label = "¿Ideas de qué área?"
-    elif data == CB_REPORT_READING_SHOW_P:
-        items, is_project, prefix, back_cb = projects, True, CB_REPORT_READING_PREFIX, CB_REPORT_READING
-        label = "¿Cola de lectura de qué proyecto?"
-    else:  # CB_REPORT_READING_SHOW_A
-        items, is_project, prefix, back_cb = areas, False, CB_REPORT_READING_PREFIX, CB_REPORT_READING
-        label = "¿Cola de lectura de qué área?"
+    is_project, prefix, back_cb, label = _ITEMS_STEP[data]
+    items = projects if is_project else areas
 
     if not items:
         tipo = "proyectos" if is_project else "áreas"
