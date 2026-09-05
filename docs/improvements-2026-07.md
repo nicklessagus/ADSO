@@ -353,11 +353,11 @@ la revisión encontró qué unificar exactamente:
 
 - **Estado:** mixto · **Impacto:** bajo-medio · **Esfuerzo:** bajo · **Decisión:** pendiente
 - **Propuestas:**
-  - Centralizar el armado del frontmatter base en un helper único (hoy `extra_fm` se inyecta dos
-    veces en modo degradado — `capture.py:115-118,128-129`; inocuo pero frágil).
-  - Helper compartido `count_unclassified_inbox()` para el recuento post-confirm
+  - ~~Centralizar el armado del frontmatter base en un helper único (hoy `extra_fm` se inyecta dos
+    veces en modo degradado — `capture.py:115-118,128-129`; inocuo pero frágil).~~ ✅ hecho (2026-09): `_stamp_new_note` en `capture.py`; la doble inyección se eliminó.
+  - ~~Helper compartido `count_unclassified_inbox()` para el recuento post-confirm
     (`capture.py:862-883` relee nota por nota secuencialmente con la regla de filtrado duplicada
-    de `handle_clasificar`).
+    de `handle_clasificar`).~~ ✅ hecho (2026-09): vive en `bot_utils.py`, corre bajo `to_thread` con `parse_cached`.
   - Borrar `block_msg_ids` también cuando el flujo se resuelve por texto (hoy solo se limpian al
     llegar un callback — `input.py:152-167` vs `callbacks.py:103-107`).
   - Decidir la asimetría audio vs imagen: el `.ogg` se borra tras transcribir

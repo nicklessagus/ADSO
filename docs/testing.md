@@ -87,6 +87,8 @@ tests/
 │   ├── test_lote3_llm_config.py       # lote 3: capa LLM y config — retries, sanitización, validación estricta (#43, #44, #45)
 │   ├── test_classify_timeout.py       # timeout por-llamada de `classify()` contra Gemini (stalls server-side)
 │   ├── test_watchdog.py               # watchdog de proceso: reinicia el bot si el event loop deja de progresar
+│   ├── test_issue58_vault_hygiene.py  # issue #58: tags de índice en kebab-case, `03-Resources/` fuera de los scans
+│   ├── test_simplification_2026_09.py # contratos de los helpers compartidos de la pasada de simplificación + reproductores xfail de #64 y #65
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -343,7 +345,7 @@ Qué se testea:
 - Preview mostrado → usuario toca `[Confirmar]` (inline keyboard callback) → nota escrita
 - Preview mostrado → usuario toca `[Cancelar]` → nota NO escrita
 - Preview mostrado → usuario toca `[Corregir]` → selector de destino → confirma → nota escrita con destino corregido
-- Desambiguación: bot muestra `[Guardar como nota]` / `[Buscar en vault]` → callback procesado correctamente
+- Desambiguación (`[Guardar como nota]` / `[Buscar en vault]`): *diseño de Fase 7, sin código ni test* — el teclado se borró en 2026-09 por no tener productor
 - Scope de consulta: bot muestra botones de proyecto → callback filtra resultados
 - **Crítico:** sin confirmación explícita via callback, nunca se escribe al vault
 
@@ -728,5 +730,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1067 tests: 874 unit, 48 integration, 145 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1121 tests: 930 unit, 48 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

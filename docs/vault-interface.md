@@ -106,7 +106,7 @@ Detalles que importan:
 
 El camino de `create_note()`. Elegir el nombre con un `_unique_path` y escribir varios `await` después abría una ventana: dos escrituras concurrentes con el mismo título el mismo día —una captura del usuario y `reclassify_inbox`, por ejemplo— elegían el mismo candidato y **la segunda sobrescribía a la primera en silencio**.
 
-La reserva ahora se hace con `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, que es atómico a nivel kernel: dos procesos no pueden ganar el mismo nombre. Si el nombre está tomado, se prueba `stem-2`, `stem-3`, … El contenido se escribe después con `_atomic_write_sync` sobre el placeholder ya reservado. Corre entero en un thread. G1 de `docs/audit-2026-07-31.md`.
+La reserva la hace `_reserve_name_sync(directory, filename, sep, start, reuse_if)` con `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, que es atómico a nivel kernel: dos procesos no pueden ganar el mismo nombre. Si el nombre está tomado, se prueba `stem-2`, `stem-3`, … El contenido se escribe después con `_atomic_write_sync` sobre el placeholder ya reservado. Corre entero en un thread. G1 de `docs/audit-2026-07-31.md`. El mismo bucle de reserva lo usan `_save_resource_sync` (adjuntos, sufijo `stem_1`, con `reuse_if` para el dedup por hash) y `_archive_orphan_sync` (huérfanos archivados): tres callers, una implementación.
 
 **Si `_atomic_write_sync` lanza una excepción manejada** (no un crash del proceso), la reserva se deshace: el placeholder vacío se borra con `os.unlink(candidate)` antes de repropagar. Sin esto el placeholder quedaba en el vault para siempre —se commiteaba al backup, disparaba el watcher y aparecía como nota en blanco— y encima ocupaba el nombre, así que el reintento del usuario escribía `-2` (#37A). Solo se borra el archivo que **esta** llamada reservó con `O_EXCL`: nunca se lleva puesta una nota ajena. Un crash real del proceso (`docker stop`, OOM) sigue dejando la nota **vacía** en vez de pisada — ese caso está documentado en `docs/decisions-log.md`.
 
@@ -314,7 +314,7 @@ Copia un archivo a `03-Resources/` en el vault.
 
 1. **Sanitiza el nombre**: aplica `Path(original_filename).name` para eliminar cualquier componente de directorio y prevenir path traversal (ej: `../../.env` queda como `.env`, luego el destino final sigue siendo `03-Resources/.env`).
 2. Delega todo el resto — reserva del nombre, dedup, copia — en `_save_resource_sync`, que corre **entero en un solo `asyncio.to_thread`**. Antes el `stat()` y el bucle de nombres bloqueaban el event loop en cada captura con adjunto en la SD de la RPi4, y cualquier `await` entre elegir el nombre y escribirlo abría una ventana TOCTOU: dos guardados concurrentes de contenido distinto podían pisarse (#36).
-3. **Reserva del nombre sin TOCTOU:** igual que `_reserve_and_write_sync`, usa `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)` — atómico a nivel kernel. Si el nombre está tomado:
+3. **Reserva del nombre sin TOCTOU:** el mismo `_reserve_name_sync` que `_reserve_and_write_sync` — `os.open(candidate, O_CREAT | O_EXCL | O_WRONLY, 0o644)`, atómico a nivel kernel — con un predicado `reuse_if` para el dedup. Si el nombre está tomado:
    - **Mismo contenido** (dedup por SHA-256 con short-circuit por tamaño, mismo criterio que `find_resource_by_hash`): reutiliza el existente, sin copiar nada.
    - **Contenido distinto:** prueba el siguiente sufijo numérico (`stem_1.ext`, `stem_2.ext`, …). **Mismo nombre + distinto contenido ⇒ archivo nuevo**, nunca se descarta el entrante.
 4. **Copia atómica:** `shutil.copy2` al temporal (no directo al destino), `chmod 0644` (`copy2` preserva el modo del origen, y el origen es el temporal de la descarga que `tempfile` crea en `0600` — sin este chmod, todo PDF o imagen de `03-Resources/` quedaba ilegible para cualquier otro usuario o proceso, mismo problema que G4 en las notas por otro camino), `os.replace` al nombre reservado y `fsync` del directorio. Un corte a mitad de camino (OOM, `docker stop`, corte de luz) nunca deja un adjunto truncado visible en `03-Resources/` — Obsidian lo listaría como si estuviera bien y nadie se enteraría.
@@ -430,7 +430,7 @@ async def seed_vault(vault_path: Path, vault_seed: Any) -> None:
 Se llaman una sola vez, al arranque del bot.
 
 - **`ensure_vault_structure()`** crea las carpetas PARA (`00-Inbox`, `01-Projects`, `02-Areas`, `03-Resources`, `05-Archive`) si no existen — `mkdir(parents=True, exist_ok=True)` para cada una, así que es seguro llamarla en cada arranque.
-- **`seed_vault()`** recorre `vault_seed.projects`/`vault_seed.areas` (de `config.yaml`) y crea, para cada uno, su `_index.md` (`project-index`/`area-index`) vía `create_note()` — **solo si `_index.md` todavía no existe** en esa carpeta, así que reiniciar el bot no pisa proyectos/áreas ya creados o editados a mano. `description` es obligatoria en la config, igual que al crear un proyecto/área desde el bot.
+- **`seed_vault()`** recorre `vault_seed.projects`/`vault_seed.areas` (de `config.yaml`) y crea, para cada uno, su `_index.md` (`project-index`/`area-index`) vía `create_note()` — **solo si `_index.md` todavía no existe** en esa carpeta, así que reiniciar el bot no pisa proyectos/áreas ya creados o editados a mano. `description` es obligatoria en la config, igual que al crear un proyecto/área desde el bot. El frontmatter y el body del índice los arma **`build_index_note(kind, name, description)`**, el mismo helper que usa el flujo de gestión (`manage.py`): nombre crudo en `project`/`area`, tag en kebab-case más el marcador `system`.
 
 ---
 
@@ -794,7 +794,7 @@ google-genai    # SDK nuevo de Gemini (from google import genai) — Embedding A
 ### `should_index()`
 
 ```python
-DEFAULT_EXCLUDE_DIRS = ["05-Archive", ".obsidian", ".trash"]
+DEFAULT_EXCLUDE_DIRS = ("05-Archive", ".obsidian", ".trash")   # definido en adso/constants.py
 
 def should_index(
     md_path: Path,

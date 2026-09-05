@@ -210,8 +210,10 @@ VALID_OPERATIONS = {
 }
 
 # En vault_writer.py — tipos persistibles incluyendo los auto-generados por el bot.
-# Ojo: vault_writer define sus propios VALID_TYPES/VALID_STATUS (mismo nombre que en
+# Ojo: vault_writer expone sus propios VALID_TYPES/VALID_STATUS (mismo nombre que en
 # llm_schema pero contenido distinto — el writer incluye project-index/area-index).
+# Desde 2026-09 ambos se derivan de NOTE_TYPES / LLM_NOTE_TYPES / STATUS_BY_TYPE en
+# adso/constants.py: una sola definición, dos vistas.
 VALID_TYPES = {"reference", "task", "idea", "project-index", "area-index"}
 VALID_STATUS = {
     "reference":    {"active", "pending-classification"},

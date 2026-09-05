@@ -40,7 +40,7 @@ Bot orquestador de Telegram que actúa como escriba, observador y clasificador d
 | Bot | Python 3.11+, `python-telegram-bot` (async) |
 | LLM primario | Gemini API — `gemini-3.5-flash-lite` |
 | LLM de Vision | Gemini API — `gemini-3.6-flash` (`GEMINI_VISION_MODEL`, constante separada de `GEMINI_MODEL`: la quota del free tier es **por modelo**, así que rasterizar un PDF escaneado no consume RPD del bucket de la captura diaria) |
-| LLM fallback | Groq — `llama-3.1-8b-instant` (entra **solo** cuando Gemini agota la cuota diaria; ante un error genérico, tras 3 reintentos se cae a modo degradado sin pasar por Groq) |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (entra en dos casos: cuando Gemini agota la cuota diaria, y cuando Gemini devuelve dos respuestas inservibles seguidas — JSON o schema inválido. Un error de red o timeout agota los 3 reintentos y cae a modo degradado sin pasar por Groq) |
 | Transcripción | `faster-whisper` (local, modelo `tiny`/`base`) |
 | OCR / Visión | `pytesseract` (local) o Gemini Vision (remoto) — el usuario elige en el momento |
 | PDF | `pymupdf` — extracción de texto, metadata académica y detección de papers |
@@ -75,7 +75,7 @@ Fases 1–5 implementadas y funcionando: captura de texto, audio, documentos, im
 - Docker y docker-compose-v2 (`sudo apt install docker-compose-v2`)
 - Token de bot de Telegram (via @BotFather)
 - API key de Gemini (Google AI Studio — free tier, sin tarjeta de crédito)
-- API key de Groq (free tier — fallback LLM que entra solo cuando Gemini agota la cuota diaria)
+- API key de Groq (free tier — fallback LLM cuando Gemini agota la cuota diaria o devuelve respuestas inservibles)
 - Google OAuth credentials (opcional — para la integración con Google Tasks)
 - Vault de Obsidian accesible como directorio local (montado via Docker)
 

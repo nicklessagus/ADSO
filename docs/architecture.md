@@ -706,7 +706,7 @@ Los botones de Telegram (`InlineKeyboardMarkup`) son el mecanismo principal de i
 | **Archivo subido ya existente** (mismo SHA-256 en `03-Resources/`, con nota que lo referencia) | `[Cancelar]` `[Crear igual]` — mismo teclado, distinto callback |
 | **Gestión** (crear proyecto/área) | `[Cancelar]` `[Confirmar]` |
 | **Resultado de consulta** | `[Generar informe .md]` — el botón vale solo para la consulta vigente: pedido desde una consulta vieja del historial responde `"La consulta expiró."` como alerta efímera, en vez de mandar el informe de la última consulta |
-| **Desambiguación** (modo incierto) | `[Guardar como nota]` `[Buscar en vault]` |
+| **Desambiguación** (modo incierto) | *(diseño de Fase 7 — sin código: el teclado y su callback se borraron en 2026-09 por no tener productor)* |
 | **OCR sin texto encontrado** | `[Gemini Vision]` / `[Cancelar]` `[Describir]` |
 | **`/status` con inbox pendiente sin destino** | `[Clasificar inbox]` |
 | **`/reporte`** | tres teclados encadenados: tipo → categoría → lista de ítems (ver `reports.py`). Si el proyecto/área elegido ya no existe, el bot avisa y repone el menú de tipos en vez de degradar el pedido a un reporte de todo el vault |

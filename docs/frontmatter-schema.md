@@ -252,7 +252,7 @@ source: system                          # auto-generado por el bot, no desde un 
 ---
 ```
 
-> **Lo que el bot escribe realmente al crear el proyecto** (`manage.py` y `seed_vault` en `vault_writer.py`): `title` (el nombre con guiones a espacios y capitalizado), `type`, `status: active`, `description`, `sections: []` **vacío**, `tags` (`["system", "<nombre>"]` desde el bot; solo `["<nombre>"]` desde la siembra de `config.yaml`), `source: system` y `project: <nombre>`. Ese `project:` no es decorativo: es uno de los campos que `_get_existing_items` lee del `_index.md` para armar la lista de destinos que ve el LLM.
+> **Lo que el bot escribe realmente al crear el proyecto** (`manage.py` y `seed_vault` en `vault_writer.py`): `title` (el nombre con guiones a espacios y capitalizado), `type`, `status: active`, `description`, `sections: []` **vacío**, `tags` (`["system", "<nombre-en-kebab>"]` — desde 2026-09 lo construye `build_index_note` en `vault_writer.py`, el mismo helper para el flujo de gestión y para la siembra; antes la siembra escribía solo `["<nombre>"]` crudo), `source: system` y `project: <nombre>`. Ese `project:` no es decorativo: es uno de los campos que `_get_existing_items` lee del `_index.md` para armar la lista de destinos que ve el LLM.
 >
 > **`sections` nace vacío y ADSO no lo actualiza.** `create_section` solo hace `mkdir` del directorio dentro del proyecto — no toca el `_index.md`. Mantener la lista al día es manual.
 
