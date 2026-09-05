@@ -24,7 +24,7 @@ class TestBuildTaskNotes:
         note.touch()
 
         fm = {"project": "tesis", "priority": "high"}
-        result = build_task_notes(fm, note, vault)
+        result = build_task_notes(fm)
 
         assert "Proyecto: tesis" in result
         assert "Prioridad: high" in result
@@ -38,7 +38,7 @@ class TestBuildTaskNotes:
         note.touch()
 
         fm = {"area": "docencia"}
-        result = build_task_notes(fm, note, vault)
+        result = build_task_notes(fm)
 
         assert "Área: docencia" in result
         assert "Proyecto:" not in result
@@ -51,7 +51,7 @@ class TestBuildTaskNotes:
         note.touch()
 
         fm = {}
-        result = build_task_notes(fm, note, vault)
+        result = build_task_notes(fm)
 
         assert "obsidian://" not in result  # links obsidian:// no se incluyen en Tasks
         assert "Proyecto:" not in result
@@ -65,7 +65,7 @@ class TestBuildTaskNotes:
         note.touch()
 
         fm = {"project": "mi proyecto"}
-        result = build_task_notes(fm, note, vault)
+        result = build_task_notes(fm)
 
         # Los links obsidian:// no se incluyen — no funcionan desde Google Tasks/Calendar
         assert "obsidian://" not in result
@@ -78,7 +78,7 @@ class TestBuildTaskNotes:
         note.touch()
 
         fm = {"project": "tesis"}
-        result = build_task_notes(fm, note, vault)
+        result = build_task_notes(fm)
 
         assert "Prioridad:" not in result
 

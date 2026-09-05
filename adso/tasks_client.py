@@ -181,7 +181,7 @@ class TasksClient:
 # Helper de contenido
 # ---------------------------------------------------------------------------
 
-def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: str = "") -> str:
+def build_task_notes(fm: dict, description: str = "") -> str:
     """Construye el campo notes para Google Tasks.
 
     Formato:
@@ -190,12 +190,11 @@ def build_task_notes(fm: dict, note_path: Path, vault_path: Path, description: s
         Prioridad: high/medium/low
         Horario: DD/MM/YYYY HH:MM  (solo si tiene hora no-medianoche)
 
-    No incluye links obsidian:// — no funcionan desde Google Tasks/Calendar.
+    No incluye links obsidian:// — no funcionan desde Google Tasks/Calendar,
+    y por eso tampoco recibe el path de la nota.
 
     Args:
         fm: Frontmatter de la nota guardada.
-        note_path: Path absoluto de la nota.
-        vault_path: Path raíz del vault.
         description: Texto original del usuario (body limpio, sin callouts).
 
     Returns:

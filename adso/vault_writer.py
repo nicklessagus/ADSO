@@ -746,61 +746,76 @@ async def move_note(source: Path, dest_dir: Path) -> Path:
     return dest_path
 
 
-def _fence_line_flags(lines: list[str]) -> list[bool]:
-    """Marca qué líneas caen dentro de un bloque de código markdown.
+@dataclass(frozen=True)
+class _MdLine:
+    """Una línea de una nota con su contexto de bloque, para recorrer "## Ver también"."""
 
-    Args:
-        lines: Líneas del documento.
+    text: str
+    in_fence: bool     # dentro de un bloque de código (los ``` incluidos)
+    is_header: bool    # es el header `## Ver también` (fuera de fence)
+    in_block: bool     # está bajo `## Ver también`, sin contar el header ni fences
 
-    Returns:
-        Lista paralela a ``lines``: True si esa línea está dentro de un fence
-        (los delimitadores ``` en sí se marcan como dentro).
+
+def _walk_ver_tambien(content: str) -> list[_MdLine]:
+    """Clasifica cada línea respecto del bloque "## Ver también".
+
+    Único recorrido del bloque: lo comparten `_strip_broken_links_in_ver_tambien`,
+    `_ver_tambien_link_targets` y `_remove_empty_ver_tambien` — antes cada uno
+    llevaba su propia máquina de estados de fences y headers. Reglas:
+
+    - Una línea que empieza con tres backticks abre/cierra un fence; nada dentro de un fence es header ni
+      item (un ``## Ver también`` o un ``- algo`` en un bloque de código es
+      un ejemplo del usuario, no estructura de la nota — #5).
+    - El bloque va desde ``## Ver también`` hasta el siguiente ``## `` o EOF.
     """
-    flags: list[bool] = []
+    result: list[_MdLine] = []
     in_fence = False
-    for line in lines:
-        if line.lstrip().startswith("```"):
+    in_block = False
+    for text in content.split("\n"):
+        stripped = text.strip()
+        if stripped.startswith("```"):
             in_fence = not in_fence
-            flags.append(True)
+            result.append(_MdLine(text, True, False, False))
             continue
-        flags.append(in_fence)
-    return flags
+        if in_fence:
+            result.append(_MdLine(text, True, False, False))
+            continue
+        if stripped == "## Ver también":
+            in_block = True
+            result.append(_MdLine(text, False, True, False))
+            continue
+        if in_block and stripped.startswith("## "):
+            in_block = False
+        result.append(_MdLine(text, False, False, in_block))
+    return result
 
 
 def _remove_empty_ver_tambien(content: str) -> str:
-    """Elimina el header '## Ver también' si no quedan items de lista bajo él."""
-    lines = content.split("\n")
+    """Elimina el header '## Ver también' si no quedan items de lista bajo él.
+
+    Cuenta cualquier item ``- ``, no solo wikilinks: un bloque con un link
+    roto y un item de texto plano del usuario debe conservar su header en vez
+    de dejar el item huérfano. Al borrar el header se borran también las
+    líneas en blanco que lo seguían.
+    """
+    lines = _walk_ver_tambien(content)
     result: list[str] = []
-    fence_lines = _fence_line_flags(lines)
     i = 0
     while i < len(lines):
-        if lines[i].strip() == "## Ver también" and not fence_lines[i]:
-            # Buscar si hay algún item de lista antes del próximo heading o EOF.
-            # Cuenta cualquier item `- `, no solo wikilinks: un bloque con un
-            # link roto y un item de texto plano del usuario debe conservar su
-            # header en vez de dejar el item huérfano.
-            j = i + 1
-            has_items = False
-            while j < len(lines):
-                # El escaneo también saltea los fences: un `- algo` dentro de un
-                # bloque de código no es un item del bloque "Ver también".
-                if fence_lines[j]:
-                    j += 1
-                    continue
-                if lines[j].startswith("- "):
-                    has_items = True
-                    break
-                if lines[j].startswith("## "):
-                    break
-                j += 1
+        line = lines[i]
+        if line.is_header:
+            has_items = any(
+                later.in_block and later.text.startswith("- ")
+                for later in lines[i + 1:]
+                if later.in_block or later.in_fence
+            )
             if has_items:
-                result.append(lines[i])
+                result.append(line.text)
             else:
-                # Saltar también las líneas en blanco que siguen al header
-                while i + 1 < len(lines) and lines[i + 1].strip() == "":
+                while i + 1 < len(lines) and lines[i + 1].text.strip() == "":
                     i += 1
         else:
-            result.append(lines[i])
+            result.append(line.text)
         i += 1
     return "\n".join(result)
 
@@ -818,37 +833,14 @@ def _ver_tambien_item_re(stem: str) -> re.Pattern[str]:
 def _strip_broken_links_in_ver_tambien(content: str, link_re: re.Pattern[str]) -> str:
     """Elimina items ``- [[stem]]`` rotos, pero SOLO dentro del bloque '## Ver también'.
 
-    Recorre las líneas manteniendo el estado "dentro del bloque Ver también"
-    (entre el header ``## Ver también`` y el siguiente ``## `` o EOF). Fuera de
-    ese bloque, las líneas se preservan tal cual — así un wikilink que el usuario
-    haya escrito en un párrafo o en otra lista nunca se borra.
+    Fuera de ese bloque las líneas se preservan tal cual — así un wikilink que
+    el usuario haya escrito en un párrafo o en otra lista nunca se borra.
     """
-    lines = content.split("\n")
-    result: list[str] = []
-    in_block = False
-    in_fence = False
-    for line in lines:
-        stripped = line.strip()
-        # Un "## Ver también" dentro de un bloque de código es un ejemplo del
-        # usuario, no un bloque real: se preserva tal cual.
-        if stripped.startswith("```"):
-            in_fence = not in_fence
-            result.append(line)
-            continue
-        if in_fence:
-            result.append(line)
-            continue
-        if stripped == "## Ver también":
-            in_block = True
-            result.append(line)
-            continue
-        if in_block and stripped.startswith("## "):
-            in_block = False
-        if in_block and link_re.match(line):
-            # Item de lista roto dentro del bloque → descartar la línea
-            continue
-        result.append(line)
-    return "\n".join(result)
+    return "\n".join(
+        line.text
+        for line in _walk_ver_tambien(content)
+        if not (line.in_block and link_re.match(line.text))
+    )
 
 
 async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
@@ -951,28 +943,12 @@ def _link_target_key(raw_target: str) -> str:
 def _ver_tambien_link_targets(content: str) -> list[str]:
     """Devuelve los targets de los items de wikilink del bloque '## Ver también'.
 
-    Espeja el recorrido de `_strip_broken_links_in_ver_tambien`: fuera del
-    bloque no hay nada que reconciliar, y dentro de un bloque de código tampoco
-    (es un ejemplo del usuario, no un link — #5).
+    Fuera del bloque no hay nada que reconciliar, y dentro de un bloque de
+    código tampoco (es un ejemplo del usuario, no un link — #5).
     """
     targets: list[str] = []
-    in_block = False
-    in_fence = False
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        if stripped == "## Ver también":
-            in_block = True
-            continue
-        if in_block and stripped.startswith("## "):
-            in_block = False
-        if not in_block:
-            continue
-        match = _VER_TAMBIEN_ITEM_RE.match(line)
+    for line in _walk_ver_tambien(content):
+        match = _VER_TAMBIEN_ITEM_RE.match(line.text) if line.in_block else None
         if match:
             targets.append(match.group(1))
     return targets

@@ -221,7 +221,7 @@ _SECTION_LIMITS: dict[str, int] = {
 }
 
 
-def detect_paper(text: str, metadata: dict) -> bool:
+def detect_paper(text: str) -> bool:
     """Detecta heurísticamente si un documento es un paper académico.
 
     Busca señales en los primeros 5000 chars del texto extraído.
@@ -229,7 +229,6 @@ def detect_paper(text: str, metadata: dict) -> bool:
 
     Args:
         text: Texto extraído del PDF.
-        metadata: Metadata del PDF (title, author, subject, pages).
 
     Returns:
         True si el documento parece un paper académico.

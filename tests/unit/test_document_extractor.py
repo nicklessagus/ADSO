@@ -179,16 +179,16 @@ class TestExtractPdf:
 class TestDetectPaper:
 
     def test_dos_senales_es_paper(self) -> None:
-        assert detect_paper("Abstract\n\nWe introduce...\n\nReferences", {}) is True
+        assert detect_paper("Abstract\n\nWe introduce...\n\nReferences") is True
 
     def test_una_senal_no_alcanza(self) -> None:
-        assert detect_paper("Introduction to my shopping list", {}) is False
+        assert detect_paper("Introduction to my shopping list") is False
 
     def test_texto_sin_senales(self) -> None:
-        assert detect_paper("Comprar leche y pan. Llamar al dentista.", {}) is False
+        assert detect_paper("Comprar leche y pan. Llamar al dentista.") is False
 
     def test_doi_cuenta_como_senal(self) -> None:
-        assert detect_paper("10.1234/abcd.2024 — Introduction", {}) is True
+        assert detect_paper("10.1234/abcd.2024 — Introduction") is True
 
     def test_solo_mira_los_primeros_5000_chars(self) -> None:
         """Señales enterradas después del sample no cuentan.
@@ -197,7 +197,7 @@ class TestDetectPaper:
         aparece en la página 3 no se detecta como paper.
         """
         texto = ("x" * 5000) + "\nAbstract\nReferences\nIntroduction"
-        assert detect_paper(texto, {}) is False
+        assert detect_paper(texto) is False
 
 
 class TestExtractTitleFromText:

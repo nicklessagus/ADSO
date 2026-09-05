@@ -72,7 +72,6 @@ async def _post_init(app: Application) -> None:
             _bot_logger.warning("No se pudo avisar del reinicio por watchdog: %s", exc)
 
     embeddings: EmbeddingsClient = app.bot_data["embeddings"]
-    vault_path = settings.vault_path
 
     # Warm-up de ChromaDB: `_ensure_initialized` es síncrona e importa chromadb
     # (medido en la RPi4: 4,4 s) además de abrir sqlite. Sin esto, el primer
@@ -84,6 +83,37 @@ async def _post_init(app: Application) -> None:
         await asyncio.to_thread(embeddings._ensure_initialized)
     except Exception as exc:  # noqa: BLE001 — el arranque no debe caerse por el warm-up
         _bot_logger.warning("Warm-up de ChromaDB fallido (se hará lazy): %s", exc)
+
+    on_change, on_delete = _watcher_callbacks(app)
+    watcher = VaultWatcher(
+        vault_path=settings.vault_path,
+        bot=app.bot,
+        chat_id=settings.telegram_allowed_user_id,
+        debug=settings.watcher.debug,
+        on_external_change=on_change,
+        on_external_delete=on_delete,
+    )
+    await watcher.start()
+    app.bot_data["vault_watcher"] = watcher
+
+    _bot_logger.info("ADSO iniciando — vault en %s", settings.vault_path)
+
+
+
+def _watcher_callbacks(app: Application):
+    """Callbacks del `VaultWatcher` para cambios y borrados externos.
+
+    Cierran sobre la `app` (settings, embeddings, backup, bot) y vivían
+    anidados en `_post_init`, que ya tiene bastante con arrancar todo.
+    """
+    settings: Settings = app.bot_data["settings"]
+    embeddings: EmbeddingsClient = app.bot_data["embeddings"]
+    vault_path = settings.vault_path
+
+    async def _backup(path: Path) -> None:
+        git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
+        if git_backup:
+            await git_backup.notify(backup_label(path))
 
     async def _reindex_external_note(path: Path) -> None:
         """Lee una nota modificada externamente y actualiza su embedding.
@@ -129,9 +159,7 @@ async def _post_init(app: Application) -> None:
                 _bot_logger.warning("Reindex externo fallido para %s: %s", path, exc)
         else:
             _bot_logger.debug("Cambio externo fuera del índice, no se reindexa: %s", path)
-        git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
-        if git_backup:
-            await git_backup.notify(backup_label(path))
+        await _backup(path)
 
     async def _remove_external_note(path: Path) -> None:
         """Elimina de ChromaDB el embedding de una nota borrada externamente y limpia wikilinks rotos."""
@@ -156,22 +184,9 @@ async def _post_init(app: Application) -> None:
                 )
         except Exception as exc:
             _bot_logger.warning("Error limpiando wikilinks rotos para %s: %s", path, exc)
-        git_backup: Optional[GitBackup] = app.bot_data.get("git_backup")
-        if git_backup:
-            await git_backup.notify(backup_label(path))
+        await _backup(path)
 
-    watcher = VaultWatcher(
-        vault_path=vault_path,
-        bot=app.bot,
-        chat_id=settings.telegram_allowed_user_id,
-        debug=settings.watcher.debug,
-        on_external_change=_reindex_external_note,
-        on_external_delete=_remove_external_note,
-    )
-    await watcher.start()
-    app.bot_data["vault_watcher"] = watcher
-
-    _bot_logger.info("ADSO iniciando — vault en %s", settings.vault_path)
+    return _reindex_external_note, _remove_external_note
 
 
 async def _post_shutdown(app: Application) -> None:

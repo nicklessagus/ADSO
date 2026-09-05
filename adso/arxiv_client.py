@@ -51,6 +51,11 @@ _ARXIV_URL_RE = re.compile(
 )
 
 
+def _strip_version(arxiv_id: str) -> str:
+    """``2301.12345v2`` → ``2301.12345``: la nota apunta siempre a la última versión."""
+    return re.sub(r"v\d+$", "", arxiv_id)
+
+
 def extract_arxiv_id(text: str) -> Optional[str]:
     """Extrae el arXiv ID de un texto que contiene una URL de arxiv.org.
 
@@ -61,12 +66,7 @@ def extract_arxiv_id(text: str) -> Optional[str]:
         arXiv ID (ej: "2301.12345" o "hep-ph/0001234"), o None si no hay match.
     """
     m = _ARXIV_URL_RE.search(text.strip())
-    if not m:
-        return None
-    arxiv_id = m.group(1)
-    # Remover versión si la hay (2301.12345v2 → 2301.12345)
-    arxiv_id = re.sub(r"v\d+$", "", arxiv_id)
-    return arxiv_id
+    return _strip_version(m.group(1)) if m else None
 
 
 def strip_arxiv_url(text: str) -> Optional[str]:
@@ -142,20 +142,18 @@ def _parse_atom_entry(entry: ET.Element) -> dict:
         if cat.get("term")
     ]
 
-    # URL canónica (abs page)
+    # URL canónica (abs page): el ID sale del campo <id> y la URL se construye
+    # siempre sin versión; el link `alternate` del feed es solo el respaldo.
     source_url = ""
     arxiv_id = ""
     for link in entry.findall("atom:link", _NS):
         if link.get("rel") == "alternate" or link.get("type") == "text/html":
             source_url = link.get("href", "")
-        # Extraer ID desde el campo <id>
     id_el = entry.find("atom:id", _NS)
     if id_el is not None and id_el.text:
         m = _ARXIV_URL_RE.search(id_el.text)
         if m:
-            arxiv_id = re.sub(r"v\d+$", "", m.group(1))
-        # Siempre construir la URL canónica sin versión
-        if arxiv_id:
+            arxiv_id = _strip_version(m.group(1))
             source_url = f"https://arxiv.org/abs/{arxiv_id}"
 
     return {

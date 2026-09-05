@@ -17,6 +17,7 @@ from adso.bot_utils import (
     _get_existing_tags,
     _has_pending_keyboard,
     _is_awaiting_text_input,
+    has_destination,
     reply_blocked,
 )
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL, Settings
@@ -100,9 +101,12 @@ def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
         ts = stats.last_event_at.strftime("%H:%M")
         lines.append(f"  Último evento: {ts}")
         if stats.conflicts_detected:
-            lines.append(f"  Conflictos detectados: {stats.conflicts_detected}")
+            ultimo = stats.last_conflict_at.strftime("%H:%M") if stats.last_conflict_at else "?"
+            lines.append(f"  Conflictos detectados: {stats.conflicts_detected} (último: {ultimo})")
         if stats.debug and stats.changes_detected:
             lines.append(f"  Cambios externos: {stats.changes_detected}")
+        if stats.debug and stats.deletions_detected:
+            lines.append(f"  Borrados externos: {stats.deletions_detected}")
 
     return lines
 
@@ -126,7 +130,7 @@ def _gather_vault_counts(vault_path: Path) -> tuple[int, int, int, int]:
             inbox_count += 1
             note = vault_cache.parse_cached(f)
             if note is not None and note.frontmatter.get("status") == "pending-classification":
-                if note.frontmatter.get("project") or note.frontmatter.get("area"):
+                if has_destination(note.frontmatter):
                     pending_auto += 1
                 else:
                     pending_manual += 1
@@ -237,8 +241,7 @@ async def handle_clasificar(
     for ref in inbox_notes:
         try:
             note = await read_note(ref.path)
-            fm = note.frontmatter
-            if not fm.get("project") and not fm.get("area"):
+            if not has_destination(note.frontmatter):
                 caso_b.append((ref, note))
         except Exception as e:
             logger.warning("Error leyendo nota de inbox para /clasificar: %s", e)

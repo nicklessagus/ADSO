@@ -871,7 +871,7 @@ async def _push_task_safe(
         debug: Si True, notifica también los pushes exitosos.
     """
     description = extract_original_from_degraded(body).strip() if body else ""
-    notes = build_task_notes(fm, note_path, vault_path, description=description)
+    notes = build_task_notes(fm, description=description)
     title = fm.get("title", "Sin título")
     task_id = await tasks_client.create_task(
         title=title,

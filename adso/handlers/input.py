@@ -814,7 +814,7 @@ async def _process_pdf_after_read_status(
             )
             return
 
-        is_paper = detect_paper(text, pdf_meta)
+        is_paper = detect_paper(text)
 
         paper_title: Optional[str] = None
         paper_authors: Optional[str] = None

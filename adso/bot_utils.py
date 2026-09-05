@@ -394,6 +394,11 @@ async def _get_existing_tags(vault_path: Path, limit: int = 100) -> list[str]:
     return list(tag_counts.keys())[:limit]
 
 
+def has_destination(fm: dict) -> bool:
+    """True si el frontmatter ya apunta a un proyecto o un área."""
+    return bool(fm.get("project") or fm.get("area"))
+
+
 async def count_unclassified_inbox(vault_path: Path) -> int:
     """Cuenta las notas del Inbox pendientes de clasificar y sin destino (Caso B).
 
@@ -413,9 +418,7 @@ async def count_unclassified_inbox(vault_path: Path) -> int:
         total = 0
         for ref in refs:
             note = parse_cached(ref.path)
-            if note is None:
-                continue
-            if not note.frontmatter.get("project") and not note.frontmatter.get("area"):
+            if note is not None and not has_destination(note.frontmatter):
                 total += 1
         return total
 

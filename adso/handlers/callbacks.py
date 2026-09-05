@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from telegram import Update
 from telegram.error import BadRequest
@@ -157,17 +158,11 @@ async def handle_callback(
             logger.exception("Error en _cb_confirm: %s", e)
             await _aviso_error_al_guardar(query, e)
 
-    elif data == CB_CANCEL:
-        await _cb_cancel(query, context)
+    elif data in (query_callbacks := _query_callbacks()):
+        await query_callbacks[data](query, context)
 
-    elif data == CB_CORRECT:
-        await _cb_correct(query, context)
-
-    elif data == CB_NOTE_CORRECT:
-        await _cb_note_correct(query, context)
-
-    elif data == CB_DEST_INBOX:
-        await _cb_dest(query, context, dest_type="inbox")
+    elif data in (update_callbacks := _update_callbacks()):
+        await update_callbacks[data](update, context)
 
     elif data.startswith(CB_DEST_AREA_PREFIX):
         # El callback_data lleva un token, no el nombre — ver F3/F4 en
@@ -213,18 +208,6 @@ async def handle_callback(
             keyboard = build_capture_keyboard()
             await query.edit_message_reply_markup(reply_markup=keyboard)
 
-    elif data == CB_INTENT_TASK:
-        await _cb_intent_task(update, context)
-
-    elif data == CB_INTENT_NOTE:
-        await _cb_intent_note(update, context)
-
-    elif data == CB_INTENT_CREATE_PROJECT:
-        await _cb_intent_create(update, context, "create_project")
-
-    elif data == CB_INTENT_CREATE_AREA:
-        await _cb_intent_create(update, context, "create_area")
-
     elif data == CB_DISAMBIG_QUERY:
         from adso.handlers.query import run_query
         # `pending_raw_content` se rescata primero: es justamente el texto que
@@ -251,27 +234,9 @@ async def handle_callback(
         await query.edit_message_text("Operación cancelada.")
         pop_manage_state(context)
 
-    elif data == CB_TRANSCRIPT_OK:
-        await _cb_transcript_ok(update, context)
-
-    elif data == CB_TRANSCRIPT_CORRECT:
-        await _enter_text_correction(query, context, "pending_transcript", "Transcripción actual")
-
     elif data == CB_TRANSCRIPT_CANCEL:
         _cleanup_pending(context, "pending_transcript")
         await query.edit_message_text("Cancelado.")
-
-    elif data == CB_READ_STATUS_READ:
-        await _process_pdf_after_read_status(update, context, "read")
-
-    elif data == CB_READ_STATUS_UNREAD:
-        await _process_pdf_after_read_status(update, context, "unread")
-
-    elif data == CB_EXTRACTION_OK:
-        await _cb_extraction_ok(update, context)
-
-    elif data == CB_EXTRACTION_CORRECT:
-        await _enter_text_correction(query, context, "pending_extraction", "Texto extraído")
 
     elif data == CB_EXTRACTION_CANCEL:
         _cleanup_pending(context, "pending_extraction", "pending_description", "pending_fallback_pdf")
@@ -308,21 +273,6 @@ async def handle_callback(
                 await query.edit_message_text(
                     "Describir el contenido del archivo para clasificarlo:"
                 )
-
-    elif data == CB_OCR:
-        await _cb_ocr(update, context)
-
-    elif data == CB_VISION:
-        await _cb_vision(update, context)
-
-    elif data == CB_CLASIFICAR_INBOX:
-        await handle_clasificar(update, context)
-
-    elif data == CB_ARXIV_CREATE_ANYWAY:
-        await _cb_arxiv_create_anyway(update, context)
-
-    elif data == CB_DOC_CREATE_ANYWAY:
-        await _cb_doc_create_anyway(update, context)
 
     elif data in (
         CB_REPORT_MENU, CB_REPORT_SCOPE, CB_REPORT_IDEAS, CB_REPORT_HEALTH, CB_REPORT_READING,
@@ -707,3 +657,57 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
         if not transferred:
             tmp_path.unlink(missing_ok=True)
 
+
+# ---------------------------------------------------------------------------
+# Tablas de despacho de `handle_callback`
+# ---------------------------------------------------------------------------
+#
+# Callbacks de igualdad exacta que solo delegan. Los que llevan lógica propia
+# (confirmar con reintento, destinos con token, reportes por prefijo, etc.)
+# siguen como ramas explícitas en `handle_callback`. Son funciones y no
+# constantes de módulo para que los nombres se resuelvan en cada llamada: los
+# tests parchean `callbacks._cb_ocr` y compañía, y una tabla construida al
+# importar guardaría la referencia original.
+
+
+def _query_callbacks() -> dict[str, Callable[..., Awaitable[None]]]:
+    """Callbacks que reciben ``(query, context)``."""
+    return {
+        CB_CANCEL: _cb_cancel,
+        CB_CORRECT: _cb_correct,
+        CB_NOTE_CORRECT: _cb_note_correct,
+        CB_DEST_INBOX: lambda query, context: _cb_dest(query, context, dest_type="inbox"),
+        CB_TRANSCRIPT_CORRECT: lambda query, context: _enter_text_correction(
+            query, context, "pending_transcript", "Transcripción actual"
+        ),
+        CB_EXTRACTION_CORRECT: lambda query, context: _enter_text_correction(
+            query, context, "pending_extraction", "Texto extraído"
+        ),
+    }
+
+
+def _update_callbacks() -> dict[str, Callable[..., Awaitable[None]]]:
+    """Callbacks que reciben ``(update, context)``."""
+    return {
+        CB_INTENT_TASK: _cb_intent_task,
+        CB_INTENT_NOTE: _cb_intent_note,
+        CB_INTENT_CREATE_PROJECT: lambda update, context: _cb_intent_create(
+            update, context, "create_project"
+        ),
+        CB_INTENT_CREATE_AREA: lambda update, context: _cb_intent_create(
+            update, context, "create_area"
+        ),
+        CB_TRANSCRIPT_OK: _cb_transcript_ok,
+        CB_EXTRACTION_OK: _cb_extraction_ok,
+        CB_READ_STATUS_READ: lambda update, context: _process_pdf_after_read_status(
+            update, context, "read"
+        ),
+        CB_READ_STATUS_UNREAD: lambda update, context: _process_pdf_after_read_status(
+            update, context, "unread"
+        ),
+        CB_OCR: _cb_ocr,
+        CB_VISION: _cb_vision,
+        CB_CLASIFICAR_INBOX: handle_clasificar,
+        CB_ARXIV_CREATE_ANYWAY: _cb_arxiv_create_anyway,
+        CB_DOC_CREATE_ANYWAY: _cb_doc_create_anyway,
+    }

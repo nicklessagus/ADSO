@@ -9,7 +9,13 @@ from typing import Optional
 
 from telegram.ext import ContextTypes
 
-from adso.bot_utils import _get_existing_items, _get_existing_tags, mark_bot_written, spawn_tracked
+from adso.bot_utils import (
+    _get_existing_items,
+    _get_existing_tags,
+    has_destination,
+    mark_bot_written,
+    spawn_tracked,
+)
 from adso.config import Settings
 from adso.constants import STATUS_ON_CONFIRM
 from adso.embeddings import EmbeddingsClient
@@ -97,7 +103,7 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
             orig_fm = note.frontmatter
 
             # Caso B: sin destino — esperar /clasificar
-            if not orig_fm.get("project") and not orig_fm.get("area"):
+            if not has_destination(orig_fm):
                 continue
 
             # Caso A: destino asignado — clasificar silenciosamente

@@ -83,16 +83,6 @@ def _scan_vault(
     return results
 
 
-def _parse_note_safe(path: Path) -> Optional[NoteData]:
-    """Lee una nota de forma segura. Retorna None si falla el parsing.
-
-    No rompe la búsqueda si una nota tiene frontmatter inválido.
-    Delega en `vault_cache.parse_cached`, que cachea el parse por
-    (mtime, size) para evitar re-leer notas sin cambios en scans repetidos.
-    """
-    return parse_cached(path)
-
-
 def _note_ref_from_data(note: NoteData, snippet: Optional[str] = None) -> NoteRef:
     """Construye un NoteRef desde un NoteData."""
     # Los valores se coaccionan a str: una nota editada a mano puede traer
@@ -170,7 +160,7 @@ async def get_backlinks(
             if md_path.stem == note_name:
                 continue
 
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
 
@@ -232,7 +222,7 @@ async def search(
         body_match: list[NoteRef] = []
 
         for md_path in _scan_vault(vault_path, exclude_dirs, scope):
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
 
@@ -316,7 +306,7 @@ async def find_by_tag(
     def _scan() -> list[NoteRef]:
         results = []
         for md_path in _scan_vault(vault_path):
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
 
@@ -355,7 +345,7 @@ async def find_by_property(
     def _scan() -> list[NoteRef]:
         results = []
         for md_path in _scan_vault(vault_path, scope=scope):
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
 
@@ -424,7 +414,7 @@ async def get_all_tags(
     def _scan() -> dict[str, int]:
         counts: dict[str, int] = {}
         for md_path in _scan_vault(vault_path, exclude_dirs):
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
             for tag in _extract_tags_from_note(note):
@@ -456,7 +446,7 @@ async def scan_notes(
     def _scan() -> list[NoteData]:
         results = []
         for md_path in _scan_vault(vault_path, exclude_dirs, scope):
-            note = _parse_note_safe(md_path)
+            note = parse_cached(md_path)
             if note is None:
                 continue
 

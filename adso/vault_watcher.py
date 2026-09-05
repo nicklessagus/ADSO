@@ -36,6 +36,11 @@ def _is_hidden(path: Path) -> bool:
     return path.name.startswith(".")
 
 
+def _is_note(path: Path) -> bool:
+    """True si el path es una nota `.md` visible (no un conflicto de Syncthing)."""
+    return path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name)
+
+
 @dataclass(frozen=True)
 class _VaultEvent:
     path: Path
@@ -66,45 +71,36 @@ class _VaultEventHandler(FileSystemEventHandler):
         self._queue = queue
         self._loop = loop
 
-    def on_created(self, event: FileCreatedEvent) -> None:
-        """Encola conflictos y notas .md nuevas creadas externamente (ej: desde Obsidian)."""
-        if event.is_directory:
-            return
-        path = Path(event.src_path)
+    def _enqueue(self, event: _VaultEvent) -> None:
+        """Pasa el evento del thread de watchdog al event loop del bot."""
+        asyncio.run_coroutine_threadsafe(self._queue.put(event), self._loop)
+
+    def _enqueue_visible_md(self, path: Path) -> None:
+        """Encola un `.md` visible como conflicto o como cambio, según su nombre."""
         if path.suffix != ".md" or _is_hidden(path):
             return
-        if CONFLICT_RE.search(path.name):
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(_VaultEvent(path=path, is_conflict=True)),
-                self._loop,
-            )
-        else:
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(_VaultEvent(path=path, is_conflict=False)),
-                self._loop,
-            )
+        self._enqueue(_VaultEvent(path=path, is_conflict=bool(CONFLICT_RE.search(path.name))))
+
+    def on_created(self, event: FileCreatedEvent) -> None:
+        """Encola conflictos y notas .md nuevas creadas externamente (ej: desde Obsidian)."""
+        if not event.is_directory:
+            self._enqueue_visible_md(Path(event.src_path))
 
     def on_modified(self, event: FileModifiedEvent) -> None:
         """Encola toda modificación de .md no-conflicto para re-embed."""
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name):
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(_VaultEvent(path=path, is_conflict=False)),
-                self._loop,
-            )
+        if _is_note(path):
+            self._enqueue(_VaultEvent(path=path, is_conflict=False))
 
     def on_deleted(self, event: FileDeletedEvent) -> None:
         """Encola borrados de .md para eliminar su embedding de ChromaDB."""
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix == ".md" and not _is_hidden(path) and not CONFLICT_RE.search(path.name):
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(_VaultEvent(path=path, is_conflict=False, is_delete=True)),
-                self._loop,
-            )
+        if _is_note(path):
+            self._enqueue(_VaultEvent(path=path, is_conflict=False, is_delete=True))
 
     def on_moved(self, event: FileMovedEvent) -> None:
         """Encola renames/moves: inotify los reporta como FileMovedEvent.
@@ -126,19 +122,9 @@ class _VaultEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         src = Path(event.src_path)
-        if src.suffix == ".md" and not _is_hidden(src) and not CONFLICT_RE.search(src.name):
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(_VaultEvent(path=src, is_conflict=False, is_delete=True)),
-                self._loop,
-            )
-        dest = Path(event.dest_path)
-        if dest.suffix == ".md" and not _is_hidden(dest):
-            asyncio.run_coroutine_threadsafe(
-                self._queue.put(
-                    _VaultEvent(path=dest, is_conflict=bool(CONFLICT_RE.search(dest.name)))
-                ),
-                self._loop,
-            )
+        if _is_note(src):
+            self._enqueue(_VaultEvent(path=src, is_conflict=False, is_delete=True))
+        self._enqueue_visible_md(Path(event.dest_path))
 
 
 class VaultWatcher:
@@ -376,68 +362,45 @@ class VaultWatcher:
                         self._notify_change(event.path), event.path, "cambio"
                     )
 
-    async def _notify_conflict(self, path: Path) -> None:
-        """Notifica al usuario sobre un conflicto de Syncthing."""
-        rel, dir_part = self._rel_parts(path)
-        lines = [
-            "⚠️ Conflicto de sincronización detectado:",
-            f"  <code>{path.name}</code>",
-        ]
+    async def _notify(self, path: Path, header: str, footer: str) -> None:
+        """Manda por Telegram el aviso de un evento sobre `path`.
+
+        Mismo formato para conflictos, cambios y borrados: encabezado, nombre
+        del archivo, su carpeta relativa al vault (si no está en la raíz) y
+        una línea de cierre con lo que el bot hace al respecto.
+        """
+        lines = [header, f"  <code>{path.name}</code>"]
+        dir_part = self._rel_dir(path)
         if dir_part:
             lines.append(f"  en: <code>{dir_part}/</code>")
-        lines.append("")
-        lines.append("Resolver el conflicto manualmente.")
-
+        lines += ["", footer]
         await self._bot.send_message(
-            chat_id=self._chat_id,
-            text="\n".join(lines),
-            parse_mode="HTML",
+            chat_id=self._chat_id, text="\n".join(lines), parse_mode="HTML"
+        )
+
+    async def _notify_conflict(self, path: Path) -> None:
+        """Notifica al usuario sobre un conflicto de Syncthing."""
+        await self._notify(
+            path, "⚠️ Conflicto de sincronización detectado:", "Resolver el conflicto manualmente."
         )
 
     async def _notify_change(self, path: Path) -> None:
         """Notifica sobre un cambio externo en modo debug."""
-        rel, dir_part = self._rel_parts(path)
-        lines = [
-            "📝 [debug] Cambio externo detectado:",
-            f"  <code>{path.name}</code>",
-        ]
-        if dir_part:
-            lines.append(f"  en: <code>{dir_part}/</code>")
-        lines.append("")
-        lines.append("Reindexando embedding...")
-
-        await self._bot.send_message(
-            chat_id=self._chat_id,
-            text="\n".join(lines),
-            parse_mode="HTML",
-        )
+        await self._notify(path, "📝 [debug] Cambio externo detectado:", "Reindexando embedding...")
 
     async def _notify_delete(self, path: Path) -> None:
         """Notifica sobre un borrado externo en modo debug."""
-        rel, dir_part = self._rel_parts(path)
-        lines = [
-            "🗑 [debug] Nota borrada externamente:",
-            f"  <code>{path.name}</code>",
-        ]
-        if dir_part:
-            lines.append(f"  en: <code>{dir_part}/</code>")
-        lines.append("")
-        lines.append("Eliminando embedding de ChromaDB...")
-
-        await self._bot.send_message(
-            chat_id=self._chat_id,
-            text="\n".join(lines),
-            parse_mode="HTML",
+        await self._notify(
+            path, "🗑 [debug] Nota borrada externamente:", "Eliminando embedding de ChromaDB..."
         )
 
-    def _rel_parts(self, path: Path) -> tuple[str, str]:
-        """Devuelve (ruta relativa, directorio relativo) para mostrar en notificaciones."""
+    def _rel_dir(self, path: Path) -> str:
+        """Carpeta de `path` relativa al vault, o "" si está en la raíz o fuera de él."""
         try:
-            rel = path.relative_to(self._vault_path)
-            dir_part = str(rel.parent) if str(rel.parent) != "." else ""
+            rel_parent = path.relative_to(self._vault_path).parent
         except ValueError:
-            dir_part = ""
-        return str(path.name), dir_part
+            return ""
+        return "" if str(rel_parent) == "." else str(rel_parent)
 
 
 def _make_observer():
