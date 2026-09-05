@@ -72,8 +72,6 @@ backup:
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
-  max_web_tokens: 8000           # truncado de contenido web antes de enviar al LLM
-  max_paper_tokens: 128000       # truncado de PDFs académicos
   degraded_retry_minutes: 30     # intervalo del cron que reintenta clasificar inbox pendiente
   disambiguation_threshold: 0.7  # confianza mínima del LLM para no preguntar con botones
 

@@ -68,7 +68,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
 | LLM primario | Gemini API — modelo `gemini-3.5-flash-lite` (línea flash-lite estable; free tier jul-2026: ~1.000-1.500 RPD, 15 RPM, 250k TPM — Google ya no publica el cap del free tier en la doc, verificarlo por proyecto en AI Studio). Clasificación y síntesis de reportes |
 | LLM de Vision | `gemini-3.6-flash` (`GEMINI_VISION_MODEL`) — solo OCR/descripción de imágenes y PDFs escaneados. Constante separada porque la quota del free tier es **por modelo**: rasterizar un PDF de 20 páginas no debe consumir RPD del bucket de la captura diaria |
-| LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). `ANTHROPIC_API_KEY` se lee en config pero no hay código que la use aún |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
@@ -550,7 +550,6 @@ GEMINI_API_KEY
 GROQ_API_KEY               # fallback LLM cuando Gemini no responde; sin esta key el bot funciona pero sin fallback
 
 # Opcionales
-ANTHROPIC_API_KEY          # LLM secundario alternativo
 LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
 ADSO_GEMINI_MODEL          # overridea GEMINI_MODEL sin tocar código. Para el harness de
                            # regresión (scripts/llm_regression.py); en producción sin setear.

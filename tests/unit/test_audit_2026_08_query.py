@@ -31,11 +31,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import frontmatter as fm_lib
 from telegram import InaccessibleMessage
 
 from adso.embeddings import EmbeddingsClient, SimilarNote
 from adso.knowledge_query import QueryResult, ScoredNote, _to_scored
+from tests.helpers import write_note
 
 FAKE_EMBEDDING = [0.1] * 768
 
@@ -113,15 +113,6 @@ def _make_app(settings, embeddings) -> SimpleNamespace:
         bot_data={"settings": settings, "embeddings": embeddings},
         bot=SimpleNamespace(send_message=AsyncMock()),
     )
-
-
-def _escribir_nota(path: Path, body: str, **fm) -> Path:
-    """Escribe una nota .md con frontmatter en `path` (crea directorios)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    base = {"title": "Nota", "type": "reference", "status": "active"}
-    base.update(fm)
-    path.write_text(fm_lib.dumps(fm_lib.Post(body, **base)), encoding="utf-8")
-    return path
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +195,7 @@ class TestE2ReindexExternoFiltraPaths:
             telegram_allowed_user_id=42,
         )
         app = _make_app(settings, MagicMock())
-        nota = _escribir_nota(vault_path / "05-Archive" / "vieja.md", "Contenido viejo.")
+        nota = write_note(vault_path / "05-Archive" / "vieja.md", "Contenido viejo.")
 
         with patch.object(bot_mod, "_index_note_safe", AsyncMock()) as indexar:
             ctor = await _post_init_con_watcher_mockeado(app)
@@ -223,7 +214,7 @@ class TestE2ReindexExternoFiltraPaths:
             telegram_allowed_user_id=42,
         )
         app = _make_app(settings, MagicMock())
-        indice = _escribir_nota(
+        indice = write_note(
             vault_path / "01-Projects" / "tesis" / "_index.md",
             "Índice del proyecto.",
             type="project-index",
@@ -249,7 +240,7 @@ class TestE2ReindexExternoFiltraPaths:
             telegram_allowed_user_id=42,
         )
         app = _make_app(settings, MagicMock())
-        nota = _escribir_nota(
+        nota = write_note(
             vault_path / "01-Projects" / "tesis" / "metodo.md", "Contenido vivo."
         )
 
@@ -285,14 +276,14 @@ class TestE3NotaVaciadaPierdeSuEmbedding:
         cliente._compute_embedding = _fake_embed
 
         vault = tmp_path / "vault"
-        nota = _escribir_nota(
+        nota = write_note(
             vault / "01-Projects" / "tesis" / "metodo.md", "Contenido sobre ML."
         )
         await cliente.reindex_vault(vault)
         assert cliente.count() == 1, "precondición: la nota quedó indexada"
 
         # El usuario vacía la nota desde Obsidian y deja solo el frontmatter.
-        _escribir_nota(nota, "")
+        write_note(nota, "")
         vault_cache.clear()
 
         await cliente.reindex_vault(vault)
@@ -316,7 +307,7 @@ class TestE3NotaVaciadaPierdeSuEmbedding:
         cliente._compute_embedding = _fake_embed
 
         vault = tmp_path / "vault"
-        nota = _escribir_nota(
+        nota = write_note(
             vault / "01-Projects" / "tesis" / "metodo.md", "Contenido sobre ML."
         )
         await cliente.reindex_vault(vault)
@@ -357,7 +348,7 @@ class TestE4CarreraConCapturaConfirmada:
         cliente = EmbeddingsClient(chroma_data_dir=tmp_path / "chroma", gemini_api_key="fake")
 
         vault = tmp_path / "vault"
-        _escribir_nota(vault / "01-Projects" / "tesis" / "vieja.md", "Contenido previo.")
+        write_note(vault / "01-Projects" / "tesis" / "vieja.md", "Contenido previo.")
 
         nueva_rel = "01-Projects/tesis/recien-confirmada"
         llamadas: list[str] = []
@@ -367,7 +358,7 @@ class TestE4CarreraConCapturaConfirmada:
             if len(llamadas) == 1:
                 # El usuario aprieta [Confirmar] a mitad del reindex nocturno:
                 # se escribe el .md y `spawn_tracked` indexa el embedding.
-                _escribir_nota(vault / f"{nueva_rel}.md", "Captura recién confirmada.")
+                write_note(vault / f"{nueva_rel}.md", "Captura recién confirmada.")
                 cliente._collection.upsert(
                     ids=[nueva_rel],
                     documents=["Captura recién confirmada."],
@@ -629,7 +620,7 @@ class TestE3bNotaVaciadaEnElWatcher:
         embeddings = MagicMock()
         embeddings.remove_note = AsyncMock()
         app = _make_app(self._settings(vault_path), embeddings)
-        nota = _escribir_nota(vault_path / "00-Inbox" / "vaciada.md", "")
+        nota = write_note(vault_path / "00-Inbox" / "vaciada.md", "")
 
         ctor = await _post_init_con_watcher_mockeado(app)
         await _callback_de_reindex(ctor)(nota)

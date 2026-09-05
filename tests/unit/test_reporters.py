@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import write_note
+
 from adso.reporters import (
     _parse_fm_date,
     _priority_key,
@@ -27,29 +29,8 @@ from adso.vault_writer import NoteData
 
 
 def _write_note(path: Path, frontmatter: dict, body: str = "") -> None:
-    """Escribe una nota .md con frontmatter YAML en path.
-
-    Crea directorios intermedios si es necesario.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["---"]
-    for k, v in frontmatter.items():
-        if isinstance(v, list):
-            if v:
-                lines.append(f"{k}:")
-                for item in v:
-                    lines.append(f"  - {item}")
-            else:
-                lines.append(f"{k}: []")
-        elif v is None:
-            lines.append(f"{k}:")
-        else:
-            lines.append(f"{k}: {v}")
-    lines.append("---")
-    if body:
-        lines.append("")
-        lines.append(body)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    """Escribe exactamente `frontmatter` (sin defaults) — ver tests/helpers.py."""
+    write_note(path, body, defaults=False, **frontmatter)
 
 
 def _today_str() -> str:

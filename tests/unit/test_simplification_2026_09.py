@@ -12,8 +12,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import frontmatter as fm_lib
 import pytest
+
+from tests.helpers import write_note
 
 from adso.bot_utils import _has_pending_keyboard, count_unclassified_inbox, reply_blocked
 from adso.constants import (
@@ -35,14 +36,6 @@ from adso.vault_writer import (
     read_note,
     seed_vault,
 )
-
-
-def _write_note(path: Path, body: str, **fm) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    base = {"title": "Nota", "type": "reference", "status": "active"}
-    base.update(fm)
-    path.write_text(fm_lib.dumps(fm_lib.Post(body, **base)), encoding="utf-8")
-    return path
 
 
 # ---------------------------------------------------------------------------
@@ -215,11 +208,11 @@ class TestCountUnclassifiedInbox:
     @pytest.mark.asyncio
     async def test_counts_only_pending_notes_without_destination(self, vault_path: Path) -> None:
         inbox = vault_path / "00-Inbox"
-        _write_note(inbox / "a.md", "x", status="pending-classification")
-        _write_note(inbox / "b.md", "x", status="pending-classification", project="p")
-        _write_note(inbox / "c.md", "x", status="pending-classification", area="a")
-        _write_note(inbox / "d.md", "x", status="active")
-        _write_note(vault_path / "01-Projects" / "p" / "e.md", "x", status="pending-classification")
+        write_note(inbox / "a.md", "x", status="pending-classification")
+        write_note(inbox / "b.md", "x", status="pending-classification", project="p")
+        write_note(inbox / "c.md", "x", status="pending-classification", area="a")
+        write_note(inbox / "d.md", "x", status="active")
+        write_note(vault_path / "01-Projects" / "p" / "e.md", "x", status="pending-classification")
         assert await count_unclassified_inbox(vault_path) == 1
 
     @pytest.mark.asyncio
@@ -355,7 +348,7 @@ class TestReclassifyKeepsVerbatimBody:
     async def _run(self, vault_path: Path, media_type: str) -> str:
         from adso.handlers import jobs
 
-        inbox = _write_note(
+        inbox = write_note(
             vault_path / "00-Inbox" / "2026-08-01-nota.md",
             "Texto original del usuario.",
             type="idea",
@@ -401,7 +394,7 @@ class TestScopeReportEmptyProjectCountsNoItems:
 
         fm, body = build_index_note("project", "p", "Scope.")
         await create_note(fm, body, vault_path)
-        _write_note(vault_path / "01-Projects" / "p" / "n.md", "x", project="p")
+        write_note(vault_path / "01-Projects" / "p" / "n.md", "x", project="p")
         with patch("adso.reporters._llm_synthesis", AsyncMock(return_value=None)):
             result = await scope_report(vault_path, project="p")
         assert result.item_count >= 1

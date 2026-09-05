@@ -17,6 +17,7 @@ Issues:
 from __future__ import annotations
 
 from datetime import date
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,6 +26,7 @@ from telegram.error import BadRequest
 
 from adso.constants import CB_DEST_PROJECT_PREFIX, CB_REPORT_SCOPE_PREFIX
 from adso.reporters import _report_header
+from tests.helpers import write_note
 
 
 # ---------------------------------------------------------------------------
@@ -58,21 +60,10 @@ def _context_de_reporte(mock_context) -> MagicMock:
     return mock_context
 
 
-def _escribir_nota(path: Path, body: str, **fm) -> Path:
-    """Escribe una nota .md con frontmatter (crea directorios)."""
-    import frontmatter as fm_lib
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    base = {
-        "title": "Nota",
-        "type": "reference",
-        "status": "active",
-        "date_created": "2026-08-01T10:00:00",
-        "date_modified": "2026-08-01T10:00:00",
-    }
-    base.update(fm)
-    path.write_text(fm_lib.dumps(fm_lib.Post(body, **base)), encoding="utf-8")
-    return path
+# `write_note` con las fechas fijas que estos tests asumen.
+_escribir_nota = partial(
+    write_note, date_created="2026-08-01T10:00:00", date_modified="2026-08-01T10:00:00"
+)
 
 
 # ---------------------------------------------------------------------------

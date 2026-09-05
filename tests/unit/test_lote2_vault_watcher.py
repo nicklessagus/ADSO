@@ -47,6 +47,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers import write_note
+
 
 # ---------------------------------------------------------------------------
 # Andamiaje: executor gateado (determinismo de la concurrencia)
@@ -797,12 +799,7 @@ def _envejecer(path: Path, dias: int = 30) -> None:
 
 
 def _nota(path: Path, cuerpo: str, titulo: str = "Nota") -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"---\ntitle: {titulo}\ntype: reference\nstatus: active\n---\n\n{cuerpo}",
-        encoding="utf-8",
-    )
-    return path
+    return write_note(path, cuerpo, title=titulo)
 
 
 class TestA57WikilinksRotosEnElReindex:

@@ -53,8 +53,6 @@ backup:
 documents:
   max_size_mb: 10
 llm:
-  max_web_tokens: 4000
-  max_paper_tokens: 64000
   degraded_retry_minutes: 15
   disambiguation_threshold: 0.8
 weekly_report:

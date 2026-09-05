@@ -87,8 +87,6 @@ documents:
 
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
-  max_web_tokens: 8000        # truncado de contenido web antes de enviar al LLM
-  max_paper_tokens: 128000    # truncado de PDFs académicos
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
   disambiguation_threshold: 0.7  # confidence del LLM por debajo de este valor → bot pregunta con botones en vez de asumir
 
@@ -208,8 +206,12 @@ Se cargan y se validan, pero **ningún módulo los lee todavía** (I1 de
 |---|---|
 | `weekly_report.*` (sección entera, incl. `stale_idea_days`) | job del reporte semanal (`improvements-2026-07.md` §2.2) |
 | `sync.interval_minutes` | cron de reconciliación con Google Tasks (§5.2) |
-| `llm.max_web_tokens`, `llm.max_paper_tokens` | truncado por tokens; hoy `document_extractor.py` trunca por caracteres con constantes hardcodeadas |
 | `rag.max_expansion_depth` | expansión desde nodo (Fase 7 completa) |
+
+Las claves `llm.max_web_tokens` y `llm.max_paper_tokens` **se eliminaron**
+(2026-09): el truncado real son constantes por caracteres en
+`document_extractor.py` y no había plan de hacerlo configurable. Si aparecen en
+un `config.yaml` viejo se ignoran con el WARNING de clave desconocida.
 
 La sección `content_extraction` **se eliminó** (2026-08-13, I1 de
 `docs/audit-2026-07-31.md`): era la única sin fase asociada y su validación

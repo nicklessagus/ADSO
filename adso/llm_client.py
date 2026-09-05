@@ -512,6 +512,19 @@ async def _safe_on_retry(on_retry: Any, attempt: int) -> None:
         logger.warning("on_retry falló (no bloqueante): %s", e)
 
 
+async def _pause_before_retry(on_retry: Any, attempt: int, wait: float) -> None:
+    """Avisa al usuario y espera antes del intento ``attempt + 1``.
+
+    Cola común de todos los reintentos de `classify`: la única diferencia entre
+    un error de red, una respuesta inválida y un 429 RPM es cuánto se espera.
+    Solo se llama cuando hay un intento siguiente: dormir después del último
+    intento retrasaría la nota degradada sin ganar nada (#43 D).
+    """
+    if on_retry:
+        await _safe_on_retry(on_retry, attempt + 1)
+    await asyncio.sleep(wait)
+
+
 def _fill_title_fallback(result: dict, content: str) -> dict:
     """Rellena el título vacío que `_validate_capture_payload` deja a propósito.
 
@@ -623,12 +636,12 @@ async def classify(
                 if groq_result is not None:
                     return _fill_title_fallback(groq_result, content)
                 break  # Groq also failed or not configured
-            if on_retry:
-                await _safe_on_retry(on_retry, attempt + 1)
-            await asyncio.sleep(RETRY_DELAYS[attempt - 1])
+            await _pause_before_retry(on_retry, attempt, RETRY_DELAYS[attempt - 1])
 
         except Exception as e:
-            if _is_rate_limit_error(e):
+            rate_limited = _is_rate_limit_error(e)
+            suggested_delay = 0.0
+            if rate_limited:
                 is_daily, suggested_delay = _parse_rate_limit_error(e)
                 if is_daily:
                     logger.error("Gemini daily quota exhausted — trying Groq fallback")
@@ -640,40 +653,26 @@ async def classify(
                         return _fill_title_fallback(groq_result, content)
                     break  # Groq also failed or not configured
 
-                # RPM error: use the delay suggested by the API.
-                # El backoff se lee DENTRO del guard: hay un delay por reintento,
-                # así que en el último intento `RETRY_DELAYS[attempt - 1]` indexa
-                # fuera de rango. Y como esto corre dentro del `except`, el
-                # IndexError escapaba de `classify()` sin pasar por modo
-                # degradado — perdiendo el texto del usuario, que es lo único
-                # que el loop no puede hacer. Regresión de haber achicado
-                # RETRY_DELAYS a [1, 2] (#43 D) sin revisar este uso.
-                if attempt < MAX_RETRIES:
-                    wait = (
-                        min(suggested_delay, MAX_RPM_WAIT)
-                        if suggested_delay
-                        else RETRY_DELAYS[attempt - 1]
-                    )
-                    logger.warning(
-                        "Attempt %d/%d — RPM rate limit, waiting %.0fs",
-                        attempt, MAX_RETRIES, wait,
-                    )
-                    if on_retry:
-                        await _safe_on_retry(on_retry, attempt + 1)
-                    await asyncio.sleep(wait)
-                else:
-                    logger.warning(
-                        "Attempt %d/%d — RPM rate limit, no retries left",
-                        attempt, MAX_RETRIES,
-                    )
-            else:
+            # El backoff se resuelve DENTRO del guard `attempt < MAX_RETRIES`: hay
+            # un delay por reintento, así que en el último intento
+            # `RETRY_DELAYS[attempt - 1]` indexa fuera de rango, y un IndexError
+            # acá adentro escaparía de `classify()` sin pasar por modo degradado
+            # — perdiendo el texto del usuario (#43 D). Un 429 RPM usa el
+            # `retryDelay` de la API (acotado) en vez del backoff fijo.
+            wait: Optional[float] = None
+            if attempt < MAX_RETRIES:
+                wait = RETRY_DELAYS[attempt - 1]
+                if rate_limited and suggested_delay:
+                    wait = min(suggested_delay, MAX_RPM_WAIT)
+            if rate_limited:
                 logger.warning(
-                    "Attempt %d/%d failed: %s", attempt, MAX_RETRIES, e
+                    "Attempt %d/%d — RPM rate limit, %s", attempt, MAX_RETRIES,
+                    f"waiting {wait:.0f}s" if wait is not None else "no retries left",
                 )
-                if on_retry and attempt < MAX_RETRIES:
-                    await _safe_on_retry(on_retry, attempt + 1)
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAYS[attempt - 1])
+            else:
+                logger.warning("Attempt %d/%d failed: %s", attempt, MAX_RETRIES, e)
+            if wait is not None:
+                await _pause_before_retry(on_retry, attempt, wait)
 
     # Degraded mode
     logger.error("LLM failed after %d attempts — degraded mode", MAX_RETRIES)

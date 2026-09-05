@@ -462,8 +462,6 @@ sync:
 backup:
   debounce_seconds: 30
 llm:
-  max_web_tokens: 8000
-  max_paper_tokens: 128000
   degraded_retry_minutes: 30
 """)
     return config
@@ -729,6 +727,7 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Todos los tests son **async** (`@pytest.mark.asyncio`) — consistente con el código de producción.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
+- `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
 - La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1111 tests: 924 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

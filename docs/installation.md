@@ -105,7 +105,6 @@ GEMINI_API_KEY=<tu API key de Gemini>
 GROQ_API_KEY=<tu API key de Groq>
 
 # ─── Opcionales ───────────────────────────────────────────────────────────────
-# ANTHROPIC_API_KEY=
 # LOG_LEVEL=INFO
 
 # Zona horaria IANA para parsear fechas relativas ("el viernes", "mañana").

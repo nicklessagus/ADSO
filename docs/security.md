@@ -595,16 +595,9 @@ Todas las operaciones de gestión requieren confirmación explícita del usuario
 
 El contenido externo se trunca antes de enviarse al LLM. El truncado limita lo que una inyección puede colgar al final de un documento largo, y de paso acota el gasto de quota.
 
-**Los límites reales son constantes en `document_extractor.py`, no configuración.** Las dos claves de `config.yaml` que parecen gobernarlos **no tienen ningún consumidor** (I1 de `docs/audit-2026-07-31.md`) — están declaradas en `Settings` y nadie las lee:
+**Los límites son constantes en `document_extractor.py`, no configuración.** Las claves `llm.max_web_tokens` / `llm.max_paper_tokens` que parecían gobernarlos nunca tuvieron consumidor (I1 de `docs/audit-2026-07-31.md`) y se eliminaron de `config.yaml` en 2026-09.
 
-```yaml
-# config.yaml — SIN CONSUMIR, no cambia nada tocarlas
-llm:
-  max_web_tokens: 8000       # links web genéricos (que además hoy no se procesan)
-  max_paper_tokens: 128000   # PDFs académicos
-```
-
-Lo que sí trunca, en `build_classify_content()` / `_SECTION_LIMITS`:
+Lo que trunca, en `build_classify_content()` / `_SECTION_LIMITS`:
 
 | Contenido | Límite real |
 |---|---|
@@ -622,7 +615,6 @@ O sea que un paper llega al LLM **más** recortado que un documento genérico, n
 | `TELEGRAM_ALLOWED_USER_ID` | Variable de entorno Docker |
 | `GEMINI_API_KEY` | Variable de entorno Docker |
 | `GROQ_API_KEY` | Variable de entorno Docker (fallback LLM) |
-| `ANTHROPIC_API_KEY` | Variable de entorno Docker (reservada — ningún código la usa aún) |
 | Google OAuth credentials | Archivo JSON montado como volumen en `/credentials/google-oauth.json`, path en env var `GOOGLE_CALENDAR_CREDS` |
 | Token OAuth de Google Tasks | `token_tasks.json`, escrito por `TasksClient` **junto al archivo de credenciales** (`<dir de GOOGLE_CALENDAR_CREDS>/token_tasks.json`). Es un secreto vivo: se regenera con `scripts/auth_google_tasks.py` y el directorio no debe commitearse |
 
