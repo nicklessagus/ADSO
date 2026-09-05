@@ -31,8 +31,8 @@ Este documento especifica en detalle las funciones de `vault_writer.py` y `vault
 | `obsidian backlinks` | `vault_search.py` | `get_backlinks()` |
 | `obsidian search` | `vault_search.py` | `search()` |
 | `obsidian tags` | `vault_search.py` | `get_all_tags()` |
-| `obsidian tasks` | `vault_search.py` | `find_tasks()` |
-| — (no tiene equiv. CLI) | `vault_writer.py` | `delete_note()`, `move_note()`, `update_wikilinks()` |
+| `obsidian tasks` | — | *Borrado en 2026-09 (`find_tasks`, sin caller; ver #61). Se reescribe cuando Fase 6 lo necesite* |
+| — (no tiene equiv. CLI) | `vault_writer.py` | `delete_note()`, `move_note()` |
 | — (no tiene equiv. CLI) | `vault_search.py` | `get_wikilinks()`, `find_by_property()`, `find_by_tag()` |
 | `obsidian daily` | — | Fuera de scope |
 | `obsidian eval` | — | No replicable sin Electron |
@@ -345,34 +345,6 @@ Busca en `03-Resources/` un archivo con el **mismo contenido** que `source_path`
 **Uso típico:** issue #53 — al recibir un documento por Telegram, `handle_document` calcula el hash del temporal y llama a esta función *antes* de gastar quota en extracción/LLM. Si hay match y alguna nota lo referencia, se ofrece `[Crear igual]` en vez de escribir un duplicado. La clave es el hash, no el nombre: el mismo binario puede llegar con nombres distintos.
 
 ---
-
-### `update_wikilinks()`
-
-**Sin equivalente directo en CLI** (el CLI lo hace internamente en `rename`)
-
-```python
-async def update_wikilinks(
-    note_path: Path,
-    old_name: str,
-    new_name: str,
-) -> None:
-```
-
-**Comportamiento:**
-
-1. Lee el archivo.
-2. Aplica cuatro reemplazos con regex (en orden de especificidad decreciente):
-   - `[[old_name#{heading}|{alias}]]` → `[[new_name#{heading}|{alias}]]`
-   - `[[old_name#{heading}]]` → `[[new_name#{heading}]]`
-   - `[[old_name|{alias}]]` → `[[new_name|{alias}]]`
-   - `[[old_name]]` → `[[new_name]]`
-3. Reescribe el archivo si hubo algún cambio.
-4. Actualiza `date_modified` si el archivo fue modificado.
-
-**Uso típico:** `bot.py` llama a `vault_search.get_backlinks(old_name)` para obtener la lista de notas afectadas, luego llama a `update_wikilinks()` en cada una.
-
----
-
 ### `remove_broken_wikilinks()`
 
 ```python
@@ -586,40 +558,6 @@ Al clasificar nuevo contenido, `bot.py` llama a `get_all_tags()` excluyendo `00-
 La exclusión de `00-Inbox` es intencional: los tags de notas pendientes de clasificación son tentativas y no deben propagarse como vocabulario canónico.
 
 ---
-
-### `find_tasks()`
-
-**Equivalente CLI:** `obsidian tasks`
-
-```python
-async def find_tasks(
-    vault_path: Path,
-    status: str | None = None,
-    area: str | None = None,
-    project: str | None = None,
-    include_inline: bool = True,
-) -> list[NoteRef]:
-```
-
-**Comportamiento:**
-
-**Fuente 1 — notas `type: task`:**
-- Busca todas las notas con `type: task` en frontmatter.
-- Aplica filtros `status`, `area`, `project` si se proveen.
-
-**Fuente 2 — checkboxes inline** (si `include_inline=True`):
-- Busca líneas `- [ ] {texto}` o `- [x] {texto}` en el body de **cualquier** nota, incluidas las que ya son `type: task`.
-- Si `status="pending"`: solo `- [ ]`. Si `status="done"`: solo `- [x]`. Si `status=None`: ambos. Con cualquier otro `status` (ej. `"in-progress"`) la fuente 2 no aporta nada.
-- Los checkboxes se filtran solo por `area` y `project` — el `status` del frontmatter de la nota que los contiene no se mira.
-
-**Retorna** lista combinada de `NoteRef`. Para los checkboxes inline, el `snippet` contiene el texto del checkbox.
-
-> **Las dos fuentes se solapan a propósito.** Una nota `type: task` que pasa los filtros se agrega **una vez como nota** (fuente 1) **y además una vez por cada checkbox** de su body (fuente 2): los checkboxes de una tarea son sus subtareas y se listan como ítems propios (cubierto por `test_inline_checkboxes_included`). El set `seen_paths` que existe en `_scan` se puebla en la fuente 1 pero **nunca se consulta** — es residuo de un diseño anterior que sí deduplicaba (`vault_search.py`, `find_tasks._scan`).
->
-> **La asimetría real entre las fuentes** (issue #61) es otra: la fuente 1 filtra por `status` + `area` + `project`, la fuente 2 solo por `area` + `project`. De ahí dos consecuencias — el `status` del frontmatter de una nota que no es `type: task` no se mira al listar sus checkboxes, y una nota `type: task` que **no** pasa un filtro hace `continue` antes de la fuente 2, así que sus checkboxes quedan silenciados aunque coincidan con el `status` pedido.
-
----
-
 ### `get_wikilinks()`
 
 **Sin equivalente CLI** (el CLI tiene backlinks pero no outgoing links)
@@ -768,7 +706,6 @@ else:
 | `get_backlinks` | Escaneo lineal de todos los `.md` | < 200ms para 500 notas |
 | `search` (texto libre) | Escaneo lineal con regex | < 300ms para 500 notas |
 | `get_all_tags` | Escaneo lineal | < 200ms para 500 notas |
-| `find_tasks` | Escaneo lineal filtrado | < 200ms para 500 notas |
 
 Todas las operaciones de búsqueda son `async` con `asyncio.to_thread()` para el I/O de disco — no bloquean el event loop del bot mientras escanean.
 

@@ -730,5 +730,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1121 tests: 930 unit, 48 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1111 tests: 924 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

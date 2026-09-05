@@ -1148,8 +1148,8 @@ También verifica que `config.yaml` existe. Si no existe, el bot falla con error
 - `security.py`: middleware de autenticación por `TELEGRAM_ALLOWED_USER_ID`
 - `bot.py`: handler de mensajes de texto, inline keyboards de confirmación (`[Confirmar]` `[Corregir]` `[Cancelar]`), selector de destino (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`), corrección por texto libre, desambiguación por confianza baja
 - `llm_client.py`: clasificación via Gemini API (modo `capture` del JSON schema), generación de frontmatter + body, reintentos adaptativos (cuota diaria → degradado inmediato; RPM → retryDelay de la API; otros → backoff fijo), modo degradado (inbox + `pending-classification`)
-- `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()`, `update_wikilinks()` — routing por tipo/proyecto/área/sección
-- `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `find_tasks()`, `get_all_tags()`, `get_note_index()`, `scan_notes()`
+- `vault_writer.py`: `create_note()`, `read_note()`, `set_property()`, `delete_note()`, `move_note()` — routing por tipo/proyecto/área/sección
+- `vault_search.py`: `get_backlinks()`, `get_wikilinks()`, `search()`, `find_by_tag()`, `find_by_property()`, `get_all_tags()`, `get_note_index()`, `scan_notes()`
 - Gestión básica: crear proyecto, crear área, crear sección (modo `manage` del JSON schema)
 - Git backup con debounce configurable
 - Validación del vault al startup (estructura de carpetas)

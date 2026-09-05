@@ -5,7 +5,7 @@ escribió reproduciendo el bug (fallaba) antes de aplicar el fix. Ahora pasan y
 quedan como regresión: si alguno de estos defectos vuelve, fallan.
 
 Issues: #3 (wikilinks borrados al mover), #4 (stop() tras start fallido),
-#5 (code fences destripados), #61 (find_tasks duplica tareas).
+#5 (code fences destripados). El V4 (#61, find_tasks) se borró con la función en 2026-09.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from adso.vault_search import find_tasks
 from adso.vault_writer import VAULT_DIRS, create_note, read_note, remove_broken_wikilinks
 from adso.vault_watcher import VaultWatcher
 
@@ -207,62 +206,3 @@ class TestV3CodeFences:
         body = (await read_note(nota)).body
         assert "ver el capítulo 3 del manual" in body
         assert "## Ver también" in body
-
-
-
-# ---------------------------------------------------------------------------
-# V4 — find_tasks: las dos fuentes filtran distinto (issue #61)
-# ---------------------------------------------------------------------------
-#
-# NO es un bug de duplicación, aunque lo parezca: una nota `type: task` se emite
-# como nota Y una vez por cada checkbox de su body. Eso es deliberado — los
-# checkboxes de una tarea son sus subtareas y se listan como ítems propios (lo
-# fija `test_inline_checkboxes_included` en tests/integration/, cuyo fixture usa
-# checkboxes llamados "Subtarea"). `seen_paths` se puebla y nunca se consulta:
-# es residuo de un diseño anterior que sí deduplicaba.
-#
-# Lo que sí es una inconsistencia real es que las dos fuentes filtran distinto,
-# y estos tests la caracterizan para que la decisión quede explícita.
-
-
-class TestV4FindTasksFiltradoAsimetrico:
-    async def test_los_subitems_de_una_tarea_se_listan(self, vault: Path) -> None:
-        """Comportamiento vigente y deliberado: la nota más sus subtareas."""
-        await create_note(
-            {"title": "Preparar clase", "type": "task", "status": "pending", "area": "docencia"},
-            "Pendiente:\n\n- [ ] armar slides\n- [ ] subir el apunte\n",
-            vault,
-        )
-
-        tareas = await find_tasks(vault, include_inline=True)
-
-        assert len(tareas) == 3
-        assert {t.snippet for t in tareas if t.snippet} == {"armar slides", "subir el apunte"}
-
-    async def test_una_tarea_filtrada_por_status_esconde_sus_checkboxes(
-        self, vault: Path
-    ) -> None:
-        """Caracteriza la asimetría: el `continue` de la fuente 1 corta la 2.
-
-        Una nota `type: task` que no pasa el filtro de `status` queda excluida
-        por completo, checkboxes incluidos — mientras que los checkboxes de una
-        nota que NO es `type: task` se listan sin importar su `status`. Las dos
-        fuentes filtran distinto: la 1 por status+area+project, la 2 solo por
-        area+project. Ver #61: hay que decidir cuál es la correcta.
-        """
-        await create_note(
-            {"title": "Tarea hecha", "type": "task", "status": "done", "area": "docencia"},
-            "- [ ] quedó pendiente igual\n",
-            vault,
-        )
-        await create_note(
-            {"title": "Apuntes", "type": "reference", "status": "active", "area": "docencia"},
-            "- [ ] revisar el presupuesto\n",
-            vault,
-        )
-
-        pendientes = await find_tasks(vault, status="pending", include_inline=True)
-
-        snippets = {t.snippet for t in pendientes if t.snippet}
-        assert "revisar el presupuesto" in snippets
-        assert "quedó pendiente igual" not in snippets

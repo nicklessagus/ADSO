@@ -25,10 +25,6 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?]]")
 # Regex para extraer tags inline (no dentro de code blocks)
 _INLINE_TAG_RE = re.compile(r"(?<!\[)#([\w/-]+)")
 
-# Regex para checkboxes
-_CHECKBOX_PENDING_RE = re.compile(r"^- \[ ] (.+)$", re.MULTILINE)
-_CHECKBOX_DONE_RE = re.compile(r"^- \[x] (.+)$", re.MULTILINE)
-
 # Default exclude dirs (la taxonomía vive en constants.py)
 _DEFAULT_EXCLUDE = list(DEFAULT_EXCLUDE_DIRS)
 
@@ -383,87 +379,6 @@ async def find_by_property(
                 # Comparación case-insensitive
                 if str(fm_value).lower() == str_value:
                     results.append(_note_ref_from_data(note))
-
-        return results
-
-    return await asyncio.to_thread(_scan)
-
-
-async def find_tasks(
-    vault_path: Path,
-    status: Optional[str] = None,
-    area: Optional[str] = None,
-    project: Optional[str] = None,
-    include_inline: bool = True,
-) -> list[NoteRef]:
-    """Encuentra tareas en el vault.
-
-    Fuente 1: notas con type: task.
-    Fuente 2: checkboxes inline - [ ] / - [x] en cualquier nota.
-
-    Args:
-        vault_path: Raíz del vault.
-        status: Filtrar por status (pending, done, etc.).
-        area: Filtrar por área.
-        project: Filtrar por proyecto.
-        include_inline: Incluir checkboxes inline.
-
-    Returns:
-        Lista combinada de NoteRef.
-    """
-
-    def _scan() -> list[NoteRef]:
-        results = []
-        seen_paths: set[Path] = set()
-
-        for md_path in _scan_vault(vault_path):
-            note = _parse_note_safe(md_path)
-            if note is None:
-                continue
-
-            fm = note.frontmatter
-
-            # Fuente 1: notas type: task
-            is_task_note = fm.get("type") == "task"
-            if is_task_note:
-                if status and fm.get("status", "") != status:
-                    continue
-                if area and fm.get("area", "") != area:
-                    continue
-                if project and fm.get("project", "") != project:
-                    continue
-                results.append(_note_ref_from_data(note))
-                seen_paths.add(md_path)
-
-            # Fuente 2: checkboxes inline (incluye notas type: task).
-            #
-            # Una nota `type: task` aporta la nota Y cada uno de sus checkboxes:
-            # los checkboxes de una tarea son sus subtareas y se listan como
-            # ítems propios (ver `test_inline_checkboxes_included`). `seen_paths`
-            # se puebla pero no se consulta: es residuo de un diseño anterior que
-            # deduplicaba. Ver #61 — la asimetría real entre las dos fuentes es
-            # que la 1 filtra por status+area+project y la 2 solo por
-            # area+project, y que el `continue` de la 1 silencia los checkboxes
-            # de una tarea filtrada.
-            if include_inline:
-                if status == "done":
-                    matches = _CHECKBOX_DONE_RE.findall(note.body)
-                elif status == "pending":
-                    matches = _CHECKBOX_PENDING_RE.findall(note.body)
-                elif status is None:
-                    matches = (
-                        _CHECKBOX_PENDING_RE.findall(note.body)
-                        + _CHECKBOX_DONE_RE.findall(note.body)
-                    )
-                else:
-                    matches = []
-
-                for m in matches:
-                    if area and fm.get("area", "") != area:
-                        continue
-                    if project and fm.get("project", "") != project:
-                        continue
-                    results.append(_note_ref_from_data(note, snippet=m.strip()))
 
         return results
 

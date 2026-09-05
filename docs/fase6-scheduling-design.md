@@ -18,7 +18,7 @@ El bot tiene que interpretar el intent, encontrar los ítems relevantes del vaul
 ## Capacidades disponibles
 
 **Vault (búsqueda determinista):**
-- `find_tasks(project, area, status)` — tareas por frontmatter + checkboxes inline
+- `find_tasks(project, area, status)` — tareas por frontmatter + checkboxes inline. *La implementación de Fase 1 se borró en 2026-09 (sin caller, semántica ambigua — #61): se reescribe acá cuando se implemente este flujo*
 - `find_by_property(read_status=unread, project=X)` — papers pendientes de lectura
 - Campos `due_date` y `scheduled` en frontmatter — ya capturados en clasificación
 - `title`, `status`, `priority` — suficiente para describir un evento

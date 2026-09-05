@@ -11,7 +11,6 @@ from adso.vault_search import (
     search,
     find_by_tag,
     find_by_property,
-    find_tasks,
     get_wikilinks,
     get_all_tags,
     get_note_index,
@@ -200,36 +199,6 @@ class TestFindByProperty:
         await _create_notes(vault)
         results = await find_by_property("type", "Task", vault)
         assert len(results) >= 1
-
-
-class TestFindTasks:
-
-    @pytest.mark.asyncio
-    async def test_find_all_tasks(self, vault: Path) -> None:
-        await _create_notes(vault)
-        results = await find_tasks(vault)
-        assert len(results) >= 1
-
-    @pytest.mark.asyncio
-    async def test_find_pending_tasks(self, vault: Path) -> None:
-        await _create_notes(vault)
-        results = await find_tasks(vault, status="pending")
-        assert len(results) >= 1
-
-    @pytest.mark.asyncio
-    async def test_inline_checkboxes_included(self, vault: Path) -> None:
-        await _create_notes(vault)
-        results = await find_tasks(vault, include_inline=True)
-        # Debe encontrar la task Y los checkboxes inline
-        snippets = [r.snippet for r in results if r.snippet]
-        assert any("Subtarea" in s for s in snippets)
-
-    @pytest.mark.asyncio
-    async def test_inline_checkboxes_excluded(self, vault: Path) -> None:
-        await _create_notes(vault)
-        results = await find_tasks(vault, include_inline=False)
-        # Solo notas type: task, sin checkboxes inline
-        assert all(r.note_type == "task" for r in results)
 
 
 class TestGetWikilinks:

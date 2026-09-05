@@ -16,7 +16,6 @@ from adso.vault_writer import (
     remove_broken_wikilinks,
     seed_vault,
     set_property,
-    update_wikilinks,
     VAULT_DIRS,
 )
 
@@ -161,52 +160,6 @@ class TestMoveNote:
     async def test_move_not_found(self, vault: Path) -> None:
         with pytest.raises(FileNotFoundError):
             await move_note(vault / "nope.md", vault / "00-Inbox")
-
-
-class TestUpdateWikilinks:
-
-    @pytest.mark.asyncio
-    async def test_simple_wikilink(self, sample_note: Path) -> None:
-        # Rewrite body to include a wikilink
-        note = await read_note(sample_note)
-        import frontmatter as fm_lib
-        post = fm_lib.Post("See [[OldNote]] for details.", **note.frontmatter)
-        sample_note.write_text(fm_lib.dumps(post), encoding="utf-8")
-
-        await update_wikilinks(sample_note, "OldNote", "NewNote")
-        content = sample_note.read_text(encoding="utf-8")
-        assert "[[NewNote]]" in content
-        assert "[[OldNote]]" not in content
-
-    @pytest.mark.asyncio
-    async def test_wikilink_with_alias(self, sample_note: Path) -> None:
-        note = await read_note(sample_note)
-        import frontmatter as fm_lib
-        post = fm_lib.Post("See [[OldNote|my alias]].", **note.frontmatter)
-        sample_note.write_text(fm_lib.dumps(post), encoding="utf-8")
-
-        await update_wikilinks(sample_note, "OldNote", "NewNote")
-        content = sample_note.read_text(encoding="utf-8")
-        assert "[[NewNote|my alias]]" in content
-
-    @pytest.mark.asyncio
-    async def test_wikilink_with_heading(self, sample_note: Path) -> None:
-        note = await read_note(sample_note)
-        import frontmatter as fm_lib
-        post = fm_lib.Post("See [[OldNote#section]].", **note.frontmatter)
-        sample_note.write_text(fm_lib.dumps(post), encoding="utf-8")
-
-        await update_wikilinks(sample_note, "OldNote", "NewNote")
-        content = sample_note.read_text(encoding="utf-8")
-        assert "[[NewNote#section]]" in content
-
-    @pytest.mark.asyncio
-    async def test_no_match_no_change(self, sample_note: Path) -> None:
-        original = sample_note.read_text(encoding="utf-8")
-        await update_wikilinks(sample_note, "NonExistent", "Other")
-        assert sample_note.read_text(encoding="utf-8") == original
-
-
 class TestEnsureVaultStructure:
 
     @pytest.mark.asyncio

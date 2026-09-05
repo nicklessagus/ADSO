@@ -746,63 +746,6 @@ async def move_note(source: Path, dest_dir: Path) -> Path:
     return dest_path
 
 
-async def update_wikilinks(
-    note_path: Path,
-    old_name: str,
-    new_name: str,
-) -> None:
-    """Actualiza wikilinks en una nota (renombrado).
-
-    Reemplaza [[old_name]] → [[new_name]] preservando alias.
-
-    Args:
-        note_path: Path al archivo .md a modificar.
-        old_name: Nombre viejo del stem.
-        new_name: Nombre nuevo del stem.
-    """
-    raw = await asyncio.to_thread(note_path.read_text, "utf-8")
-
-    # [[old_name]] → [[new_name]]
-    pattern_simple = re.compile(
-        r"\[\[" + re.escape(old_name) + r"\]\]"
-    )
-    # [[old_name|alias]] → [[new_name|alias]]
-    pattern_alias = re.compile(
-        r"\[\[" + re.escape(old_name) + r"(\|[^\]]+)\]\]"
-    )
-    # [[old_name#heading]] → [[new_name#heading]]
-    pattern_heading = re.compile(
-        r"\[\[" + re.escape(old_name) + r"(#[^\]|]+)\]\]"
-    )
-    # [[old_name#heading|alias]] → [[new_name#heading|alias]]
-    pattern_heading_alias = re.compile(
-        r"\[\[" + re.escape(old_name) + r"(#[^\]|]+)(\|[^\]]+)\]\]"
-    )
-
-    new_content = raw
-    new_content = pattern_heading_alias.sub(
-        f"[[{new_name}\\1\\2]]", new_content
-    )
-    new_content = pattern_heading.sub(
-        f"[[{new_name}\\1]]", new_content
-    )
-    new_content = pattern_alias.sub(
-        f"[[{new_name}\\1]]", new_content
-    )
-    new_content = pattern_simple.sub(
-        f"[[{new_name}]]", new_content
-    )
-
-    if new_content != raw:
-        # Actualizar date_modified en frontmatter
-        post = load_post(new_content)
-        clean_meta = _clean_frontmatter({**dict(post.metadata), "date_modified": now_iso()})
-        final_post = _build_post(post.content, clean_meta)
-        output = frontmatter.dumps(final_post)
-        await asyncio.to_thread(_atomic_write_sync, note_path, output)
-        logger.info("Wikilinks actualizados en: %s", note_path)
-
-
 def _fence_line_flags(lines: list[str]) -> list[bool]:
     """Marca qué líneas caen dentro de un bloque de código markdown.
 

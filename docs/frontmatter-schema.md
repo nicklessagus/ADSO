@@ -38,7 +38,7 @@ read_status: unread                    # Text enum — unread | read (ver secci�
 
 `source_file` y `source_url` son mutuamente opcionales y pueden coexistir (ej: un paper del que se tiene el PDF y el link).
 
-> **`date_modified` solo lo mantiene el bot.** Se actualiza en las escrituras que hace ADSO (`create_note`, `append_to_note`, `set_property`, `update_wikilinks`). Una edición externa desde Obsidian no lo toca: el `VaultWatcher` detecta el cambio y re-embede la nota, pero no reescribe el frontmatter. Consecuencia práctica: el `mtime` del archivo puede ser bastante más nuevo que `date_modified` (en el vault real hay 18 notas con esa divergencia, hasta 98 días). Para "última modificación real", usar `file.mtime` de Dataview, no `date_modified`.
+> **`date_modified` solo lo mantiene el bot.** Se actualiza en las escrituras que hace ADSO (`create_note`, `append_to_note`, `set_property`). Una edición externa desde Obsidian no lo toca: el `VaultWatcher` detecta el cambio y re-embede la nota, pero no reescribe el frontmatter. Consecuencia práctica: el `mtime` del archivo puede ser bastante más nuevo que `date_modified` (en el vault real hay 18 notas con esa divergencia, hasta 98 días). Para "última modificación real", usar `file.mtime` de Dataview, no `date_modified`.
 
 ---
 
