@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from adso.constants import DEFAULT_EXCLUDE_DIRS
+from adso.constants import ALWAYS_EXCLUDE_DIRS, DEFAULT_EXCLUDE_DIRS
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,14 @@ def should_index(
     if rel.suffix != ".md":
         return False
     if any(part in exclude_dirs for part in rel.parts):
+        return False
+    # `03-Resources/` es la carpeta de adjuntos: un `.md` ahí no es una nota del
+    # vault. Va aparte de `exclude_dirs` —igual que `_index.md` y la raíz— porque
+    # es taxonomía, no preferencia: los callers pasan su propia lista y con eso
+    # alcanzaba para que un apunte suelto en Resources se embebiera y contestara
+    # `/buscar` mientras los reportes y los scans por frontmatter no lo veían
+    # nunca (#72).
+    if any(part in ALWAYS_EXCLUDE_DIRS for part in rel.parts):
         return False
     if rel.stem == "_index":
         return False

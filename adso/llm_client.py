@@ -554,6 +554,60 @@ def _fill_title_fallback(result: dict, content: str) -> dict:
     return result
 
 
+def _match_existing(value: Any, existing: list[dict[str, str]]) -> Optional[str]:
+    """Devuelve el nombre canónico del item que coincide con ``value``, o None.
+
+    La comparación es por ``strip()`` + ``casefold()`` de los dos lados: el LLM
+    devuelve el nombre con la capitalización del texto del usuario y hasta con
+    espacios de más.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    objetivo = value.strip().casefold()
+    for item in existing:
+        nombre = str(item.get("name") or "")
+        if nombre.strip().casefold() == objetivo:
+            return nombre
+    return None
+
+
+def canonicalize_destination(
+    frontmatter: dict,
+    existing_projects: list[dict[str, str]],
+    existing_areas: list[dict[str, str]],
+) -> None:
+    """Deja en el frontmatter solo destinos que ya existen en el vault (in-place).
+
+    `create_note` hace `mkdir(parents=True)` sobre el destino, así que un
+    proyecto alucinado —o el mismo con otra capitalización, `"Tesis "` al lado
+    de `tesis/`— creaba una carpeta hermana sin `_index.md` que no aparecía en
+    ningún teclado ni reporte y se llevaba la nota adentro (#71). Un destino que
+    no existe se descarta y la nota cae al Inbox, donde el usuario la reubica:
+    **nunca** se descarta la nota ni ningún otro campo del frontmatter.
+
+    Args:
+        frontmatter: Frontmatter propuesto por el LLM. Se muta.
+        existing_projects: Proyectos del vault ``[{name, description}]``.
+        existing_areas: Áreas del vault, mismo formato.
+    """
+    for clave, existentes in (("project", existing_projects), ("area", existing_areas)):
+        if clave not in frontmatter:
+            continue
+        canonico = _match_existing(frontmatter[clave], existentes)
+        if canonico is not None:
+            frontmatter[clave] = canonico
+            continue
+        logger.warning(
+            "El LLM propuso %s=%r, que no existe en el vault — la nota va al Inbox",
+            clave, frontmatter[clave],
+        )
+        del frontmatter[clave]
+        if clave == "project":
+            # Una `section` solo significa algo dentro de un proyecto: sin él
+            # queda apuntando a un subdirectorio del Inbox.
+            frontmatter.pop("section", None)
+
+
 def _validate_response(
     response_text: str, media_type: str, disambiguation_threshold: float
 ) -> dict:
@@ -606,13 +660,29 @@ async def classify(
     system_prompt = build_system_prompt(existing_projects, existing_areas, existing_tags)
     user_message = build_user_message(content, user_context)
 
+    def _finish(validated: dict) -> dict:
+        """Últimos retoques comunes a todos los caminos de retorno.
+
+        La canonicalización del destino corre acá y no en `_validate_capture_payload`
+        porque es el único punto que conoce los proyectos y las áreas que existen
+        de verdad. Cubre también los payloads de `query`/`edit`, que
+        `capture._redirect_unimplemented_mode` convierte en capturas después
+        (#71). `manage` no pasa: crear un proyecto nuevo es justo lo que hace.
+        """
+        payload = validated.get("payload") if isinstance(validated, dict) else None
+        if validated.get("mode") != "manage" and isinstance(payload, dict):
+            fm = payload.get("frontmatter")
+            if isinstance(fm, dict):
+                canonicalize_destination(fm, existing_projects, existing_areas)
+        return _fill_title_fallback(validated, content)
+
     invalid_response_attempts = 0
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response_text = await _call_gemini(system_prompt, user_message)
             validated = _validate_response(response_text, media_type, disambiguation_threshold)
-            return _fill_title_fallback(validated, content)
+            return _finish(validated)
 
         except LLMResponseError as e:
             # La respuesta del modelo es inservible (JSON no parseable o schema
@@ -634,7 +704,7 @@ async def classify(
                     media_type,
                 )
                 if groq_result is not None:
-                    return _fill_title_fallback(groq_result, content)
+                    return _finish(groq_result)
                 break  # Groq also failed or not configured
             await _pause_before_retry(on_retry, attempt, RETRY_DELAYS[attempt - 1])
 
@@ -650,7 +720,7 @@ async def classify(
                         media_type,
                     )
                     if groq_result is not None:
-                        return _fill_title_fallback(groq_result, content)
+                        return _finish(groq_result)
                     break  # Groq also failed or not configured
 
             # El backoff se resuelve DENTRO del guard `attempt < MAX_RETRIES`: hay

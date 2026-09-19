@@ -117,7 +117,15 @@ async def _download_to_tmp(tg_media: Any, suffix: Optional[str]) -> Path:
         suffix = Path(tg_file.file_path or "audio.ogg").suffix
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
-    await tg_file.download_to_drive(str(tmp_path))
+    try:
+        await tg_file.download_to_drive(str(tmp_path))
+    except BaseException:
+        # El caller recién asigna `tmp_path` cuando esta corutina retorna, así
+        # que si la descarga lanza su `unlink` nunca corre y el temporal queda
+        # huérfano — y en la RPi4 `/tmp` es tmpfs: RAM filtrada hasta el
+        # reinicio (#73). El error se propaga igual, acá solo se limpia.
+        tmp_path.unlink(missing_ok=True)
+        raise
     return tmp_path
 
 
@@ -299,7 +307,12 @@ async def handle_text(
         return
 
     intents = _detect_manage_keywords(text)
-    if intents:
+    # `_detect_manage_keywords` también dispara con archivar/borrar/renombrar,
+    # pero `build_intent_keyboard` solo sabe dibujar [Crear proyecto]/[Crear
+    # área]: sin este filtro, "borrar la nota vieja" abría el teclado de gestión
+    # sin un solo botón de gestión y encima perdía la fila [🔎 Buscar en el
+    # vault] que tiene cualquier otra captura de texto (C14).
+    if intents and {"project", "area"} & set(intents):
         await update.message.reply_text(
             "¿Qué hacer?",
             reply_markup=build_intent_keyboard(intents),

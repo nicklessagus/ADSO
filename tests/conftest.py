@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
-import pytest
+import socket
 from pathlib import Path
+
+import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from telegram import CallbackQuery, Chat, Message, Update, User
@@ -53,6 +55,83 @@ def pytest_collection_modifyitems(items: list) -> None:
         marker = marker_for_path(Path(item.path))
         if marker:
             item.add_marker(getattr(pytest.mark, marker))
+
+
+# ---------------------------------------------------------------------------
+# Guards globales: ningún test sale a la red
+# ---------------------------------------------------------------------------
+#
+# `reporters._llm_synthesis` construye un cliente genai de verdad y se traga
+# cualquier excepción, así que 14 tests unitarios abrían conexiones TCP a
+# generativelanguage.googleapis.com y pasaban igual — lentos, no determinísticos
+# y dependientes de que la API contestara (#67).
+
+_real_socket_connect = socket.socket.connect
+_real_create_connection = socket.create_connection
+
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _es_loopback(address) -> bool:
+    """True para destinos que un test sí puede usar: loopback y AF_UNIX."""
+    if not isinstance(address, tuple) or not address:
+        # AF_UNIX pasa el path como str: no es red.
+        return True
+    host = address[0]
+    return isinstance(host, str) and host.split("%")[0] in _LOOPBACK
+
+
+@pytest.fixture(autouse=True)
+def _sin_red(monkeypatch):
+    """Bloquea toda conexión saliente que no sea loopback ni AF_UNIX.
+
+    Se parchea ``socket.socket.connect`` —el nivel más bajo, por donde pasan
+    ``create_connection``, httpx y el SDK de genai— y también
+    ``create_connection`` para que el traceback diga algo legible. ChromaDB y
+    cualquier servidor local siguen funcionando.
+    """
+    def _guard_connect(self, address, *args, **kwargs):
+        if not _es_loopback(address):
+            raise RuntimeError(
+                f"Un test intentó salir a la red hacia {address!r}. "
+                "Mockear la llamada en vez de pegarle a la API real."
+            )
+        return _real_socket_connect(self, address, *args, **kwargs)
+
+    def _guard_create_connection(address, *args, **kwargs):
+        if not _es_loopback(address):
+            raise RuntimeError(
+                f"Un test intentó salir a la red hacia {address!r}. "
+                "Mockear la llamada en vez de pegarle a la API real."
+            )
+        return _real_create_connection(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", _guard_connect)
+    monkeypatch.setattr(socket, "create_connection", _guard_create_connection)
+
+
+# Tests cuyo SUJETO es `_llm_synthesis` misma: mockean el cliente genai y miden
+# lo que la función hace con él (el deadline HTTP de la request, el timeout de
+# una llamada colgada). Stubearla ahí les sacaría justo lo que verifican, y no
+# salen a la red igual: el cliente está mockeado y el guard de sockets sigue
+# puesto.
+_TESTS_QUE_MIDEN_LA_SINTESIS = ("tests/unit/test_lote4.py::TestR5Synthesis",)
+
+
+@pytest.fixture(autouse=True)
+def _sin_sintesis_llm(request, monkeypatch):
+    """Neutraliza ``reporters._llm_synthesis`` en toda la suite.
+
+    Devuelve None (la síntesis es un adorno: el reporte se genera igual). Un test
+    que parchee `_llm_synthesis` por su cuenta gana, porque su parche se aplica
+    después de esta fixture.
+    """
+    if request.node.nodeid.startswith(_TESTS_QUE_MIDEN_LA_SINTESIS):
+        return
+
+    from adso import reporters
+
+    monkeypatch.setattr(reporters, "_llm_synthesis", AsyncMock(return_value=None))
 
 
 @pytest.fixture

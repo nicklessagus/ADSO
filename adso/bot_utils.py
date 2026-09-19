@@ -8,11 +8,14 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 import re
 import time
 from contextlib import contextmanager
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Coroutine, Iterator, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram.ext import ContextTypes
 
@@ -85,6 +88,34 @@ class Stopwatch:
         return " | ".join(partes)
 
 
+def user_tz() -> "timezone | ZoneInfo":
+    """Zona horaria del usuario, única resolución del proyecto.
+
+    La usan el parser de fechas relativas de la captura (los días de la semana y
+    "mañana"/"hoy" computados en UTC dan un off-by-one cerca de medianoche: un
+    usuario en UTC-3 escribiendo "el viernes" un jueves 22:00 local, que en UTC
+    ya es viernes) y los jobs diarios (`run_daily` con un `time` naive lo
+    interpreta PTB en UTC, así que `reindex.time: "03:00"` disparaba a las 00:00
+    locales, #68).
+
+    Orden de resolución: ``ADSO_TIMEZONE`` (override explícito) → ``TZ`` (la que
+    docker-compose ya define para el contenedor) → UTC. Requiere el paquete
+    ``tzdata`` para que ``zoneinfo`` resuelva los nombres en imágenes slim.
+
+    Returns:
+        La zona configurada, o ``timezone.utc`` si no hay ninguna o el nombre es
+        inválido — una zona mal escrita no puede tumbar el arranque.
+    """
+    tz_name = os.getenv("ADSO_TIMEZONE", "").strip() or os.getenv("TZ", "").strip()
+    if not tz_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("Zona horaria inválida (%r) — usando UTC", tz_name)
+        return timezone.utc
+
+
 def spawn_tracked(coro: Awaitable, *, name: str | None = None) -> "asyncio.Task":
     """Crea una tarea de fondo con referencia fuerte y logging de excepciones.
 
@@ -110,27 +141,72 @@ def spawn_tracked(coro: Awaitable, *, name: str | None = None) -> "asyncio.Task"
     return task
 
 
-# Tope del set bot_written_paths. En operación normal el set se drena solo (el
-# VaultWatcher consume cada entrada al procesar el evento inotify de la escritura,
-# ahora que on_moved está implementado). El cap es una red de seguridad: si algún
-# evento se pierde y una entrada nunca se drena, el set no crece sin límite en
-# uptime largo. 512 es muy holgado para un bot single-user.
+# Tope del dict bot_written_paths. Las entradas caducan solas por la ventana de
+# gracia; el cap es una red de seguridad para una ráfaga de escrituras dentro de
+# la misma ventana. 512 es muy holgado para un bot single-user.
 _BOT_WRITTEN_CAP = 512
 
+# Cuánto vale la marca de una escritura propia. Una sola `create_note` produce
+# VARIOS eventos inotify sobre el mismo path (el placeholder `O_EXCL` y el
+# `os.replace` de la escritura atómica), y el dedup de 2 s del watcher entrega
+# uno inmediato y otro en el flanco de salida. Cuando la marca era un `set` que
+# el primer callback consumía, el segundo evento pasaba por edición externa:
+# embedding de más y entrada duplicada en el commit del backup (#66). Con
+# ventana, la marca sobrevive a todos los eventos de esa escritura y caduca
+# antes de que una edición externa posterior tenga que verse (10 s: dos órdenes
+# de magnitud sobre la ventana de dedup, muy por debajo de cualquier edición
+# humana).
+BOT_WRITE_GRACE_SECONDS = 10.0
 
-def mark_bot_written(bot_data: dict, path: Path) -> None:
-    """Registra un path escrito por el bot para que VaultWatcher saltee su evento.
 
-    El watcher chequea este set y descarta el evento inotify de la propia
-    escritura del bot (evita doble embed). Acota el tamaño del set: descartar una
-    entrada aún no drenada solo provoca un re-embed redundante (idempotente),
-    nunca pérdida de datos.
+def _prune_bot_written(marks: "dict[Path, float]", now: float) -> None:
+    """Descarta marcas vencidas y, si aún sobra, las más viejas hasta el cap.
+
+    Descartar una marca de más solo provoca un re-embed redundante
+    (idempotente), nunca pérdida de datos.
     """
-    paths: set = bot_data.setdefault("bot_written_paths", set())
-    paths.add(path)
-    if len(paths) > _BOT_WRITTEN_CAP:
-        for stale in list(paths)[: len(paths) - _BOT_WRITTEN_CAP]:
-            paths.discard(stale)
+    for stale in [p for p, ts in marks.items() if now - ts > BOT_WRITE_GRACE_SECONDS]:
+        del marks[stale]
+    if len(marks) > _BOT_WRITTEN_CAP:
+        sobrantes = sorted(marks, key=lambda p: marks[p])[: len(marks) - _BOT_WRITTEN_CAP]
+        for stale in sobrantes:
+            del marks[stale]
+
+
+def mark_bot_written(bot_data: dict, path: Path, *, now: float | None = None) -> None:
+    """Registra un path escrito por el bot para que VaultWatcher saltee sus eventos.
+
+    Args:
+        bot_data: ``bot_data`` de la Application (donde vive el registro).
+        path: Path de la nota recién escrita.
+        now: Momento de la marca (reloj monótono). Inyectable para tests, misma
+            convención que el ``now`` de ``_parse_date_from_text``.
+    """
+    now = time.monotonic() if now is None else now
+    marks: dict[Path, float] = bot_data.setdefault("bot_written_paths", {})
+    marks[path] = now
+    _prune_bot_written(marks, now)
+
+
+def was_bot_written(bot_data: dict, path: Path, *, now: float | None = None) -> bool:
+    """True si el bot escribió ``path`` dentro de la ventana de gracia.
+
+    **No consume la marca**: una escritura produce varios eventos inotify y
+    todos tienen que saltearse (#66). La marca caduca por tiempo, no por lectura.
+
+    Args:
+        bot_data: ``bot_data`` de la Application.
+        path: Path del evento que reporta el watcher.
+        now: Momento de la consulta (reloj monótono). Inyectable para tests.
+
+    Returns:
+        False para un path nunca marcado o cuya marca ya venció — ahí el evento
+        es una edición externa real y se procesa como tal.
+    """
+    now = time.monotonic() if now is None else now
+    marks: dict[Path, float] = bot_data.get("bot_written_paths") or {}
+    _prune_bot_written(marks, now)
+    return path in marks
 
 
 # Estados que dejan un teclado inline a la vista y bloquean todo input nuevo.

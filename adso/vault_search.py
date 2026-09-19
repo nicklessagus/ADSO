@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from adso.constants import DEFAULT_EXCLUDE_DIRS
+from adso.constants import ALWAYS_EXCLUDE_DIRS, DEFAULT_EXCLUDE_DIRS
 from adso.vault_cache import parse_cached
 from adso.vault_writer import NoteRef, NoteData
 
@@ -38,7 +38,13 @@ _FRONTMATTER_TOKENS = ("type", "status", "project", "area")
 # default habría dejado sin arreglar justo el camino que alimenta el prompt de
 # clasificación. Misma forma que `_index.md` en `embeddings.should_index`: no es
 # configurable porque no es una preferencia, es la taxonomía. Issue #58.
-_ALWAYS_EXCLUDE = ("03-Resources",)
+#
+# La constante vive en `constants.py` desde que `should_index` también la aplica
+# (#72): tenerla acá sola dejaba a `03-Resources/` fuera de los scans
+# estructurales pero dentro del índice semántico, así que un `.md` ahí contestaba
+# `/buscar` y no aparecía en ningún reporte. El alias local se mantiene porque es
+# el nombre por el que los tests la importan.
+_ALWAYS_EXCLUDE = ALWAYS_EXCLUDE_DIRS
 
 
 # ---------------------------------------------------------------------------

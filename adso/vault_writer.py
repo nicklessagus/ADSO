@@ -23,7 +23,12 @@ from urllib.parse import unquote
 import frontmatter
 from slugify import slugify
 
-from adso.constants import NOTE_TYPES, STATUS_BY_TYPE, VALID_PRIORITY
+from adso.constants import (
+    DEFAULT_STATUS_BY_TYPE,
+    NOTE_TYPES,
+    STATUS_BY_TYPE,
+    VALID_PRIORITY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -502,6 +507,15 @@ async def create_note(
     # Se COACCIONA en vez de lanzar: el caller típico es `_cb_confirm`, o sea
     # el usuario ya apretó [Confirmar], y el texto de audio/OCR/Vision no
     # existe en ningún otro lado. Regla de oro: sin pérdida de datos.
+    # Un `status` vacío es un status AUSENTE, no uno inválido: el LLM devuelve
+    # `""` (o `None`, legal en el schema de Gemini) y la coacción de abajo lo
+    # convertía en `pending-classification`, dejando notas buenas marcadas como
+    # sin clasificar. Normalizar primero es lo que deja lugar al default (#69).
+    if isinstance(fm.get("status"), str) and not fm["status"].strip():
+        fm.pop("status")
+    elif fm.get("status") is None:
+        fm.pop("status", None)
+
     note_type = fm.get("type")
     if note_type not in VALID_TYPES:
         logger.warning(
@@ -525,6 +539,15 @@ async def create_note(
                 fm["status"], note_type, fallback,
             )
             fm["status"] = fallback
+
+    # Default por tipo para la nota que llegó sin status. Va DESPUÉS de la
+    # coacción, así que el valor escrito siempre es válido para el tipo: sin
+    # esto, `docs/frontmatter-schema.md` documentaba un default que nadie
+    # aplicaba y la nota quedaba sin la línea `status` (invisible para los
+    # filtros y reportes que la usan). `area-index` no figura en la tabla: no
+    # tiene ciclo de vida.
+    if "status" not in fm and fm["type"] in DEFAULT_STATUS_BY_TYPE:
+        fm["status"] = DEFAULT_STATUS_BY_TYPE[fm["type"]]
 
     # Setear campos automáticos si no vienen
     now = now_iso()
@@ -1142,9 +1165,23 @@ async def reconcile_vault(vault_path: Path) -> tuple[list[Path], list[Path]]:
 async def ensure_vault_structure(vault_path: Path) -> None:
     """Crea la estructura de carpetas del vault si no existe.
 
+    Verifica primero que el vault EXISTA. Era un `mkdir(parents=True)` a secas,
+    así que un typo en `VAULT_PATH` o un bind mount que no montó arrancaban el
+    bot contra un vault nuevo y vacío: las notas se escribían ahí, el índice se
+    reconstruía sobre la nada y nadie se enteraba hasta buscar una nota vieja
+    (#70). Abortar el arranque es la única respuesta sin pérdida de datos.
+
     Args:
         vault_path: Path raíz del vault.
+
+    Raises:
+        RuntimeError: Si ``vault_path`` no existe o no es un directorio.
     """
+    if not await asyncio.to_thread(vault_path.is_dir):
+        raise RuntimeError(
+            f"VAULT_PATH no apunta a un directorio existente: {vault_path}. "
+            "Verificar la variable de entorno y el montaje del vault."
+        )
     for d in VAULT_DIRS:
         dir_path = vault_path / d
         await asyncio.to_thread(dir_path.mkdir, parents=True, exist_ok=True)

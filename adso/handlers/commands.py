@@ -90,6 +90,10 @@ def _format_watcher_status(watcher: Optional[VaultWatcher]) -> list[str]:
     """Genera las líneas de estado del VaultWatcher para /status."""
     if watcher is None:
         return ["<b>Watcher vault:</b> no iniciado"]
+    if not watcher.is_running:
+        # Decir `activo` de un watcher muerto es peor que no decir nada: el
+        # usuario sigue editando desde Obsidian creyendo que se re-embebe.
+        return ["<b>Watcher vault:</b> detenido (fallo al iniciar)"]
 
     stats: WatcherStats = watcher.stats
     label = "activo · debug" if stats.debug else "activo"

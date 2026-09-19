@@ -181,6 +181,18 @@ class VaultWatcher:
     def stats(self) -> WatcherStats:
         return self._stats
 
+    @property
+    def is_running(self) -> bool:
+        """True solo si el observer está arriba.
+
+        `start()` traga el fallo del observer (un límite de inotify agotado, por
+        ejemplo), loguea y deja `_observer = None` para que `stop()` no haga
+        join sobre un thread nunca arrancado. El objeto watcher sigue existiendo
+        igual, así que /status lo reportaba como `activo` sin que nadie estuviera
+        mirando el vault (C10).
+        """
+        return self._observer is not None
+
     async def start(self) -> None:
         """Arranca el observer de watchdog y la tarea de dispatch."""
         loop = asyncio.get_running_loop()

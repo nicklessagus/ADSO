@@ -45,9 +45,21 @@ STATUS_ON_CONFIRM: dict[str, str] = {
 # reclasificación (#64); para document/image/link el LLM sí genera el body.
 VERBATIM_BODY_MEDIA = frozenset({"text", "audio"})
 
+# `status` que `create_note` escribe cuando el frontmatter no trae ninguno. Se
+# deriva de `STATUS_ON_CONFIRM` (no es una segunda copia a mano) más el índice
+# de proyecto, que nace `active`. `area-index` queda afuera: no tiene ciclo de
+# vida, así que tampoco se le inventa un status (#69).
+DEFAULT_STATUS_BY_TYPE: dict[str, str] = {**STATUS_ON_CONFIRM, "project-index": "active"}
+
 # Carpetas que ningún scan ni índice debe mirar por defecto. Es el mismo valor
 # que el default de `vault.exclude_dirs` en config.yaml.
 DEFAULT_EXCLUDE_DIRS = ("05-Archive", ".obsidian", ".trash")
+
+# Carpetas que ningún scan ni índice mira NUNCA, pase el caller la lista que
+# pase. `03-Resources/` es la carpeta de adjuntos según la taxonomía: un `.md`
+# ahí no es una nota del vault. No es configurable porque no es una preferencia
+# — si una nota tiene que ser buscable, no va en `03-Resources` (#58, #72).
+ALWAYS_EXCLUDE_DIRS = ("03-Resources",)
 
 # ---------------------------------------------------------------------------
 # Callback data constants

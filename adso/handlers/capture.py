@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -27,6 +25,7 @@ from adso.bot_utils import (
     mark_bot_written,
     render_with_keyboard,
     spawn_tracked,
+    user_tz,
 )
 from adso.config import Settings
 from adso.constants import STATUS_ON_CONFIRM, VERBATIM_BODY_MEDIA
@@ -287,182 +286,181 @@ async def _classify_and_preview(
     vault_path = settings.vault_path
 
     # Latencia por etapa: sin esto, una captura lenta no se puede diagnosticar
-    # a posteriori (ver Stopwatch en bot_utils.py).
+    # a posteriori (ver Stopwatch en bot_utils.py). El `finally` es lo que
+    # garantiza la línea por TODAS las salidas: con un `_log_timing()` por
+    # `return`, una excepción del scan o del render se llevaba puesta justo la
+    # medición del caso lento, que es el único que vale la pena medir (C16).
     sw = Stopwatch()
+    try:
+        with sw.stage("scan"):
+            projects, areas = await _get_existing_items(vault_path)
+            existing_tags = await _get_existing_tags(vault_path)
 
-    def _log_timing() -> None:
-        logger.info("Captura (%s): %s", media_type, sw.summary())
+        async def on_retry(attempt: int, max_attempts: int) -> None:
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}..."
+                )
 
-    with sw.stage("scan"):
-        projects, areas = await _get_existing_items(vault_path)
-        existing_tags = await _get_existing_tags(vault_path)
-
-    async def on_retry(attempt: int, max_attempts: int) -> None:
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                f"Gemini no responde a tiempo, reintento {attempt}/{max_attempts}..."
+        with sw.stage("classify"):
+            result = await classify(
+                content=text,
+                media_type=media_type,
+                existing_projects=projects,
+                existing_areas=areas,
+                existing_tags=existing_tags,
+                disambiguation_threshold=settings.llm.disambiguation_threshold,
+                on_retry=on_retry,
+                user_context=user_context,
             )
 
-    with sw.stage("classify"):
-        result = await classify(
-            content=text,
-            media_type=media_type,
-            existing_projects=projects,
-            existing_areas=areas,
-            existing_tags=existing_tags,
-            disambiguation_threshold=settings.llm.disambiguation_threshold,
-            on_retry=on_retry,
-            user_context=user_context,
-        )
+        # Modos no implementados (query, edit) → tratar como captura, re-validando
+        # el payload (validate_llm_response no lo sanitiza para esos modos).
+        mode = _redirect_unimplemented_mode(result, text)
 
-    # Modos no implementados (query, edit) → tratar como captura, re-validando
-    # el payload (validate_llm_response no lo sanitiza para esos modos).
-    mode = _redirect_unimplemented_mode(result, text)
+        # Guardar info de recurso para el confirm
+        if resource_file:
+            result["_resource_file"] = resource_file
 
-    # Guardar info de recurso para el confirm
-    if resource_file:
-        result["_resource_file"] = resource_file
+        # Inyectar campos extra al frontmatter
+        if extra_fm:
+            payload = result.get("payload") or {}
+            # `frontmatter: null` es legal en el schema de Gemini (y Groq lo emite
+            # libremente): el default de `.get` no aplica cuando la clave EXISTE con
+            # valor None, así que `fm.update()` mataba el flujo. Los caminos que
+            # traen `extra_fm` (read_status de un PDF escaneado, OCR/Vision
+            # confirmado) ya popearon su estado: ahí se perdía el texto extraído.
+            fm = payload.get("frontmatter")
+            if not isinstance(fm, dict):
+                fm = {}
+                payload["frontmatter"] = fm
+            fm.update(extra_fm)
 
-    # Inyectar campos extra al frontmatter
-    if extra_fm:
-        payload = result.get("payload") or {}
-        # `frontmatter: null` es legal en el schema de Gemini (y Groq lo emite
-        # libremente): el default de `.get` no aplica cuando la clave EXISTE con
-        # valor None, así que `fm.update()` mataba el flujo. Los caminos que
-        # traen `extra_fm` (read_status de un PDF escaneado, OCR/Vision
-        # confirmado) ya popearon su estado: ahí se perdía el texto extraído.
+        if mode == "degraded":
+            payload = result["payload"]
+            fm = payload["frontmatter"]
+            _stamp_new_note(fm, media_type)
+            if user_context:
+                fm["user_context"] = user_context
+
+            context.user_data["pending_note"] = result
+            result["payload"]["suggested_links"] = []
+
+            preview = build_preview(fm, payload.get("body", text), [])
+            keyboard = build_capture_keyboard()
+
+            sent = await render_with_keyboard(
+                _reply_fn(update),
+                _fallback_msg(update),
+                "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
+                "Confirmar, corregir o cancelar.\n\n" + preview,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+            _remember_preview_msg(result, sent)
+            return
+
+        # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
+        if force_capture and mode != "capture":
+            result["mode"] = "capture"
+            mode = "capture"
+
+        # Reparar payload si el modo fue forzado a capture desde un mode sin frontmatter
+        if mode == "capture" and (
+            not isinstance(result.get("payload"), dict)
+            or not isinstance(result.get("payload", {}).get("frontmatter"), dict)
+        ):
+            if not isinstance(result.get("payload"), dict):
+                result["payload"] = {}
+            if not isinstance(result["payload"].get("frontmatter"), dict):
+                result["payload"]["frontmatter"] = {}
+            fm_forced = result["payload"]["frontmatter"]
+            if not fm_forced.get("type") or fm_forced["type"] not in VALID_TYPES:
+                fm_forced["type"] = "idea"
+            if not fm_forced.get("title"):
+                fm_forced["title"] = text[:80].strip()
+            if not result["payload"].get("body"):
+                result["payload"]["body"] = text
+
+        if mode != "capture":
+            await _reply_fn(update)("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
+            return
+
+        payload = result["payload"]
         fm = payload.get("frontmatter")
         if not isinstance(fm, dict):
-            fm = {}
-            payload["frontmatter"] = fm
-        fm.update(extra_fm)
+            await _reply_fn(update)("Respuesta inesperada del LLM. Intentar de nuevo.")
+            return
+        suggested_links: list[dict] = []
 
-    if mode == "degraded":
-        payload = result["payload"]
-        fm = payload["frontmatter"]
+        # Para texto libre y audio el body es siempre el texto original del usuario.
+        # preserve_body extiende esto a imágenes/documentos cuando el texto viene
+        # directamente del usuario (descripción manual, OCR confirmado).
+        # original_text permite que el LLM clasifique con un fragmento (text) pero
+        # el body de la nota use el contenido completo (original_text).
+        if media_type in VERBATIM_BODY_MEDIA or preserve_body:
+            body = original_text or text
+            payload["body"] = original_text or text
+        else:
+            body = payload.get("body", "")
+
         _stamp_new_note(fm, media_type)
-        if user_context:
-            fm["user_context"] = user_context
+
+        # El usuario eligió explícitamente el tipo — ignorar lo que infirió el LLM
+        if forced_type:
+            fm["type"] = forced_type
+            if forced_type == "task":
+                fm["status"] = "pending"
+        elif prevent_task and fm.get("type") == "task":
+            fm["type"] = "reference"
+            fm["status"] = "active"
+
+        # due_date y scheduled solo son relevantes para tareas
+        if fm.get("type") != "task":
+            fm.pop("due_date", None)
+            fm.pop("scheduled", None)
+        else:
+            # Override LLM date with local parser — more reliable for relative expressions
+            # ("el martes", "mañana", etc.) because the LLM often gets weekday arithmetic wrong.
+            local_date = _parse_date_from_text(text)
+            if local_date:
+                fm["due_date"] = local_date
+
+        # El body se embebe una sola vez: el vector viaja en el payload y `_cb_confirm`
+        # lo reutiliza al indexar si el body no cambió (sin "Ver también" ni adjunto).
+        with sw.stage("links"):
+            suggested_links, body_embedding = await _suggest_links(context, body)
 
         context.user_data["pending_note"] = result
-        result["payload"]["suggested_links"] = []
+        result["payload"]["suggested_links"] = suggested_links
+        result["payload"]["_body_embedding"] = body_embedding
 
-        preview = build_preview(fm, payload.get("body", text), [])
+        preview = build_preview(fm, body, suggested_links)
         keyboard = build_capture_keyboard()
+
+        # Contenido extraído (PDF/OCR/Vision/documento) que trae un patrón de posible
+        # inyección: el <input> ya va blindado en classify(), pero avisar para que el
+        # usuario escrute el preview antes de confirmar. No bloquea — igual se confirma.
+        if check_injection_risk(text):
+            logger.warning("Patrón de inyección detectado en contenido a clasificar")
+            # El flag viaja con el estado pendiente: el preview se vuelve a
+            # renderizar en [Corregir] y [Reubicar], y sin él el aviso desaparecía
+            # justo cuando el usuario está por confirmar, que es cuando la regla de
+            # seguridad pide que escrute (#50).
+            result["injection_risk"] = True
+            preview = _INJECTION_PREVIEW_WARNING + preview
 
         sent = await render_with_keyboard(
             _reply_fn(update),
             _fallback_msg(update),
-            "⚠️ No se pudo clasificar bien — guardado en Inbox como borrador. "
-            "Confirmar, corregir o cancelar.\n\n" + preview,
+            preview,
             reply_markup=keyboard,
             parse_mode="HTML",
         )
         _remember_preview_msg(result, sent)
-        _log_timing()
-        return
 
-    # Si el usuario forzó captura explícitamente, ignorar el mode del LLM
-    if force_capture and mode != "capture":
-        result["mode"] = "capture"
-        mode = "capture"
-
-    # Reparar payload si el modo fue forzado a capture desde un mode sin frontmatter
-    if mode == "capture" and (
-        not isinstance(result.get("payload"), dict)
-        or not isinstance(result.get("payload", {}).get("frontmatter"), dict)
-    ):
-        if not isinstance(result.get("payload"), dict):
-            result["payload"] = {}
-        if not isinstance(result["payload"].get("frontmatter"), dict):
-            result["payload"]["frontmatter"] = {}
-        fm_forced = result["payload"]["frontmatter"]
-        if not fm_forced.get("type") or fm_forced["type"] not in VALID_TYPES:
-            fm_forced["type"] = "idea"
-        if not fm_forced.get("title"):
-            fm_forced["title"] = text[:80].strip()
-        if not result["payload"].get("body"):
-            result["payload"]["body"] = text
-
-    if mode != "capture":
-        await _reply_fn(update)("No se interpretó el mensaje como una nota para guardar. Intentar de nuevo.")
-        _log_timing()
-        return
-
-    payload = result["payload"]
-    fm = payload.get("frontmatter")
-    if not isinstance(fm, dict):
-        await _reply_fn(update)("Respuesta inesperada del LLM. Intentar de nuevo.")
-        _log_timing()
-        return
-    suggested_links: list[dict] = []
-
-    # Para texto libre y audio el body es siempre el texto original del usuario.
-    # preserve_body extiende esto a imágenes/documentos cuando el texto viene
-    # directamente del usuario (descripción manual, OCR confirmado).
-    # original_text permite que el LLM clasifique con un fragmento (text) pero
-    # el body de la nota use el contenido completo (original_text).
-    if media_type in VERBATIM_BODY_MEDIA or preserve_body:
-        body = original_text or text
-        payload["body"] = original_text or text
-    else:
-        body = payload.get("body", "")
-
-    _stamp_new_note(fm, media_type)
-
-    # El usuario eligió explícitamente el tipo — ignorar lo que infirió el LLM
-    if forced_type:
-        fm["type"] = forced_type
-        if forced_type == "task":
-            fm["status"] = "pending"
-    elif prevent_task and fm.get("type") == "task":
-        fm["type"] = "reference"
-        fm["status"] = "active"
-
-    # due_date y scheduled solo son relevantes para tareas
-    if fm.get("type") != "task":
-        fm.pop("due_date", None)
-        fm.pop("scheduled", None)
-    else:
-        # Override LLM date with local parser — more reliable for relative expressions
-        # ("el martes", "mañana", etc.) because the LLM often gets weekday arithmetic wrong.
-        local_date = _parse_date_from_text(text)
-        if local_date:
-            fm["due_date"] = local_date
-
-    # El body se embebe una sola vez: el vector viaja en el payload y `_cb_confirm`
-    # lo reutiliza al indexar si el body no cambió (sin "Ver también" ni adjunto).
-    with sw.stage("links"):
-        suggested_links, body_embedding = await _suggest_links(context, body)
-
-    context.user_data["pending_note"] = result
-    result["payload"]["suggested_links"] = suggested_links
-    result["payload"]["_body_embedding"] = body_embedding
-
-    preview = build_preview(fm, body, suggested_links)
-    keyboard = build_capture_keyboard()
-
-    # Contenido extraído (PDF/OCR/Vision/documento) que trae un patrón de posible
-    # inyección: el <input> ya va blindado en classify(), pero avisar para que el
-    # usuario escrute el preview antes de confirmar. No bloquea — igual se confirma.
-    if check_injection_risk(text):
-        logger.warning("Patrón de inyección detectado en contenido a clasificar")
-        # El flag viaja con el estado pendiente: el preview se vuelve a
-        # renderizar en [Corregir] y [Reubicar], y sin él el aviso desaparecía
-        # justo cuando el usuario está por confirmar, que es cuando la regla de
-        # seguridad pide que escrute (#50).
-        result["injection_risk"] = True
-        preview = _INJECTION_PREVIEW_WARNING + preview
-
-    sent = await render_with_keyboard(
-        _reply_fn(update),
-        _fallback_msg(update),
-        preview,
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-    _remember_preview_msg(result, sent)
-    _log_timing()
+    finally:
+        logger.info("Captura (%s): %s", media_type, sw.summary())
 
 
 _WEEKDAYS_ES: dict[str, int] = {
@@ -471,26 +469,11 @@ _WEEKDAYS_ES: dict[str, int] = {
 }
 
 
-def _user_tz() -> timezone | ZoneInfo:
-    """Zona horaria del usuario para parsear fechas relativas.
-
-    Los días de la semana y "mañana"/"hoy" deben resolverse en la hora local del
-    usuario: computarlos en UTC produce un off-by-one cerca de medianoche (ej. un
-    usuario en UTC-3 escribiendo "el viernes" un jueves 22:00 local, que en UTC ya
-    es viernes).
-
-    Orden de resolución: ``ADSO_TIMEZONE`` (override explícito) → ``TZ`` (la que
-    docker-compose ya define para el contenedor) → UTC. Requiere el paquete
-    ``tzdata`` para que ``zoneinfo`` resuelva los nombres en imágenes slim.
-    """
-    tz_name = os.getenv("ADSO_TIMEZONE", "").strip() or os.getenv("TZ", "").strip()
-    if not tz_name:
-        return timezone.utc
-    try:
-        return ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        logger.warning("Zona horaria inválida (%r) — usando UTC", tz_name)
-        return timezone.utc
+# La resolución de zona vive en `bot_utils` desde que los jobs diarios también
+# la necesitan (#68): `run_daily` con un `time` naive lo interpreta PTB en UTC,
+# así que `reindex.time: "03:00"` disparaba a las 00:00 locales. El nombre viejo
+# se conserva como alias — es el que usa `_parse_date_from_text`.
+_user_tz = user_tz
 
 
 def _parse_date_from_text(text: str, now: Optional[datetime] = None) -> Optional[str]:

@@ -93,26 +93,31 @@ def build_preview(
 
     fm = frontmatter
     lines.append(f"<b>Título:</b> {_esc(fm.get('title', ''))}")
-    lines.append(f"<b>Tipo:</b> {fm.get('type', '?')}")
+    # Todo valor del frontmatter va por `_esc`: un `<` sin escapar rompe el
+    # parse HTML de Telegram (el preview entero deja de renderizarse) y estos
+    # campos los propone el LLM a partir de contenido externo — PDF, OCR, el
+    # abstract de un paper. `type` y `status` hoy solo pueden traer un enum
+    # validado; escaparlos igual cuesta una llamada (C15).
+    lines.append(f"<b>Tipo:</b> {_esc(fm.get('type', '?'))}")
 
     if fm.get("project"):
-        dest = f"01-Projects/{fm['project']}"
+        dest = f"01-Projects/{_esc(fm['project'])}"
         if fm.get("section"):
-            dest += f"/{fm['section']}"
+            dest += f"/{_esc(fm['section'])}"
         lines.append(f"<b>Destino:</b> {dest}")
     elif fm.get("area"):
-        lines.append(f"<b>Destino:</b> 02-Areas/{fm['area']}")
+        lines.append(f"<b>Destino:</b> 02-Areas/{_esc(fm['area'])}")
     else:
         lines.append("<b>Destino:</b> 00-Inbox")
 
     if fm.get("status"):
-        lines.append(f"<b>Status:</b> {fm['status']}")
+        lines.append(f"<b>Status:</b> {_esc(fm['status'])}")
     if fm.get("priority"):
-        lines.append(f"<b>Prioridad:</b> {fm['priority']}")
+        lines.append(f"<b>Prioridad:</b> {_esc(fm['priority'])}")
     if fm.get("tags"):
-        lines.append(f"<b>Tags:</b> {', '.join(fm['tags'])}")
+        lines.append(f"<b>Tags:</b> {', '.join(_esc(t) for t in fm['tags'])}")
     if fm.get("due_date"):
-        lines.append(f"<b>Fecha límite:</b> {fm['due_date']}")
+        lines.append(f"<b>Fecha límite:</b> {_esc(fm['due_date'])}")
 
     if suggested_links:
         link_labels = [lnk.get("title") or lnk["note_id"] for lnk in suggested_links]

@@ -14,8 +14,10 @@ Two rules the diff depends on, both taken from the bot rather than restated
 here (restating them produces false positives — `_index.md` files look like 5
 missing embeddings until you notice the bot skips them on purpose):
 
-- what belongs in the index is `embeddings.should_index` (`exclude_dirs`,
-  `_index.md`, Syncthing conflicts);
+- what belongs in the index is `embeddings.should_index`, and the
+  `exclude_dirs` it receives are the deployed ones (`vault.exclude_dirs` in
+  `config.yaml`), not the built-in default: a vault that excludes an extra
+  folder would otherwise show every note in it as a missing embedding;
 - the document id is the note's vault-relative path without the suffix.
 
 Exit code is 0 when both sides agree, 1 when they do not, so it can gate a
@@ -30,20 +32,33 @@ from pathlib import Path
 
 import chromadb
 
+from adso.config import ConfigError, load_settings
 from adso.constants import DEFAULT_EXCLUDE_DIRS
 from adso.embeddings import COLLECTION_NAME, should_index
 
-EXCLUDE_DIRS = list(DEFAULT_EXCLUDE_DIRS)
+
+def _exclude_dirs() -> list[str]:
+    """Excluded folders as the running bot sees them.
+
+    Falls back to the constant when `config.yaml` is missing or unreadable, so
+    the script still answers something useful outside the container.
+    """
+    try:
+        return list(load_settings().vault.exclude_dirs)
+    except (ConfigError, OSError) as exc:
+        print(f"config.yaml no disponible ({exc}); usando exclusiones por defecto\n")
+        return list(DEFAULT_EXCLUDE_DIRS)
 
 
 def main() -> int:
     vault = Path(os.environ.get("VAULT_PATH", "/vault"))
     chroma_dir = os.environ.get("CHROMA_DATA_DIR", "/app/data/chroma")
+    exclude_dirs = _exclude_dirs()
 
     on_disk = {
         str(p.relative_to(vault).with_suffix(""))
         for p in vault.rglob("*.md")
-        if should_index(p, vault, EXCLUDE_DIRS)
+        if should_index(p, vault, exclude_dirs)
     }
     collection = chromadb.PersistentClient(path=chroma_dir).get_or_create_collection(
         name=COLLECTION_NAME

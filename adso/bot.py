@@ -27,6 +27,7 @@ import asyncio
 import logging
 
 from adso import vault_cache
+from adso.bot_utils import user_tz, was_bot_written
 from adso.config import Settings, load_settings
 from adso.embeddings import EmbeddingsClient, should_index
 from adso.handlers.callbacks import handle_callback
@@ -120,11 +121,12 @@ def _watcher_callbacks(app: Application):
 
         Si el path fue escrito por el bot (capture/jobs ya disparó indexado y
         backup), no se reindexa ni se notifica al git_backup: evita double-embed
-        y entradas duplicadas en commits.
+        y entradas duplicadas en commits. La marca no se consume: una sola
+        escritura atómica genera varios eventos inotify y todos se saltean hasta
+        que la marca caduca (`BOT_WRITE_GRACE_SECONDS`, #66).
         """
-        bot_written: set = app.bot_data.setdefault("bot_written_paths", set())
-        if path in bot_written:
-            bot_written.discard(path)
+        if was_bot_written(app.bot_data, path):
+            _bot_logger.debug("Evento de una escritura propia, no se reprocesa: %s", path)
             return
         # Mismos filtros que el reindex nocturno: sin ellos, editar desde
         # Obsidian una nota de `05-Archive` (o un `_index.md`) la metía al
@@ -364,7 +366,12 @@ def create_application(settings: Optional[Settings] = None) -> Application:
         )
 
     if settings.reindex.enabled:
-        reindex_time = datetime.strptime(settings.reindex.time, "%H:%M").time()
+        # `time` tz-aware a propósito: PTB fija el scheduler en UTC cuando la
+        # hora es naive, así que `reindex.time: "03:00"` disparaba a las 00:00
+        # locales en UTC-3 — el reindex nocturno caía en pleno uso (#68).
+        reindex_time = datetime.strptime(settings.reindex.time, "%H:%M").time().replace(
+            tzinfo=user_tz()
+        )
         app.job_queue.run_daily(
             reindex_job,
             time=reindex_time,
