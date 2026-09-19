@@ -11,7 +11,7 @@ Development is organized in phases. Each phase extends the previous one.
 | 3 | Audio (faster-whisper) + PDF (pymupdf) + text documents | Done |
 | 4 | Images: OCR (pytesseract) + Gemini Vision | Done |
 | 5 | arXiv integration via official Atom API | Done |
-| 6 | Google Calendar + Google Tasks | Partial (Tasks done, Calendar deferred) |
+| 6 | Google Calendar + Google Tasks | Partial (Tasks push-only, Calendar deferred) |
 | 7 | Natural language RAG queries | Partial (`/buscar` retrieval done; scope/expansion/synthesis pending) |
 | 8 | Vault analysis: reports, health, reading queue | Partial |
 
@@ -19,18 +19,21 @@ Development is organized in phases. Each phase extends the previous one.
 
 ## Phase 6 — Google Calendar + Tasks
 
-**Tasks (done):**
+**Tasks (done — one-way push only):**
 - Automatic push to dedicated `ADSO` list on task confirmation
 - `due_date` maps to Google Tasks date field → appears as chip in Calendar
 - Telegram notification on push failure
 - `tasks.debug` config flag for verbose push logging
-- External lists readable (not written)
+
+**Tasks (pending):**
+- Reading tasks from any list. `tasks_client.py` calls `tasklists().list()` only to find or create the `ADSO` list (`tasks_client.py:113-125`); there is no `tasks().list()`, no update and no delete.
+- Persist `gtask_id` in the note frontmatter — prerequisite for anything below (`create_task` returns the id and the caller drops it, `capture.py:877-896`)
+- Bidirectional sync: vault `status: done` ↔ Google Tasks completed
+- Re-auth flow for expired OAuth tokens (7-day limit in Testing mode) — today re-auth is manual, via `scripts/auth_google_tasks.py`
 
 **Calendar (deferred — design pending):**
 - Write `scheduled` events to dedicated `ADSO` calendar
-- Bidirectional sync: vault `status: done` ↔ Google Tasks completed
 - Weekly planning report via calendar view
-- Re-auth flow for expired OAuth tokens (7-day limit in Testing mode)
 
 Design document: `docs/fase6-scheduling-design.md`
 
@@ -40,14 +43,15 @@ Design document: `docs/fase6-scheduling-design.md`
 
 Natural language search over the vault using ChromaDB + LLM synthesis.
 
-**Done (7.0):** pure semantic retrieval via `/buscar` and the `[🔎 Buscar en el vault]` button — inline results for up to 3 matches, `.md` report for larger result sets, source citations with `obsidian://` links, and a configurable similarity threshold (`rag.similarity_threshold` in `config.yaml`). No LLM synthesis yet. Design in `docs/fase7-rag-design.md`.
+**Done (7.0):** pure semantic retrieval via `/buscar` and the `[🔎 Buscar en el vault]` button — inline results for up to 3 matches (title, scope, status, similarity and snippet; no links, since `obsidian://` is not clickable from Telegram), `.md` report with `obsidian://` citations for larger result sets, and a configurable similarity threshold (`rag.similarity_threshold` in `config.yaml`). No LLM synthesis yet. Design in `docs/fase7-rag-design.md`.
 
 **Pending:**
 
-- `mode=query` in LLM classifier (currently redirected to capture)
 - Retrieval pipeline: semantic search → structural search → merge → LLM synthesis
 - Scope disambiguation: bot asks `[Todo]` `[Proyecto1]` ... if not specified
 - Expansion from a node: `[Solo relaciones directas]` `[Expandir un grado más]`
+
+**Decided against:** re-enabling `mode=query` in the LLM classifier. Intent detection stays on `/buscar`, the `[🔎 Buscar en el vault]` button and (later) a local heuristic — a classifier mode would burn generation quota on every message, including captures. See `docs/fase7-rag-design.md` § "Detección de intención".
 
 ---
 

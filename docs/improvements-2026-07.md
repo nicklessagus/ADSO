@@ -12,6 +12,12 @@ Este documento deja cada propuesta con el detalle suficiente para implementarla
 
 Cada ítem tiene una línea `Decisión:` para marcar `implementar` / `descartar` / `pendiente`.
 
+> **Este documento es un backlog vivo, no una foto.** A diferencia de los
+> `docs/audit-*.md` —que no se editan nunca, porque registran lo que se sabía en
+> una fecha—, acá los ítems se marcan hechos a medida que se implementan, con la
+> evidencia (`path:línea` o issue) al lado. Última pasada de re-verificación
+> contra el código: **2026-09-18** (`39fa96f`, v1.8.0).
+
 Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 → 4 → 5 → backlog.
 
 ---
@@ -173,29 +179,46 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ## Bloque 3 — Resiliencia LLM / embeddings (fusiona el ítem "degraded mode" del plan 2026-05)
 
-### 3.1 Timeout explícito en llamadas a Gemini
+### 3.1 Timeout explícito en llamadas a Gemini — ✅ HECHO (2026-08-27/28)
 
-- **Estado:** plausible (`llm_client.py:548-557,615-619`) · **Impacto:** alto (robustez) · **Esfuerzo:** bajo · **Decisión:** pendiente
-- **Problema:** `generate_content` corre en `to_thread` sin timeout. Un cuelgue de red deja el
+- **Estado:** ✅ implementado · **Decisión:** hecho
+- **Problema:** `generate_content` corría en `to_thread` sin timeout. Un cuelgue de red dejaba el
   thread bloqueado indefinidamente; en `reclassify_inbox`/`reindex` retiene `_vault_heavy_lock` y
   frena todos los jobs pesados.
-- **Propuesta:** `types.HttpOptions(timeout=...)` (30-60s) al construir el cliente, o
-  `asyncio.wait_for` alrededor del `to_thread`; ante timeout, contar como retry transitorio.
+- **Resuelto:** `CLASSIFY_TIMEOUT_MS = 12_000` (`llm_client.py:98`) va en el
+  `GenerateContentConfig` de `_call_gemini` vía `types.HttpOptions(timeout=...)`
+  (`llm_client.py:789`), **no** en el cliente compartido con Vision. Un timeout entra por el camino
+  genérico de reintentos, así que conserva los 3 intentos. Los reportes usan su propia constante
+  (`SYNTHESIS_HTTP_TIMEOUT_MS`, `reporters.py:299`).
+- **Se cobró un incidente por el camino:** salió en `8_000` y la API rechaza cualquier deadline
+  menor a 10 s con un 400, así que toda captura cayó a modo degradado durante un día. El
+  post-mortem y la regla que dejó (correr `scripts/llm_regression.py` antes de tocar cualquier
+  parámetro del `GenerateContentConfig`) están en `docs/decisions-log.md`.
 
-### 3.2 No reintentar errores permanentes en `classify()`
+### 3.2 No reintentar errores permanentes en `classify()` — 🔶 MITAD HECHA (lote 3, #43)
 
-- **Estado:** plausible (`llm_client.py:391-423`) · **Impacto:** medio · **Esfuerzo:** bajo · **Decisión:** pendiente
-- **Problema:** el `except Exception` genérico reintenta 3× (con sleeps 1+2s) errores que nunca van
-  a mejorar: 400 `INVALID_ARGUMENT`, 401/403 (key mala), `LLMResponseError` de schema.
-- **Propuesta:** clasificar la excepción: permanentes → cortar directo a fallback/degraded;
-  fallo de validación → como máximo 1 reintento con hint "return valid JSON"; transitorios (5xx,
-  red, empty) → retries actuales.
+- **Estado:** parcial · **Impacto:** medio (lo que queda) · **Esfuerzo:** bajo · **Decisión:** pendiente la otra mitad
+- **Hecho — la rama de respuesta inválida:** `LLMResponseError` tiene su propio presupuesto
+  (`MAX_INVALID_RESPONSE_ATTEMPTS`): 2 intentos y después **un único tiro a Groq**, que no se
+  reintenta (`llm_client.py:617-640`). El razonamiento: reintentar el mismo prompt contra el mismo
+  modelo casi nunca arregla un JSON malformado, pero otro modelo puede. El tipo del error se decide
+  por `isinstance`, nunca por el texto del mensaje (post-mortem en `docs/decisions-log.md`).
+- **Pendiente — los errores permanentes de la API:** 400 `INVALID_ARGUMENT`, 401/403 (key mala) y
+  403 de permisos siguen cayendo en el `except Exception` genérico (`llm_client.py:641-680`) y
+  gastan los 3 intentos con sleeps de 1+2 s antes de degradar. Ahí `_is_rate_limit_error` solo
+  separa el 429; cualquier otro `APIError` es indistinguible de un 503 transitorio.
+- **Propuesta para lo que queda:** extender la clasificación por tipo a los códigos permanentes
+  (`APIError` con `code in {400, 401, 403}`) → cortar directo a Groq/degradado sin reintentar. El
+  incidente del timeout de 8 s es el caso testigo: tres llamadas condenadas en ~300 ms cada una.
 
-### 3.3 Groq como fallback ante cualquier fallo terminal de Gemini (no solo cuota diaria)
+### 3.3 Groq como fallback ante cualquier fallo terminal de Gemini (no solo cuota diaria) — 🔶 MITAD HECHA
 
-- **Estado:** plausible (`llm_client.py:395-404`) · **Impacto:** alto · **Esfuerzo:** bajo-medio · **Decisión:** pendiente
-- **Problema:** el fallback a Groq se dispara solo con 429 `PerDay`. Con 500/503, timeouts o
-  respuestas vacías repetidas se agotan los retries y se cae a degraded aunque Groq esté sano.
+- **Estado:** parcial · **Impacto:** alto (lo que queda) · **Esfuerzo:** bajo-medio · **Decisión:** pendiente la otra mitad
+- **Hecho:** Groq también se intenta cuando se agota el presupuesto de respuestas inválidas
+  (`llm_client.py:632-640`, ver 3.2), no solo con 429 `PerDay` (`:649-657`).
+- **Pendiente:** el camino genérico sigue sin fallback. Con 500/503, timeouts (incluido el de 3.1)
+  o respuestas vacías repetidas se agotan los 3 intentos y se cae a degradado aunque Groq esté sano
+  — el `for` termina y va derecho a `make_degraded_result` (`llm_client.py:677-680`).
 - **Propuesta:** tras agotar los retries por errores transitorios, intentar Groq antes de degradar.
   Complemento: 1-2 retries con backoff corto dentro de `_try_groq_fallback` (hoy es un solo
   intento y Groq free tier también tiene RPM estricto).
@@ -309,27 +332,41 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 `capture.py` está en 1.183 líneas. Además de mover helpers a `bot_utils.py` (plan original),
 la revisión encontró qué unificar exactamente:
 
-### 4.1 Unificar el bloque "embedding + links sugeridos" (4 copias)
+### 4.1 Unificar el bloque "embedding + links sugeridos" (4 copias) — ✅ HECHO
 
-- **Estado:** confirmado (una de las copias es código muerto, ver 1.7) · **Impacto:** medio · **Esfuerzo:** bajo-medio · **Decisión:** pendiente
+- **Estado:** ✅ implementado · **Decisión:** hecho
 - **Problema:** el patrón `compute_embedding(body)` → `query_similar` → armar `suggested_links`
-  está en `capture.py:225-245`, `:283-302` (muerto), `:649-666` y `:1152-1166`, con variaciones
-  inconsistentes: el flujo arXiv usa el abstract como query y **no guarda `_body_embedding`**, así
-  que `_cb_confirm` siempre re-embebe (llamada de red redundante y links calculados sobre un texto
-  distinto al indexado).
-- **Propuesta:** helper único `_compute_suggested_links(embeddings, settings, body, *,
-  query_text=None) -> tuple[list, vector]` usado en los tres sitios vivos; arXiv computa el
-  embedding del body definitivo una vez y lo guarda en `_body_embedding` como el resto.
+  estaba repetido cuatro veces (una de ellas código muerto, ver 1.7), con variaciones
+  inconsistentes.
+- **Resuelto:** helper único `_suggest_links(context, query_text)` (`capture.py:137`), que devuelve
+  `(links, vector_usado)`. **Ningún flujo de captura llama a `query_similar`/`compute_embedding`
+  directo**: la regla de qué texto se embebe y qué vector puede reutilizarse vive ahí y en ningún
+  otro lado. Contratos en `tests/unit/test_capture_links.py`.
+- **Con una diferencia deliberada respecto de la propuesta original:** arXiv **sigue sin guardar
+  `_body_embedding`** (`capture.py:1480-1482`), y eso ahora es la decisión correcta, no el bug. El
+  flujo de arXiv busca links por el **abstract**, no por el body de la nota; guardar ese vector como
+  `_body_embedding` haría que `_cb_confirm` indexe la nota con un embedding ajeno a su propio texto.
+  El costo es una llamada de embedding extra al confirmar un paper de arXiv.
 
-### 4.2 Unificar los dos parsers de corrección
+### 4.2 Unificar los dos parsers de corrección — 🔶 MITAD HECHA (#62, C12/C7 de la auditoría 2026-08)
 
-- **Estado:** confirmado (divergencia real) · **Impacto:** medio (UX inconsistente) · **Esfuerzo:** medio · **Decisión:** pendiente
-- **Problema:** `_apply_task_corrections` (`capture.py:460-506`, regex en cualquier posición) y la
-  cadena `elif startswith` para notas (`:509-554`) interpretan los mismos prefijos distinto:
-  `tipo X` funciona para notas pero **no** para tareas (cae como título si es corto); el mapeo de
-  prioridad está duplicado; la rama tarea acepta fecha embebida en texto libre, la de notas no.
-- **Propuesta:** un solo parser que reciba el frontmatter y aplique cada campo detectado
-  independiente del `type`, validando contra `VALID_TYPES`.
+- **Estado:** parcial · **Impacto:** bajo-medio (lo que queda) · **Esfuerzo:** medio · **Decisión:** pendiente la otra mitad
+- **Hecho — el bug real que causaba pérdida de datos:** `tipo`/`type` salió a su propio helper
+  agnóstico del tipo, `_apply_type_correction` (`capture.py:640`), y **las dos ramas lo llaman
+  primero** (`_apply_note_corrections:639`, `_apply_task_corrections:707`). Antes, sobre una tarea
+  el texto `tipo nota` no se reconocía, caía al fallback de título y la tarea terminaba llamándose
+  "tipo nota" — perdiendo el título y sin cambiar nunca de tipo. Además `_resync_status_with_type`
+  (`capture.py:670`) realinea `status` y descarta `due_date`/`scheduled` al dejar de ser tarea, así
+  que el cambio de tipo ya no escribe un frontmatter inválido al vault. El mapeo de prioridad
+  tampoco está duplicado: las dos ramas usan `_PRIORITY_WORDS`.
+- **Pendiente — siguen siendo dos parsers.** `_apply_note_corrections` usa prefijos excluyentes
+  (el primero que matchea gana, y requiere el espacio) mientras que `_apply_task_corrections` busca
+  con regex en cualquier posición y acumula varios campos de un mismo mensaje. Consecuencia visible:
+  sobre una tarea se puede corregir fecha y prioridad en una sola línea, sobre una nota no; y la
+  nota no acepta fecha embebida en texto libre (correcto para su tipo, pero por dos caminos
+  distintos en vez de por una regla).
+- **Propuesta para lo que queda:** un solo parser que aplique cada campo detectado independiente
+  del `type`, descartando después los que no correspondan al tipo vigente.
 
 ### 4.3 Salida del modo corrección
 
@@ -342,12 +379,17 @@ la revisión encontró qué unificar exactamente:
 
 ### 4.4 Estado `pending_raw_content` + `pending_capture_ctx` como unidad
 
-- **Estado:** plausible (`capture.py:978-983`, `callbacks.py:177-180`, `input.py:174-281`) · **Impacto:** medio (leak de estado entre capturas) · **Esfuerzo:** bajo-medio · **Decisión:** pendiente
-- **Problema:** se setean juntos pero se limpian por separado según el camino de salida; un
-  `pending_capture_ctx` residual puede contaminar la próxima captura (p. ej. `resource_file` de un
-  audio viejo aplicado a texto nuevo). `_has_pending_keyboard` no lo considera.
-- **Propuesta:** fusionarlos en un solo dict, limpiarlo en todos los caminos de salida (incluido
-  `/reset`, verificar `handle_reset`) e incluirlo en `_has_pending_keyboard`.
+- **Estado:** parcial · **Impacto:** medio (leak de estado entre capturas) · **Esfuerzo:** bajo-medio · **Decisión:** pendiente
+- **Problema:** se setean juntos (`capture.py:1289-1290`) pero se limpian por separado según el
+  camino de salida; un `pending_capture_ctx` residual puede contaminar la próxima captura (p. ej.
+  `resource_file` de un audio viejo aplicado a texto nuevo).
+- **Hecho de este ítem:** `pending_raw_content` ya está en `_KEYBOARD_STATE_KEYS`
+  (`bot_utils.py:138`), así que `_has_pending_keyboard` sí lo considera, y `/reset` limpia las dos
+  claves juntas (`bot_utils.py:381`). El descarte por `[🔎 Buscar en el vault]` también las popea
+  de a pares vía `_cleanup_pending` (`callbacks.py:220`, #50).
+- **Pendiente:** siguen siendo dos claves separadas, y `pending_capture_ctx` no está en
+  `_KEYBOARD_STATE_KEYS`.
+- **Propuesta:** fusionarlos en un solo dict y limpiarlo en todos los caminos de salida.
 
 ### 4.5 Limpiezas menores del flujo
 
@@ -366,9 +408,14 @@ la revisión encontró qué unificar exactamente:
 
 ### 4.6 Errores crudos al chat
 
-- **Estado:** plausible (`callbacks.py:117,371,446`; `input.py:358,457,476,624`) · **Impacto:** medio (fuga de detalles internos) · **Esfuerzo:** bajo · **Decisión:** pendiente
-- **Problema:** varios `edit_message_text(f"Error: {e}")` vuelcan la excepción cruda (paths, detalles
+- **Estado:** confirmado, **sigue pendiente** (re-verificado 2026-09-18) · **Impacto:** medio (fuga de detalles internos) · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Problema:** varios `reply_text(f"Error…: {e}")` vuelcan la excepción cruda (paths, detalles
   de API) al usuario.
+- **Sitios vivos hoy** (las referencias de julio quedaron desfasadas por el split de `bot.py`;
+  estas son las actuales): `input.py:465` (transcripción), `:651` (lectura de archivo de texto),
+  `:747` (documento), `:804` (imagen), `:907` (extracción de PDF) y `callbacks.py:652` (documento
+  duplicado). Ninguno cambió de forma desde 2026-07: son los mismos `f"...: {e}"`, y el log que los
+  acompaña es `logger.error`, no `logger.exception`.
 - **Propuesta:** mensaje genérico + `logger.exception` con el detalle; volcado de `{e}` solo bajo un
   flag de debug.
 
@@ -392,7 +439,7 @@ corregir la doc (1.8).
 
 ### 5.1 Persistir `gtask_id` en el frontmatter
 
-- **Estado:** confirmado (el `task_id` devuelto por `create_task` se descarta — `capture.py:735,817`) · **Impacto:** alto (prerequisito de todo sync) · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** confirmado, sigue pendiente (re-verificado 2026-09-18: `create_task` devuelve el id y `push_task_to_google` solo lo loguea — `capture.py:877-896`) · **Impacto:** alto (prerequisito de todo sync) · **Esfuerzo:** bajo · **Decisión:** pendiente
 - **Propuesta:** guardar `gtask_id` (y opcionalmente el list id) en el frontmatter de la nota task
   al confirmar. Sin esto no hay update/complete/delete posible ni idempotencia ante retries.
 
@@ -421,12 +468,14 @@ corregir la doc (1.8).
 - **Propuesta:** anclar el `due` date-only a mediodía local, o documentar el comportamiento
   conocido de Google Tasks con fechas sin hora.
 
-### 5.5 Condición muerta en `build_task_notes`
+### 5.5 Condición muerta en `build_task_notes` — ✅ HECHO
 
-- **Estado:** plausible (`tasks_client.py:227`) · **Impacto:** bajo (claridad) · **Esfuerzo:** trivial · **Decisión:** pendiente
+- **Estado:** ✅ implementado · **Decisión:** hecho
 - **Problema:** `isinstance(dt, datetime) and not isinstance(dt, date)` — `datetime` es subclase de
-  `date`, el primer conjunto es siempre falso; funciona de casualidad por el `hasattr` posterior.
-- **Propuesta:** `isinstance(dt, datetime) and (dt.hour or dt.minute)`.
+  `date`, el primer conjunto era siempre falso; funcionaba de casualidad por el `hasattr` posterior.
+- **Resuelto:** `tasks_client.py:220-229` normaliza con
+  `time_source if isinstance(time_source, datetime) else datetime.fromisoformat(str(time_source))` y
+  decide con `if dt.hour != 0 or dt.minute != 0`, envuelto en `except (TypeError, ValueError)`.
 
 ---
 
@@ -436,8 +485,12 @@ Todos **plausibles** salvo indicación; re-verificar al encarar. Decisión: pend
 
 **Watcher / vault:**
 - Excluir `.stversions`, `.git`, `.stfolder` tanto en el filtro del watcher como en
-  `_DEFAULT_EXCLUDE` de `vault_search.py:32` — hoy las copias versionadas de Syncthing pueden
-  re-embederse y aparecer en `/buscar`.
+  `_DEFAULT_EXCLUDE` de `vault_search.py` — hoy las copias versionadas de Syncthing pueden
+  re-embederse y aparecer en `/buscar`. **Mitad hecha:** el watcher ya los saltea, porque
+  `_is_hidden` (`vault_watcher.py:32-35`) descarta todo path cuyo nombre empiece con `.` y los tres
+  lo hacen. Falta el otro lado: `DEFAULT_EXCLUDE_DIRS` es `("05-Archive", ".obsidian", ".trash")`
+  (`constants.py:50`), así que un `.md` bajo `.stversions/` sigue entrando al reindex nocturno
+  (`embeddings.should_index`) y a los scans de `vault_search`.
 - Acotar el fan-out de re-embeds del watcher (`vault_watcher.py:184-196`): una ráfaga de Syncthing
   con N notas lanza N llamadas concurrentes a Gemini sin límite → semáforo o consumidor único.
 - Fallo de `observer.start()` se traga (`vault_watcher.py:156-164`) y `/status` sigue mostrando
@@ -466,8 +519,10 @@ Todos **plausibles** salvo indicación; re-verificar al encarar. Decisión: pend
 **Frontmatter / jobs / arranque:**
 - `set_property("type", ...)` no re-valida `status` contra el tipo nuevo (`vault_writer.py:449-459`).
 - `set_property(key, None)` borra el campo silenciosamente: hacer explícito (`delete_property`).
-- `reclassify_inbox` fuerza `source="telegram"` aunque la nota fuera `source: system`
-  (`jobs.py:132`): preservar el original.
+- `reclassify_inbox` fuerza `source="telegram"` aunque la nota fuera `source: system`: preservar el
+  original. Sigue vigente, pero la línea se mudó: hoy vive en el helper compartido
+  `inherit_inbox_frontmatter` (`capture.py`), que usan el cron **y** `/clasificar` — un fix ahí
+  cubre los dos.
 - `reindex_job` no notifica fallos (solo `logger.error`) y retiene `_vault_heavy_lock` durante todo
   el reindex: notificar si `errors` es alto o abortó por cuota; soltar el lock por lotes.
 - `run_daily` del reindex con hora naive (`bot.py:213-217`): PTB la interpreta en su propia zona;

@@ -45,10 +45,33 @@ python scripts/llm_regression.py --model gemini-3.7-flash \
 python scripts/llm_regression.py --provider groq --save
 ```
 
-Costo: ~34 requests por corrida (11 casos × 3 + 1 de Vision), holgado dentro del
-free tier. `--delay` espacia los requests para no chocar con el RPM.
+Costo: ~34 requests por corrida (11 casos × `--repeat` + 1 de Vision), holgado
+dentro del free tier.
 
-Exit code 0 si no hay reglas duras falladas, 1 si las hay.
+### Flags
+
+| Flag | Default | Qué hace |
+|---|---|---|
+| `--model` | — | Modelo candidato: setea `ADSO_GEMINI_MODEL` antes de importar `adso.config` |
+| `--vision-model` | — | Ídem para Vision (`ADSO_GEMINI_VISION_MODEL`). El smoke de Vision es un caso aparte: se puede evaluar un candidato de Vision sin cambiar el de clasificación |
+| `--provider` | `gemini` | `gemini` o `groq` |
+| `--repeat` | `3` | Corridas por caso. La salida del modelo no es determinística, así que una sola corrida no distingue una regresión de un mal día |
+| `--delay` | `1.0` | Segundos entre requests, para no chocar con el RPM del free tier |
+| `--only` | — | Ids de caso a correr (`--only task-area injection-exfil`). Útil para iterar sobre un caso sin quemar la corrida entera |
+| `--no-vision` | off | Saltea el smoke de Vision (ahorra el request contra `GEMINI_VISION_MODEL`) |
+| `--save` | off | Guarda el resultado como baseline en `baselines/` |
+| `--compare` | — | Path a una baseline JSON contra la que comparar |
+
+### Exit codes
+
+| Código | Significado |
+|---|---|
+| 0 | Sin reglas duras falladas (o, con `--compare`, sin regresiones) |
+| 1 | Hay reglas duras falladas (o regresiones contra la baseline) |
+| 2 | No corrió nada: falta `GEMINI_API_KEY` con `--provider gemini`, o `--only` no matcheó ningún caso |
+
+Un 2 nunca es un veredicto sobre el modelo — es que el harness no llegó a
+correr.
 
 ## Reglas
 

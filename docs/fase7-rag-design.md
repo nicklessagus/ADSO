@@ -96,8 +96,14 @@ La infraestructura de retrieval ya existe; Fase 7 es sobre todo orquestación.
   de llamada a Gemini de texto libre (a adaptar con prompt grounded).
 - **Config `rag.*`** (`RagConfig` en `config.py`): `similarity_threshold: 0.75`,
   `max_results: 10`, `max_expansion_depth: 2`.
-- **Botones de desambiguación** (`constants.py`): `CB_DISAMBIG_QUERY` ejecuta el
-  retrieval semántico real (mismo pipeline que `/buscar`) desde la etapa 7.0.
+- **Botón de búsqueda** (`constants.py`): `CB_DISAMBIG_QUERY` ejecuta el
+  retrieval semántico real (mismo pipeline que `/buscar`) desde la etapa 7.0. Su
+  **único productor hoy** es la fila `[🔎 Buscar en el vault]` del teclado de
+  guardado (`build_save_keyboard`, `keyboards.py:362-378`), que acompaña a
+  `[Cancelar] [Tarea] [Nota]` en el flujo de captura común de texto y audio
+  (`input.py:310,347`; `capture.py:1287`). El teclado de
+  desambiguación de dos botones que este documento describe **no existe**: se
+  borró en 2026-09 por no tener productor (ver más abajo).
 
 > Nota: `knowledge_query.py` ya existe (etapa 7.0) e implementa `retrieve()`;
 > `synthesize()` y el resto de este diseño siguen pendientes.
@@ -180,6 +186,13 @@ async def synthesize(
 > 7.2) y `QueryResult` expone `below_threshold: bool` (indica que los resultados
 > se obtuvieron relajando el umbral) en lugar de `expanded`. Firmas reales en
 > `adso/knowledge_query.py`.
+>
+> `scope` **sí** está en la firma shipeada (`knowledge_query.py:84-90`) y se
+> propaga al `where` de ChromaDB, pero ningún caller lo pasa: `run_query` llama a
+> `retrieve()` solo con `query`/`vault_path`/`embeddings`/`threshold`/`max_results`
+> (`query.py:86-92`). Lo mismo vale para `ScoredNote.via`, que se completa pero
+> nadie lee. Es plomería de 7.1/7.2 ya puesta: implementar el scope es cablear los
+> botones, no tocar `retrieve()`.
 
 - `retrieve` es puro retrieval (embedding + ChromaDB + filesystem). Testeable con
   ChromaDB mockeado.
@@ -200,15 +213,25 @@ la quota de generación en cada mensaje, incluso capturas).
 
 1. **`/buscar <consulta>`** — comando explícito, cero ambigüedad, cero LLM. Es el
    MVP. Si no hay texto, el bot pide la consulta.
-2. **Botón `[Buscar en vault]`** — el `CB_DISAMBIG_QUERY` que ya existe. Aparece
-   cuando el usuario manda algo que *podría* ser consulta y el bot ofrece
-   `[Guardar como nota]` `[Buscar en vault]`. Deja de responder "próxima versión"
-   y llama al pipeline con el texto pendiente.
+2. **Botón `[🔎 Buscar en el vault]`** — el `CB_DISAMBIG_QUERY`, implementado en
+   7.0. **Resuelto distinto a como se diseñó acá:** en vez de un teclado de
+   desambiguación aparte que el bot muestre cuando sospecha una consulta, el botón
+   es una segunda fila fija del teclado de guardado (`build_save_keyboard`), así
+   que aparece en el flujo de captura común de texto y audio, sin heurística de
+   por medio. Llama al pipeline con `pending_raw_content` y descarta la captura
+   (`callbacks.py:211-225`).
 3. **Heurística (etapa posterior)** — detectar consultas por patrón sin comando:
    arranca con "qué tengo/hay sobre", "mostrá/mostrame", "buscá", "dame todo…",
-   termina en "?". Solo dispara la *desambiguación* (no asume): muestra
-   `[Guardar como nota]` `[Buscar en vault]`. Falsos positivos cuestan un botón,
-   no una acción.
+   termina en "?". Falsos positivos cuestan un botón, no una acción.
+
+   **Estado: sin teclado que mostrar.** El teclado de dos botones
+   `[Guardar como nota]` `[Buscar en vault]` que esta etapa dispararía se borró en
+   2026-09 (`build_disambiguation_keyboard` y `CB_DISAMBIG_CAPTURE`, commit
+   `a7ad51d`) por no tener ningún productor (`needs_disambiguation`
+   se sigue calculando en `classify` y nadie lo lee; `llm.disambiguation_threshold`
+   existe solo para ese cálculo). Implementar la heurística implica decidir primero
+   qué muestra: reconstruir ese teclado, o —más barato— reordenar el teclado de
+   guardado poniendo `[🔎 Buscar en el vault]` arriba cuando el patrón dispara.
 
 ---
 

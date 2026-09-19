@@ -43,9 +43,12 @@ jobs:
           VAULT_PATH: /tmp/adso_test_vault
 
       # El gate mide el código real, `adso/handlers/*` incluido (~40% del
-      # proyecto, antes omitido). Actual: 74%. El umbral queda en 70 para dar
-      # margen a variaciones menores; subirlo es la forma de fijar el terreno
-      # ganado a medida que la regla test-first suma cobertura.
+      # proyecto, antes omitido). El umbral es 70 y deja margen para
+      # variaciones menores; la cobertura real de cada corrida sale del reporte
+      # (el artefacto de coverage / Codecov), no de este comentario — un número
+      # acá se queda viejo en el commit siguiente. Subir el umbral es la forma
+      # de fijar el terreno ganado a medida que la regla test-first suma
+      # cobertura.
       - name: Check coverage threshold (3.11 only)
         if: matrix.python-version == '3.11'
         run: python -m coverage report --fail-under=70

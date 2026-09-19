@@ -200,7 +200,16 @@ _GEMINI_RESPONSE_SCHEMA = {
 
 ### 4. Validación campo por campo del output JSON
 
-El JSON del LLM se valida contra el schema completo antes de escribir al vault. Si cualquier campo falla, la nota va a `00-Inbox/` con `status: pending-classification` y se loguea el intento.
+El JSON del LLM se valida contra el schema completo antes de escribir al vault. **El fallo no es uniforme y la diferencia importa:** solo cuatro condiciones lanzan `LLMResponseError` y mandan la nota a `00-Inbox/` con `status: pending-classification` (modo degradado):
+
+- `frontmatter` ausente o que no es un objeto,
+- `type` fuera de `VALID_TYPES`,
+- `status` fuera del enum de su `type` (después de `_norm_enum()` y de los `STATUS_ALIASES`),
+- `priority` fuera de `VALID_PRIORITY`.
+
+Todo el resto **se coacciona o se descarta en silencio**, sin abortar nada y sin que la nota vaya al Inbox: `due_date`/`scheduled` que no parsean como ISO 8601 → `None`; `year` no convertible a int → `None`; `authors`/`keywords` de un tipo inesperado → `None` (un string suelto se parte por comas); `read_status` fuera de `{read, unread}` → `None`; `tags` que no son lista ni string → `[]`; `title` no-string, vacío o `"Sin título"` → `""` (lo completa el fallback de `classify()`); `body` ausente o `null` → `""`.
+
+De esos descartes silenciosos **solo dos dejan rastro en el log**: la clave fuera de `ALLOWED_FRONTMATTER_KEYS` (§4b) y un `summary` no-string. Los demás —fechas, `year`, `authors`, `keywords`, `read_status`, `tags`— desaparecen sin una sola línea: en producción no hay forma de notar que el LLM propuso un campo académico mal tipado y el bot lo tiró.
 
 ```python
 # En llm_schema.py (re-exportado desde llm_client) — tipos que el LLM puede proponer (project-index y area-index son generados por el bot)
@@ -252,13 +261,13 @@ def validate_llm_response(response_json: dict) -> dict:
 
 Antes de comparar contra los enums, `type`/`status`/`priority` pasan por `_norm_enum()` (string + `strip` + minúsculas + espacios internos a guión) y `status` admite además un puñado de aliases (`STATUS_ALIASES`: `todo`/`open`/`new` → `pending`, `draft` → `raw`, `published` → `active`). Es tolerancia de forma, no de valor: lo que no cae en el enum después de normalizar sigue lanzando `LLMResponseError`.
 
-Esto convierte cualquier inyección que corrompa los campos en un fallo controlado, no en una nota inválida persistida.
+Una inyección que corrompa `type`, `status`, `priority` o el `frontmatter` entero se convierte entonces en un fallo controlado. Una que solo ensucie los campos opcionales de arriba **no falla**: se limpia y la nota se persiste sin ellos. En ninguno de los dos casos llega al `.md` un valor fuera del enum.
 
 **El writer también valida, no solo el validador del LLM.** `create_note()` (`vault_writer.py`) revalida `type`/`status` contra sus propios `VALID_TYPES`/`VALID_STATUS` justo antes de resolver el destino. Hasta la auditoría 2026-08-26 esos enums solo se aplicaban en `set_property()`: `create_note()` escribía al vault lo que le llegara, y los escritores que **no** pasan por `_validate_capture_payload` —el flujo de índices de `manage.py`, cualquier caller directo— eran un camino sin validar. Un `type` fuera del enum rompe el routing de `_resolve_dest_dir` (la nota cae a Inbox) y además desactivaba en silencio la validación de status de `set_property()` sobre esa misma nota.
 
 En el writer la respuesta es **coaccionar, no rechazar** (`type` inválido → `idea` + `pending-classification`; `status` inválido para su type → el fallback del type), las dos cosas con log a `warning`. Es deliberado y no debilita la validación aguas arriba: el caller típico es `_cb_confirm`, o sea el usuario ya apretó `[Confirmar]`, y el texto de audio/OCR/Vision no existe en ningún otro lado. Rechazar ahí sería pérdida de datos por una respuesta corrupta del LLM. El contenido no confiable ya fue filtrado por las capas 3, 4 y 4b; lo que queda acá es la última red del path de escritura.
 
-Complemento en el otro extremo: `set_property()` ahora **lanza `ValueError`** si el `type` de la nota que va a modificar no está en `VALID_TYPES`, en vez de resolver a un conjunto vacío de status válidos y saltearse la validación — justo en las notas que ya están malformadas.
+Complemento en el otro extremo: `set_property()` **lanza `ValueError`** si el `type` de la nota que va a modificar no está en `VALID_TYPES`, en vez de resolver a un conjunto vacío de status válidos y saltearse la validación — justo en las notas que ya están malformadas. **Ese guard corre únicamente cuando la clave que se está seteando es `status`** (`vault_writer.py`, rama `if key == "status"`): sobre una nota con `type` corrupto, un `set_property(..., "tags", [...])` o `(..., "due_date", ...)` no levanta nada. Las demás validaciones de `set_property` son por clave y no miran el `type` de la nota: `type`, `priority`, `media_type` y `source` contra su propio enum, los campos de fecha contra ISO 8601, y `tags` contra `list`.
 
 ### 4b. Whitelist de claves del frontmatter
 
@@ -296,7 +305,7 @@ Se aplica **antes** de que `capture.py` inyecte `extra_fm`/`user_context`, así 
 
 ### 5. Separación de prompts: extracción vs. clasificación
 
-> **Alcance real:** hoy esta separación aplica **solo a Gemini Vision** (imágenes y PDFs escaneados, `describe_image_with_vision` en `llm_client.py`). Los PDFs con capa de texto se extraen **localmente con pymupdf**, sin ninguna llamada al LLM (`document_extractor.py`), y las URLs genéricas **no se procesan** — solo los links de arXiv, cuya metadata viene literal de la API de arXiv, también sin LLM de extracción. El límite `llm.max_web_tokens` de `config.yaml` existe pero todavía no tiene consumidor.
+> **Alcance real:** hoy esta separación aplica **solo a Gemini Vision** (imágenes y PDFs escaneados, `describe_image_with_vision` en `llm_client.py`). Los PDFs con capa de texto se extraen **localmente con pymupdf**, sin ninguna llamada al LLM (`document_extractor.py`), y las URLs genéricas **no se procesan** — solo los links de arXiv, cuya metadata viene literal de la API de arXiv, también sin LLM de extracción. Los límites de truncado son constantes del código, no configuración (ver §10).
 
 Cuando el input es contenido externo que necesita al LLM para leerse (imagen, PDF escaneado), el procesamiento se divide en dos llamadas:
 
@@ -318,7 +327,13 @@ El LLM del paso 1 no conoce el schema ni el sistema — solo puede devolver text
 
 ### 6. Detección de patrones de inyección
 
-Antes de enviar contenido externo al LLM, se aplica un chequeo de patrones:
+Sobre el contenido se aplica un chequeo de patrones. **Cuándo corre depende del camino, y no es antes de la llamada en todos ellos:**
+
+- **Texto tipeado por el usuario:** se chequea **antes** de clasificar (`handle_text`, `input.py`). Es el único camino que puede cortar el flujo.
+- **`user_context`** (el caption que acompaña un archivo): se chequea **antes** de la llamada, dentro de `build_user_message` (`llm_client.py`), y si dispara se descarta el campo entero.
+- **Contenido extraído** (PDF, OCR, Vision, documento, metadata de arXiv): se chequea **después** de que `classify()` volvió (`capture.py`, `_classify_and_preview` y `_classify_and_preview_arxiv`), y con un único efecto — anteponer `_INJECTION_PREVIEW_WARNING` al preview. Ese contenido ya fue enviado al modelo; lo que lo protege en el envío es el blindaje de `<input>` (capa 2) y la neutralización de tags de `build_user_message`, no este chequeo.
+
+Los patrones:
 
 ```python
 # En llm_schema.INJECTION_PATTERNS (re-exportado desde llm_client) — inglés,
@@ -362,7 +377,7 @@ El parámetro `user_context` (caption del usuario enviado junto a archivos) se c
 Si se detecta un patrón en el contenido principal, la respuesta depende del camino:
 
 - **Texto tipeado por el usuario** (`handle_text` en `input.py`): el bot corta el flujo y pregunta con botones `[Cancelar]` `[Tarea]` `[Nota]` — nada se clasifica hasta que el usuario decida.
-- **Contenido extraído** (PDF, OCR, Vision, documento, metadata de arXiv): el bot clasifica igual y antepone `_INJECTION_PREVIEW_WARNING` al preview (ver §8). No bloquea: la nota igual necesita `[Confirmar]`.
+- **Contenido extraído** (PDF, OCR, Vision, documento, metadata de arXiv): el chequeo corre recién con la respuesta del LLM en la mano, así que no puede evitar la llamada. El bot clasifica igual y antepone `_INJECTION_PREVIEW_WARNING` al preview (ver §8). No bloquea: la nota igual necesita `[Confirmar]`.
 
 No es una defensa perfecta (se puede evadir), pero cubre ataques comunes y genera visibilidad. La defensa principal sigue siendo el constrained output schema de Gemini (capa 3).
 
@@ -413,6 +428,22 @@ Esto previene que una nota con contenido malicioso en el vault contamine futuras
 
 El preview que el bot muestra antes de escribir al vault es también una defensa de seguridad: si una inyección corrompe el frontmatter propuesto, el usuario lo ve antes de que se persista. El preview actual (`build_preview` en `keyboards.py`) muestra un subconjunto curado: título, tipo, destino, status, prioridad, tags, due_date, los links sugeridos y un snippet del body (200 chars) — no todos los campos. Cuando el contenido externo dispara `check_injection_risk`, se antepone además un aviso explícito (`_INJECTION_PREVIEW_WARNING`) para que el usuario escrute antes de confirmar.
 
+> **La excepción, documentada porque es real:** el cron de reclasificación del Inbox
+> (`reclassify_inbox` en `handlers/jobs.py`, Caso A — notas degradadas que ya tienen
+> destino) corre `classify()` y escribe la nota resultante con `create_note()` **sin
+> preview y sin paso de usuario**. Lo que el usuario confirmó fue la nota degradada
+> original; la segunda pasada del LLM —título, `type`, `status`, tags, fechas, y para
+> `document`/`image`/`link` también el body— se persiste sin revisar. En ese camino
+> `check_injection_risk` **no corre**, así que un aviso de inyección que el usuario
+> habría visto en la captura interactiva no existe acá.
+>
+> Lo que sí sigue vigente en ese camino: las capas 3, 4 y 4b (schema constrained,
+> validación de valores, whitelist de claves), el blindaje `<input>` y la invariante
+> de destino (el cron nunca sobreescribe `project`/`section`/`area`, que son lo que
+> el usuario eligió). Para `text` y `audio` el body es verbatim del usuario
+> (`VERBATIM_BODY_MEDIA`), nunca la reescritura del LLM. Es una decisión de diseño
+> —sin ella una nota degradada no saldría nunca del Inbox sola—, no un descuido.
+
 ### 9. Espacio de acciones finito
 
 El LLM nunca ejecuta acciones directamente. Su output (JSON) se mapea en código Python a un conjunto fijo y cerrado de operaciones:
@@ -433,7 +464,7 @@ El conjunto **realmente cableado** hoy es bastante más chico que esa lista, que
 
 El LLM siempre responde con un JSON que tiene un wrapper común y un payload que varía por modo. El bot parsea el JSON y ejecuta la operación correspondiente. Si el JSON no se ajusta al schema, el input va a `00-Inbox/` con `status: pending-classification`.
 
-**Umbral de confianza:** si `confidence < llm.disambiguation_threshold` (default `0.7`, configurable en `config.yaml`), el bot no asume el modo y dispara desambiguación con inline keyboard (`[Guardar como nota]` `[Buscar en vault]`).
+**Umbral de confianza — hoy no gobierna nada.** `llm.disambiguation_threshold` (default `0.7`) sigue en `config.yaml`, lo valida `config.py` y viaja hasta `classify()`, pero su único efecto es setear el flag `needs_disambiguation` (`llm_client.py`) en la respuesta validada. **Ningún caller lo lee.** El teclado de desambiguación `[Guardar como nota]` `[Buscar en vault]` se borró en 2026-09 por no tener productor; lo que quedó es la fila `[🔎 Buscar en el vault]` de `build_save_keyboard`, que el usuario aprieta cuando quiere —no la dispara una confianza baja—. Baja confianza hoy no cambia ningún comportamiento: el modo se toma tal como lo devolvió el LLM.
 
 #### Wrapper común
 
@@ -448,7 +479,7 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 | Campo | Tipo | Descripción |
 |---|---|---|
 | `mode` | string enum | `capture`, `query`, `edit`, `manage` |
-| `confidence` | float 0-1 | Confianza del LLM en la clasificación de modo. Por debajo de `llm.disambiguation_threshold` → desambiguación |
+| `confidence` | float 0-1 | Confianza del LLM en la clasificación de modo. Por debajo de `llm.disambiguation_threshold` se setea `needs_disambiguation: true` en la respuesta validada — flag que **hoy ningún caller lee** (ver arriba) |
 | `payload` | object | Contenido específico del modo — schema abajo |
 
 #### Modo `capture` — Captura de contenido
@@ -645,6 +676,7 @@ O sea que un paper llega al LLM **más** recortado que un documento genérico, n
 [6b] Errores clasificados por tipo, no por texto → el input no mueve el control de flujo del retry
 [7] Contexto RAG read-only  (diseño — Fase 7)    → notas del vault no pueden disparar acciones
 [8] Preview de confirmación (UX + seguridad)     → el usuario ve el frontmatter antes de persistir
+     (no aplica al cron de reclasificación — ver §8)
 [9] Espacio de acciones finito                   → el código no puede hacer más que N cosas
 [10] Truncado de contenido externo               → instrucciones ocultas al final del documento
 [11] Gestión de secretos                         → credenciales fuera del código
@@ -660,6 +692,8 @@ Las capas son complementarias: ninguna es perfecta sola. En conjunto hacen muy d
 - [ ] `.env` no commiteado (verificar con `git status`)
 - [ ] `credentials/` no commiteado (verificar con `git status`)
 - [ ] Repositorio del **vault** (backup) configurado como privado en GitHub — el repo de **código** es público desde v1.0.0 (ver §11), así que todo lo que se commitea ahí es público: código, docs y **mensajes de commit**
+- [ ] **Hooks de secretos activados en el clon: `git config core.hooksPath hooks`** (verificar con `git config core.hooksPath`, que debe imprimir `hooks`). `hooks/commit-msg` y `hooks/pre-push` rechazan mensajes de commit que contengan un patrón de credencial — es el control del canal que efectivamente quemó este repo (commit `889c5ca`, 2026-08-13), y el que **push protection de GitHub no cubre**: GitHub escanea el contenido de los archivos, no los mensajes. Sin el `core.hooksPath` seteado los hooks no corren: viven en `hooks/` (versionado), no en `.git/hooks/`
+- [ ] Consciente de lo que esos hooks **no** cubren: los patrones son Groq (`gsk_`), Gemini (`AIza`), Telegram (`NNNNNNNN:AA…`), OpenAI (`sk-`), GitHub (`ghp_`, `github_pat_`), AWS (`AKIA`) y bloques PEM. **No matchean un client secret de Google OAuth (`GOCSPX-…`) ni un refresh token (`1//0…`)** — los dos secretos de la integración con Google Tasks (§11) pasarían el hook sin ruido. Ahí no hay red: no pegar nunca el contenido de `google-oauth.json` ni de `token_tasks.json` en un mensaje de commit, PR o issue
 - [ ] Variables de entorno seteadas en `docker-compose.yml` por referencia, no por valor
 - [ ] Logs no exponen valores de variables de entorno
 - [ ] `validate_llm_response()` + `_validate_capture_payload()` se aplican en todo camino que escribe al vault

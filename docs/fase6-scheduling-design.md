@@ -129,11 +129,18 @@ Scope:
 
 ### Fase 6b — Scheduling de tarea específica + Tasks API
 
-Scope:
+> **Ya implementado de este bloque (2026, fuera del orden de este plan):** el push
+> de `due_date` a Google Tasks. Al confirmar una tarea, `create_task` la inserta en
+> la lista `ADSO` con el `due` armado desde `due_date`
+> (`tasks_client.py:130-183`). Es **unidireccional**: el `task_id` que devuelve la
+> API se descarta (`capture.py:877-896`), así que no hay update, complete ni delete.
+
+Scope pendiente:
 - Casos tipo B: tarea específica por nombre en lenguaje natural
 - Flujo de disambiguación con candidatos inline
-- Tasks API para sincronizar `due_date` con Google Tasks
-- Reconciliación bidireccional (ver decisiones en CLAUDE.md)
+- Reconciliación bidireccional (ver decisiones en CLAUDE.md). Requiere primero
+  persistir `gtask_id` en el frontmatter — ver 5.1 y 5.2 de
+  `docs/improvements-2026-07.md`
 
 ---
 

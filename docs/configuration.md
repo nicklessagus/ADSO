@@ -18,7 +18,10 @@ Parámetros que el usuario puede ajustar sin tocar el código, editando `config.
 
 Separación de responsabilidades:
 - **`.env`** — secretos y credenciales (tokens, API keys, paths). Nunca se comparte.
-- **`config.yaml`** — preferencias de comportamiento del bot. Puede versionarse.
+- **`config.yaml`** — preferencias de comportamiento del bot. **No se versiona:**
+  está en `.gitignore` porque lleva la configuración de cada despliegue. Lo que
+  el repo versiona es `config.yaml.example`, la plantilla que se copia al
+  instalar.
 
 ---
 
@@ -182,8 +185,11 @@ inadvertido.
 Existe porque pasó: el `config.yaml` desplegado declaraba
 `weekly_report.include:` mientras el loader lee `weekly_report.sections:`, y la
 clave se descartaba en silencio (I2 de `docs/audit-2026-07-31.md`). Los tests
-`TestClavesDesconocidas` en `tests/unit/test_config.py` cargan tanto
-`config.yaml` como `config.yaml.example` y fallan si alguno vuelve a driftear.
+`TestClavesDesconocidas` en `tests/unit/test_config.py` cargan `config.yaml` y
+`config.yaml.example` y fallan si alguno vuelve a driftear — pero **solo el del
+example corre siempre**. El `config.yaml` local está gitignoreado, así que en CI
+no existe y ese test se saltea (`pytest.skip`): la verificación del archivo que
+efectivamente se despliega vale únicamente en la máquina donde ese archivo vive.
 
 Para inspeccionarlo desde código: `load_settings(...).unknown_keys`.
 
@@ -275,4 +281,11 @@ WARNING de clave desconocida.
 
 - `config.yaml` debe existir. Si falta, el bot falla con error claro al arrancar.
 - Cambios en `config.yaml` requieren reiniciar el bot (`docker compose restart adso-bot`).
-- Los valores de `.env` tienen precedencia sobre `config.yaml` para los parámetros que aparezcan en ambos (compatibilidad con despliegues que ya usan solo `.env`).
+  Con la variante de directorio de deploy separado hace falta `make deploy`:
+  `make restart` **no** copia el `config.yaml` del repo al directorio de deploy,
+  que es el que se monta en el contenedor (ver `docs/installation.md` §5).
+- `.env` y `config.yaml` no comparten ninguna clave, así que no hay precedencia
+  de uno sobre el otro: el `.env` lleva secretos, paths y overrides de modelo
+  (`TELEGRAM_TOKEN`, `GEMINI_API_KEY`, `VAULT_PATH`, `ADSO_GEMINI_MODEL`, …) y
+  `config.yaml` lleva preferencias de comportamiento. Ninguna de las claves de
+  este documento se puede setear por variable de entorno.

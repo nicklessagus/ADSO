@@ -1,5 +1,6 @@
-# Defensa en profundidad: el Dockerfile solo hace COPY de requirements.txt y
-# adso/, pero si algún día se cambia a COPY . ., nada de esto entra a la imagen.
+# Defensa en profundidad: el Dockerfile solo hace COPY de requirements.txt,
+# adso/ y scripts/, pero si algún día se cambia a COPY . ., nada de esto entra
+# a la imagen.
 .git
 .github
 .venv

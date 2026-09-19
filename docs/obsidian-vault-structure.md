@@ -108,7 +108,7 @@ Solo las tres primeras están implementadas. `_cb_manage_confirm` (`adso/handler
 | Borrar proyecto | ❌ *(diseño — no implementado)* | Doble + resolución de backlinks | Ver reglas abajo |
 | Borrar área | ❌ *(diseño — no implementado)* | Simple (muestra cuántas notas se mueven) | Mueve notas internas a `00-Inbox/`, borra carpeta, actualiza ChromaDB |
 | Renombrar proyecto/área | ❌ *(diseño — no implementado)* | Simple | Renombra carpeta, actualiza ChromaDB y `_index.md` |
-| Mover nota | ❌ fuera de scope | — | **Fuera de scope como comando del bot** — existe la primitiva `move_note()` en `vault_writer.py` (la usan otros flujos), pero no hay flujo de usuario para mover una nota suelta |
+| Mover nota | ❌ fuera de scope | — | **Fuera de scope como comando del bot** — existe la primitiva `move_note()` en `vault_writer.py`, pero **hoy no la llama ningún flujo** (solo la ejercitan los tests): no hay forma de mover una nota suelta desde el bot |
 | Borrar nota | ❌ *(diseño — no implementado)* | Simple o con aviso de backlinks | Ver reglas abajo |
 
 Mientras tanto, archivar, renombrar, mover y borrar se hacen a mano en el filesystem o en Obsidian; el `VaultWatcher` reconcilia los embeddings, y el reindex nocturno limpia los huérfanos.
@@ -175,6 +175,8 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 - **Carpetas de proyecto/sección:** lowercase, sin espacios, con guiones
 - **Nota índice de proyecto:** `_index.md` (prefijo `_` para que aparezca primero)
 - Sin caracteres especiales en nombres de archivo
+
+> **La convención de carpetas es una convención, no una regla que el código imponga.** El nombre del proyecto o del área va **crudo** al disco: `build_index_note` lo guarda tal cual en `project`/`area` (es lo que direcciona la carpeta, y kebab-casearlo apuntaría a un directorio inexistente) y `_resolve_dest_dir` concatena ese valor al path. Lo único que se aplica es `_safe_component`, que bloquea path traversal (`..`, separadores, dots iniciales) — no normaliza mayúsculas, espacios ni acentos. Crear un proyecto llamado `Tesis Doctoral` produce `01-Projects/Tesis Doctoral/`. Lo que sí se normaliza es el **tag** del `_index.md`, que va en kebab-case (`_to_kebab`), para no partir en dos el vocabulario que el prompt reutiliza (#58). La convención de nombres de **archivo** sí está garantizada: la produce `python-slugify` en `_make_filename`.
 
 ---
 

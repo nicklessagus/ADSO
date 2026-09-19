@@ -23,8 +23,8 @@ Define la estructura de metadatos que el bot genera automáticamente para cada n
 ```yaml
 ---
 title: "Título descriptivo de la nota"
-date_created: 2025-01-15T14:30:00     # ISO 8601, generado por el bot — sin comillas para tipo Date & time en Obsidian
-date_modified: 2025-01-15T14:30:00    # ISO 8601, actualizado por el bot en cada edición hecha vía ADSO — sin comillas
+date_created: 2025-01-15 14:30:00     # generado por el bot — sin comillas, para tipo Date & time en Obsidian
+date_modified: 2025-01-15 14:30:00    # actualizado por el bot en cada edición hecha vía ADSO — sin comillas
 type: reference                         # Ver tipos válidos abajo
 tags: [tag1, tag2]                     # Generados por LLM, kebab-case
 source: telegram                       # "telegram" para notas de usuario, "system" para auto-generadas (ej: _index.md)
@@ -47,9 +47,11 @@ read_status: unread                    # Text enum — unread | read (ver secci�
 Reglas de serialización para máxima compatibilidad con la UI de Properties de Obsidian.
 
 - **Fechas sin comillas (`Date & time` / `Date`):** Los campos `date_created`, `date_modified`, `due_date` y `scheduled` se escriben **sin comillas** en el YAML. Sin comillas, Obsidian los reconoce como tipo `Date & time` o `Date` y habilita el widget de calendario. Con comillas los trata como `Text` plano. Esto es **crítico** — el bot siempre genera estos campos sin comillas.
+
+  El mecanismo es `_clean_frontmatter()` (`vault_writer.py`): convierte el string ISO 8601 a un objeto `datetime` (o `date`, si es solo fecha) y deja que PyYAML lo serialice como timestamp YAML. **La forma que termina en el archivo lleva espacio y no `T`** — el `T` solo existe en el string intermedio que produce `now_iso()`. Ambas son timestamps YAML válidos y equivalentes; lo que importa es la ausencia de comillas.
   ```yaml
-  # Correcto — Obsidian reconoce como Date & time / Date
-  date_created: 2025-01-15T14:30:00
+  # Correcto — lo que el bot escribe realmente; Obsidian lo reconoce como Date & time / Date
+  date_created: 2025-01-15 14:30:00
   due_date: 2025-02-01
 
   # Incorrecto — Obsidian lo trata como Text
@@ -82,7 +84,7 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 
 > **Archivar es manual.** El diseño es mover la carpeta del proyecto a `05-Archive/` y setear `status: archived` en su `_index.md`, pero **ningún código lo hace**: `archive_project` está en `VALID_OPERATIONS` y en el prompt, y `_cb_manage_confirm` responde `"Operación 'archive_project' todavía no está disponible."` (ver `docs/security.md` §9b). Hoy el usuario mueve la carpeta desde Obsidian y edita el `status` a mano. Lo único que ADSO archiva por su cuenta son los adjuntos huérfanos de `03-Resources/`, que van a `05-Archive/03-Resources/` y no tienen frontmatter.
 
-`pending-classification` es el único valor compartido: cualquier tipo puede tenerlo si el LLM no respondió (modo degradado) o si el LLM no pudo asignar destino. Las notas con este status son candidatas para reclasificación automática (cron) o manual (`/clasificar`).
+`pending-classification` es el valor compartido por los tres tipos de nota de contenido — `reference`, `task` e `idea` — cuando el LLM no respondió (modo degradado) o no pudo asignar destino. Las notas con este status son candidatas para reclasificación automática (cron) o manual (`/clasificar`).
 
 | Tipo | Valores de `status` | Default |
 |---|---|---|
@@ -92,7 +94,7 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 | `project-index` | `active`, `on-hold`, `completed`, `archived` | `active` |
 | `area-index` | — (sin ciclo de vida) | — |
 
-`pending-classification` está disponible para todos los tipos: indica que el LLM no respondió (modo degradado). El bot intentará reclasificar automáticamente.
+> **`pending-classification` NO está disponible para todos los tipos.** `STATUS_BY_TYPE` (`constants.py`) lo incluye únicamente en `reference`, `task` e `idea`. Los índices no lo admiten: `project-index` tiene su propio ciclo (`active`/`on-hold`/`completed`/`archived`) y `area-index` declara el conjunto vacío a propósito (no tiene ciclo de vida, y ahí `create_note()` no valida nada). Es coherente con el flujo: los índices los genera el bot con datos que el usuario ya confirmó, nunca el LLM clasificando. Si un `project-index` llegara con `pending-classification`, `create_note()` lo coacciona al fallback de su tipo (`active`).
 
 > **Normalización de enums (`_norm_enum` en `llm_schema.py`).** Antes de validar `type`/`status`/`priority` contra su enum, el valor se stringifica, se hace `strip`, se pasa a minúsculas **y se colapsan los espacios internos a guión**: `"In Progress"` → `in-progress`. Un modelo chico devuelve la forma con espacio tan seguido como la canónica, y sin esa normalización tiraba *toda* la respuesta a modo degradado. Acepta cualquier tipo sin lanzar (incluidos `dict`/`list` no hasheables del fallback de Groq).
 >
@@ -109,7 +111,7 @@ Cada tipo tiene su propio ciclo de vida. `status: archived` solo aplica a `proje
 | Valor | Carpeta destino | Descripción |
 |---|---|---|
 | `reference` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Nota de contenido general (incluye papers y cualquier material de referencia) |
-| `task` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Tarea (proyecto > área > Inbox; con `due_date`/`scheduled` opcionales → Google Calendar) |
+| `task` | `01-Projects/{proyecto}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Tarea (proyecto > área > Inbox; `due_date`/`scheduled` opcionales, ver el routing de tasks abajo) |
 | `idea` | `01-Projects/{proyecto}/{seccion}/` si tiene proyecto, `02-Areas/{area}/` si tiene área, o `00-Inbox/` si no tiene ninguno | Idea exploratoria — se promueve a proyecto o se descarta |
 | `project-index` | `01-Projects/{proyecto}/` | Nota índice de proyecto — auto-generada, no clasificada por el LLM |
 | `area-index` | `02-Areas/{area}/` | Nota índice de área — auto-generada, no clasificada por el LLM |
@@ -132,7 +134,7 @@ related: ["[[otra-nota]]"]             # RESERVADO — no implementado (ver nota
 
 > Routing: con proyecto → `01-Projects/{proyecto}/{seccion}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin proyecto ni área → el preview muestra `00-Inbox` como destino; el bot **no** dispara ningún selector proactivamente. Para cambiarlo, el usuario aprieta `[Reubicar]` en el preview y elige `[Elegir área]` `[Elegir proyecto]` `[Inbox]`. El PDF/binario siempre va a `03-Resources/` independientemente del destino de la nota.
 
-> **`summary` y `related` son campos reservados — ningún código los escribe.** Están en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), así que sobreviven a la sanitización si aparecen, pero **no** están declaradas en el `frontmatter` de `_GEMINI_RESPONSE_SCHEMA`: el constrained decoding de Gemini no puede emitirlas, solo podría hacerlo el fallback de Groq (que responde sin schema). Ningún flujo del bot las popula y ninguna nota del vault real las usa. En particular, los links por similitud **no** van a `related`: se escriben como wikilinks en el bloque `## Ver también` del body. El campo `summary` del LLM que sí se usa es el del payload (nivel superior, no frontmatter), y solo en el flujo de arXiv para el callout `> [!summary] AI Summary` del body.
+> **`summary` y `related` son campos reservados — ningún código los escribe, en ningún tipo de nota.** Vale igual para el `related` que aparece en los bloques de `task` y de `idea`: no hay flujo que lo popule para ninguno de los tres tipos. Están en `ALLOWED_FRONTMATTER_KEYS` (`llm_schema.py`), así que sobreviven a la sanitización si aparecen, pero **no** están declaradas en el `frontmatter` de `_GEMINI_RESPONSE_SCHEMA`: el constrained decoding de Gemini no puede emitirlas, solo podría hacerlo el fallback de Groq (que responde sin schema). Ningún flujo del bot las popula y ninguna nota del vault real las usa. En particular, los links por similitud **no** van a `related`: se escriben como wikilinks en el bloque `## Ver también` del body. El campo `summary` del LLM que sí se usa es el del payload (nivel superior, no frontmatter), y solo en el flujo de arXiv para el callout `> [!summary] AI Summary` del body.
 
 ### Campos opcionales para contenido académico
 
@@ -165,7 +167,8 @@ related: ["[[otra-nota]]", "[[paper-similar]]"]   # los links van al bloque `## 
 
 > **Qué popula cada campo, verificado contra el código.** De este bloque, lo único que algún flujo escribe es:
 > - **arXiv** (`_classify_and_preview_arxiv`, `capture.py`): `authors`, `year`, `doi`, `keywords` y `source_url` literales de la API, más `read_status: unread` por defecto y el tag `paper` antepuesto.
-> - **PDF** (`_frontmatter_from_pdf_metadata`, `capture.py`): `title` y `authors` de la metadata del archivo (el `author` viene como un solo string y se parte por `,`/`;`), más el `read_status` que eligió el usuario con los botones.
+> - **PDF con capa de texto** (`_cb_extraction_ok`, `capture.py`): `title`, `authors` y **`doi`** — los tres salen de `extract_paper_sections()` (extracción local del texto del PDF) con la metadata del archivo como respaldo para `title` y `doi` —, más el `read_status` que eligió el usuario con los botones. Solo se pueblan si `detect_paper()` dio positivo.
+> - **PDF escaneado** (`_frontmatter_from_pdf_metadata`, `capture.py`): sin capa de texto no hay secciones que extraer, así que `title` y `authors` salen de la metadata del archivo (el `author` viene como un solo string y se parte por `,`/`;`), más el mismo `read_status`. Este camino **no** aporta `doi`.
 > - **LLM de clasificación:** `journal`, y `authors`/`year`/`doi`/`keywords` cuando no vinieron de una fuente literal. Junto con `read_status`, son las únicas claves académicas declaradas en `_GEMINI_RESPONSE_SCHEMA` — las demás el constrained decoding no las puede emitir.
 >
 > `relevance`, `context`, `contribution`, `dataset` y `related` están en `ALLOWED_FRONTMATTER_KEYS` pero **no** en el schema del LLM y ningún flujo los escribe: son reservados, igual que `summary`. `methods` y `conclusions` sí los extrae `document_extractor.py`, pero **no como frontmatter**: van al contenido que se manda al LLM y terminan como las secciones `## Methods` / `## Conclusions` del body.
@@ -213,13 +216,13 @@ project: tesis                          # Text plano — opcional. Si presente, 
 area: investigacion                     # Text plano — carpeta destino si no hay proyecto (02-Areas/{area}/)
 due_date: 2025-02-01                    # Date — sin comillas, ISO 8601 (solo fecha)
 scheduled: 2025-01-28T10:00:00         # Date & time — sin comillas, ISO 8601
-related: ["[[otra-nota]]"]             # links siempre entre comillas dobles dentro del array
+related: ["[[otra-nota]]"]             # RESERVADO — no implementado; links siempre entre comillas dobles dentro del array
 ---
 ```
 > Routing de tasks: `project` gana sobre `area`. Con proyecto → `01-Projects/{proyecto}/`. Con área (sin proyecto) → `02-Areas/{area}/`. Sin ninguno → `00-Inbox/`.
-> Todas las tasks se sincronizan a la lista única `ADSO` en Google Tasks.
-> Si la tarea tiene fecha/hora explícita, va además a Google Calendar.
-> Si no tiene fecha, va solo a Google Tasks.
+> Al confirmar, la task se pushea a la lista única `ADSO` de Google Tasks (push unidireccional; el `task_id` no se persiste todavía).
+> **No hay integración con Google Calendar** — no existe `calendar_client.py` y ninguna tarea genera un evento. `due_date` viaja como fecha límite de Google Tasks, y Google Calendar la muestra por su cuenta como chip de la task, sin evento separado.
+> **`scheduled` no se pushea como campo.** Su único uso en `tasks_client.py` es de dónde sacar la hora: si `scheduled` (o, si falta, `due_date`) trae un componente horario distinto de medianoche, esa hora se escribe como texto en el campo `notes` de la task. Fuera de eso el campo solo vive en el frontmatter de la nota.
 
 ### `idea`
 ```yaml
@@ -242,8 +245,8 @@ Cada proyecto tiene un `_index.md` en su raíz. Es la única nota que no se crea
 ---
 type: project-index
 title: "Tesis doctoral"
-date_created: 2025-01-01               # Date — sin comillas
-date_modified: 2025-01-15              # Date — sin comillas
+date_created: 2025-01-01 09:12:44      # Date & time — sin comillas, con hora (ver nota abajo)
+date_modified: 2025-01-01 09:12:44     # Date & time — sin comillas
 status: active                          # Text enum — active | on-hold | completed | archived
 description: "Papers de doctorado, experimentos de ML, escritura académica."  # scope de clasificación — requerido
 sections: [introduccion, experimentos, trabajos-futuros, papers]
@@ -255,6 +258,8 @@ source: system                          # auto-generado por el bot, no desde un 
 > **Lo que el bot escribe realmente al crear el proyecto** (`manage.py` y `seed_vault` en `vault_writer.py`): `title` (el nombre con guiones a espacios y capitalizado), `type`, `status: active`, `description`, `sections: []` **vacío**, `tags` (`["system", "<nombre-en-kebab>"]` — desde 2026-09 lo construye `build_index_note` en `vault_writer.py`, el mismo helper para el flujo de gestión y para la siembra; antes la siembra escribía solo `["<nombre>"]` crudo), `source: system` y `project: <nombre>`. Ese `project:` no es decorativo: es uno de los campos que `_get_existing_items` lee del `_index.md` para armar la lista de destinos que ve el LLM.
 >
 > **`sections` nace vacío y ADSO no lo actualiza.** `create_section` solo hace `mkdir` del directorio dentro del proyecto — no toca el `_index.md`. Mantener la lista al día es manual.
+>
+> **`date_created` y `date_modified` del índice son `Date & time`, no `Date`.** No los escribe `build_index_note`: los pone `create_note()` con `fm.setdefault(..., now_iso())`, el mismo timestamp completo que recibe cualquier otra nota. En el archivo quedan como `2025-01-01 09:12:44` (espacio, sin `T` — es lo que emite PyYAML para un `datetime`). El `## Estado` del body sí muestra solo la fecha: ahí se escribe `now_iso()[:10]`.
 
 El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 
@@ -270,7 +275,11 @@ El body del `_index.md` es Markdown libre. ADSO genera un template inicial con:
 - Creado: {date_created}
 ```
 
-El usuario puede agregar lo que quiera al body (objetivos, notas, links, secciones, etc.). ADSO solo modifica el frontmatter (`date_modified`, `status`).
+Ese template es el del **proyecto**: `## Secciones` y `## Estado` los agrega `build_index_note` solo cuando `kind == "project"`. El `_index.md` de un área lleva únicamente `# {title}` y `## Descripción` (ver la sección siguiente).
+
+El usuario puede agregar lo que quiera al body (objetivos, notas, links, secciones, etc.).
+
+> **ADSO no modifica un `_index.md` ya creado — ni el body ni el frontmatter.** No hay ningún camino de código que lo reescriba: `create_note()` solo lo genera la primera vez (`seed_vault` saltea la carpeta si el archivo ya existe), `set_property()` y `append_to_note()` no tienen callers, y las dos rutinas que sí reescriben `.md` —`remove_broken_wikilinks` y `_reconcile_vault_sync`— saltean explícitamente los archivos con stem `_index`. En particular **`date_modified` y `status` quedan congelados en el valor de creación**: cambiarlos es trabajo manual en Obsidian.
 
 ---
 
@@ -282,14 +291,26 @@ Cada área tiene un `_index.md` en su raíz. Se genera automáticamente al crear
 ---
 type: area-index
 title: "Docencia"
-date_created: 2025-01-01               # Date — sin comillas
-date_modified: 2025-01-15              # Date — sin comillas
+date_created: 2025-01-01 09:12:44      # Date & time — sin comillas, con hora
+date_modified: 2025-01-01 09:12:44     # Date & time — sin comillas
 description: "Preparación de clases, guías de ejercicios, consultas de alumnos, material didáctico."  # requerido — usado por el LLM para clasificar
 source: system
 ---
 ```
 
-> Las áreas usan el mismo campo `description` — no hay diferencia estructural entre el `_index.md` de proyecto y de área, excepto que los proyectos tienen `status` y `sections`. El bot escribe además `tags` y `area: <nombre>` (el equivalente del `project:` del índice de proyecto, y lo que `_get_existing_items` lee).
+> Las áreas usan el mismo campo `description`. Las diferencias con el índice de proyecto son dos, y las decide `build_index_note` con un solo `if kind == "project"`:
+>
+> - **Frontmatter:** el área **no** lleva `status` ni `sections`. El bot escribe `title`, `type`, `description`, `tags` (`["system", "<nombre-en-kebab>"]`), `source: system` y `area: <nombre>` (el equivalente del `project:` del índice de proyecto, y lo que `_get_existing_items` lee).
+> - **Body:** el área lleva **solo** `# {title}` y `## Descripción`. **No tiene `## Secciones` ni `## Estado`** — esos dos headers son exclusivos del proyecto, y el `- Creado:` que va bajo `## Estado` también.
+>
+> ```markdown
+> # Docencia
+>
+> ## Descripción
+> Preparación de clases, guías de ejercicios, consultas de alumnos, material didáctico.
+> ```
+>
+> Igual que el índice de proyecto, una vez creado **ningún camino de código lo vuelve a tocar**.
 
 > **`description` se valida por contenido, no por presencia.** `_validate_manage_payload` (`llm_schema.py`) rechaza con `LLMResponseError` una operación de crear proyecto o área cuya `description` sea `""`, solo espacios o `null` — antes solo se chequeaba que la clave existiera, así que un `_index.md` podía nacer con la descripción vacía. No es cosmético: la `description` es lo que el LLM lee para decidir en qué proyecto o área clasificar cada nota nueva. Un índice sin ella deja al destino invisible para la clasificación.
 
@@ -359,10 +380,12 @@ El usuario la completa después de leer/revisar el contenido — es su interpret
 
 ## Consultas Dataview de ejemplo
 
+> **Ninguna consulta apunta a `03-Resources`.** Según la taxonomía esa carpeta es de adjuntos (PDFs, imágenes): ADSO nunca escribe una nota ahí, el paper vive en `01-Projects/`, `02-Areas/` o `00-Inbox/` y solo *referencia* el binario con `source_file`. Del lado del bot la carpeta está excluida siempre de los scans estructurales (`_ALWAYS_EXCLUDE` en `vault_search.py`, issue #58), así que un `.md` puesto ahí a mano no aparece en `/reporte` ni en el vocabulario de tags. Incluirla en un `FROM` solo puede traer material que el bot no considera notas.
+
 **Papers sin leer por prioridad:**
 ```dataview
 TABLE authors, year, priority, relevance
-FROM "01-Projects" OR "03-Resources"
+FROM "01-Projects" OR "02-Areas" OR "00-Inbox"
 WHERE authors AND read_status = "unread"
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
@@ -386,7 +409,7 @@ SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC
 **Papers pendientes de leer:**
 ```dataview
 TABLE authors, year, priority, relevance
-FROM "01-Projects" OR "03-Resources"
+FROM "01-Projects" OR "02-Areas" OR "00-Inbox"
 WHERE authors
 SORT choice(priority, "high", 1, "medium", 2, "low", 3) ASC, year DESC
 ```
@@ -409,7 +432,7 @@ WHERE type = "idea" AND status = "raw"
 **Todo lo anotado esta semana:**
 ```dataview
 TABLE type, project, section
-FROM "01-Projects" OR "02-Areas" OR "03-Resources"
+FROM "01-Projects" OR "02-Areas" OR "00-Inbox"
 WHERE date_created >= date(today) - dur(7 days)
 SORT date_created DESC
 ```

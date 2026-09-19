@@ -21,9 +21,9 @@ Define cómo se testea ADSO: qué se testea, a qué nivel, con qué herramientas
 ## Principios
 
 - **Sin pérdida de datos es la prioridad #1.** Todo camino que toca el vault (escritura, edición, borrado) debe tener test. Si un test puede fallar sin que nadie lo note y eso causa pérdida de datos, falta un test.
-- **Tests rápidos primero.** Los unit tests deben correr en segundos. Si un test necesita red, es integration o e2e.
+- **Tests rápidos primero.** Los unit tests deben correr en segundos. **Ningún test sale a la red, en ningún nivel** — y desde 2026-09-18 no es una convención sino una fixture autouse (ver § Guards globales).
 - **Mocks para APIs externas, reales para filesystem.** Gemini, Telegram y Google APIs se mockean siempre. ChromaDB y el vault usan directorios temporales reales — así se detectan errores de path, permisos y encoding.
-- **Los tests corren en dev, no en producción.** La RPi4 no ejecuta tests. El CI corre en GitHub Actions (o local en la máquina de desarrollo).
+- **Los tests corren en dev, no en producción.** El contenedor desplegado no ejecuta tests; la máquina de desarrollo —que en este proyecto también es una RPi4— y GitHub Actions sí.
 - **Fixtures reproducibles.** Las respuestas del LLM se graban como JSON y se replayan. No hay tests que dependan de una API externa en tiempo real.
 
 ---
@@ -63,7 +63,7 @@ tests/
 │   ├── test_knowledge_query.py    # retrieval semántico (Fase 7.0)
 │   ├── test_document_extractor.py # detección de papers, extracción de secciones
 │   ├── test_transcriber.py        # faster-whisper: modelo, idioma, fallback
-│   ├── test_jobs.py               # crons: reclassify_inbox, heartbeat, skip por flujo activo
+│   ├── test_jobs.py               # `_PENDING_FLOW_KEYS` cubre todas las keys de flujo (los crons en sí se testean en test_lote4.py, test_audit_block_b/g.py y test_simplification_2026_09.py)
 │   ├── test_reporters.py          # formateo de reportes (reporte, reporte_full)
 │   ├── test_bot_errors.py         # error handler global de PTB
 │   ├── test_confirm_failure.py    # "crear antes de descartar": reintento tras fallo de escritura
@@ -90,6 +90,8 @@ tests/
 │   ├── test_watchdog.py               # watchdog de proceso: reinicia el bot si el event loop deja de progresar
 │   ├── test_issue58_vault_hygiene.py  # issue #58: tags de índice en kebab-case, `03-Resources/` fuera de los scans
 │   ├── test_simplification_2026_09.py # contratos de los helpers compartidos de la pasada de simplificación + tests de #64 y #65
+│   ├── test_audit_2026_09_vault.py    # auditoría 2026-09-18, lado vault: ventana de gracia de las escrituras del bot (#66), status por defecto (#69), vault inexistente (#70), destino canonizado (#71), 03-Resources fuera del índice (#72)
+│   ├── test_audit_2026_09_handlers.py # auditoría 2026-09-18, lado handlers: guard de red (#67), zona horaria de los crons (#68), temporal huérfano (#73), escapado del preview, línea de tiempos ante excepción, estado real del watcher, fila de búsqueda con keywords de gestión
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -136,7 +138,7 @@ Qué se testea:
 - Formato: `YYYY-MM-DD-titulo-en-kebab-case.md`
 - Caracteres especiales removidos o transliterados
 - Títulos largos truncados a longitud razonable
-- Títulos con acentos y ñ: `á` → `a`, `ñ` → `n` (o se preservan — definir)
+- Títulos con acentos y ñ: `á` → `a`, `ñ` → `n` (transliteración, fijada en `test_file_naming.py::test_accents_transliterated`)
 - Títulos vacíos o solo espacios → fallback a slug genérico
 - Sin colisión: si el archivo ya existe, se agrega sufijo numérico
 
@@ -314,8 +316,11 @@ Simulan el flujo completo desde un mensaje de Telegram hasta el resultado final.
 
 Qué se testea:
 - Mensaje de texto → bot responde con preview → usuario confirma → nota en vault
-- Mensaje con link → extracción de contenido → preview → vault
+- Modo degradado: preview con `pending-classification`
+- Teclado de desambiguación `[Tarea]`/`[Nota]` y aviso de inyección
 - `media_type` correcto en cada caso
+
+No hay test e2e de link: salvo arxiv.org (cubierto en unit), un link es texto plano — el bot no extrae contenido web.
 
 #### `test_query_handler.py`
 
@@ -345,9 +350,8 @@ Qué se testea:
 Qué se testea:
 - Preview mostrado → usuario toca `[Confirmar]` (inline keyboard callback) → nota escrita
 - Preview mostrado → usuario toca `[Cancelar]` → nota NO escrita
-- Preview mostrado → usuario toca `[Corregir]` → selector de destino → confirma → nota escrita con destino corregido
+- Preview mostrado → usuario toca `[Reubicar]` (`CB_CORRECT`) → se muestra el selector de destino. Ojo con los nombres: `[Corregir]` es `CB_NOTE_CORRECT` (modo corrección por texto) y `[Reubicar]` es `CB_CORRECT`, al revés de lo que sugieren
 - Desambiguación (`[Guardar como nota]` / `[Buscar en vault]`): *diseño de Fase 7, sin código ni test* — el teclado se borró en 2026-09 por no tener productor
-- Scope de consulta: bot muestra botones de proyecto → callback filtra resultados
 - **Crítico:** sin confirmación explícita via callback, nunca se escribe al vault
 
 ---
@@ -357,7 +361,10 @@ Qué se testea:
 > Ejemplo ilustrativo del patrón. El `tests/conftest.py` real expone:
 > `vault_path`, `sample_config`, `llm_fixture`, `make_update`,
 > `make_callback_query`, `mock_context` (+ helpers `make_user`/`make_chat`/
-> `make_message`) — ver el archivo para las firmas exactas.
+> `make_message`) y las dos fixtures autouse de § Guards globales — ver el
+> archivo para las firmas exactas. `llm_fixture` hoy no tiene consumidores: los
+> dos tests que leen `tests/fixtures/llm_responses/` abren los JSON directamente.
+> El bloque de abajo es ilustrativo y no compila contra el conftest real.
 
 ```python
 import pytest
@@ -503,7 +510,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **86%** sobre 5590 statements (2026-08-27).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **91%** sobre 5360 statements (2026-09-18).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
@@ -513,16 +520,19 @@ del proyecto. Con los handlers omitidos, **un test nuevo sobre un handler no
 movía el gate**, que es justo donde la regla test-first más hace falta. Detalle
 en I3 de `docs/audit-2026-07-31.md`.
 
-Cobertura actual de handlers (el terreno a ganar): `query.py` 94%, `callbacks.py`
-84%, `capture.py` 84%, `commands.py` 75%, `manage.py` 75%, `input.py` 82%,
-`jobs.py` 79%, `reports.py` 40%.
+Cobertura actual de handlers (el terreno a ganar): `input.py` 94%, `query.py`
+94%, `commands.py` 91%, `capture.py` 89%, `callbacks.py` 87%, `manage.py` 81%,
+`jobs.py` 80%, `reports.py` 77%.
 
-Módulos que hoy **no llegan** a su target de la tabla de arriba: `tasks_client.py`
-73% (≥ 80%), `transcriber.py` 56% (≥ 70%), `security.py` 94% (target 100%) y
-`vault_writer.py` 89% (≥ 90%). El resto está en target o por encima: `config.py`
-97%, `document_extractor.py` 97%, `llm_schema.py` 95%, `embeddings.py` 92%,
-`llm_client.py` 89% (target ≥ 85% — el lote 3 lo subió de 72%), `vault_search.py`
-87%.
+Módulos que hoy **no llegan** a su target de la tabla de arriba: `transcriber.py`
+56% (≥ 70% — las líneas 77-101 son la carga real del modelo, que ningún test
+ejercita), `vault_writer.py` 88% (≥ 90%) y `security.py` 96% (target 100%). El
+resto está en target o por encima: `constants.py`/`knowledge_query.py`/
+`logging_setup.py` 100%, `config.py` 99%, `keyboards.py` 98%,
+`document_extractor.py` 97%, `llm_schema.py` 96%, `arxiv_client.py` 95%,
+`bot_utils.py` 95%, `vault_cache.py` 95%, `embeddings.py` 92%, `reporters.py`
+92%, `vault_watcher.py` 91%, `watchdog.py` 91%, `llm_client.py` 90%,
+`vault_search.py` 89%, `tasks_client.py` 85% (dejó atrás su ≥ 80%).
 
 ### Qué NO se mide en CI
 
@@ -586,6 +596,35 @@ ese es el momento de excluirlo por marker (y de actualizar esta sección).
 
 ---
 
+## Guards globales (`conftest.py`)
+
+Dos fixtures **autouse**, o sea que se aplican a los 1334 tests sin que ninguno
+las pida.
+
+`_sin_red` parchea `socket.socket.connect` y `socket.create_connection`, y lanza
+`RuntimeError` ante cualquier destino que no sea loopback ni AF_UNIX. Se parchea
+el nivel más bajo a propósito: `create_connection`, httpx y el SDK de genai
+terminan todos ahí, y un guard más arriba los dejaría pasar.
+
+`_sin_sintesis_llm` reemplaza `reporters._llm_synthesis` por un mock que devuelve
+`None`. Un test que la parchee por su cuenta gana, porque su parche corre
+después.
+
+**Por qué existen.** "Ningún test toca la red" era una convención escrita en este
+documento, y 14 tests de `test_reporters.py` y `test_audit_block_cd.py` la
+violaban en silencio: los reportes llaman a `_llm_synthesis` siempre, esa función
+construye un cliente genai real y **se traga cualquier excepción**, así que con
+red mandaban una request HTTPS a Google con `GEMINI_API_KEY=dummy`, recibían un
+4xx y pasaban — exactamente igual que sin red. O sea que además de salir a la red,
+esos tests no verificaban nada del camino de síntesis (#67).
+
+La única exención es `test_lote4.py::TestR5Synthesis`, cuyo **sujeto** es
+`_llm_synthesis` misma (mide el deadline HTTP de la request y el timeout):
+stubearla ahí borraría lo que el test verifica. No sale a la red igual — su
+cliente genai está mockeado y el guard de sockets le sigue aplicando.
+
+---
+
 ## Tests de reproducción — `xfail(strict=True)`
 
 Convención introducida por la auditoría 2026-08-26 (`docs/audit-2026-08-26.md`).
@@ -623,12 +662,14 @@ El `reason` es obligatorio y nombra el bug (`"BUG E1: ..."`), así que el report
 de la suite es la lista viva de defectos conocidos. Un issue está cerrado cuando
 su `xfail` desapareció y su test pasa.
 
-Los siete archivos `tests/unit/test_audit_2026_08_*.py` siguen esta convención.
-**Hoy ninguno lleva la marca puesta:** los 39 bugs de la auditoría se arreglaron
-en el mismo commit que sacó sus `xfail`, así que los 897 tests pasan (`0 xfailed`,
-`0 xpassed`) y todos esos reproductores quedaron como guards de regresión — el
-paso 4 del ciclo. La convención sigue vigente para el próximo bug que se
-documente antes de arreglarse.
+Los siete archivos `tests/unit/test_audit_2026_08_*.py` siguen esta convención, y
+los dos de la auditoría 2026-09-18 (`test_audit_2026_09_vault.py`,
+`test_audit_2026_09_handlers.py`) nacieron con 50 marcas puestas, que el
+implementador fue sacando a medida que cada fix las hacía pasar.
+**Hoy ninguno lleva la marca:** la suite corre con `0 xfailed, 0 xpassed` y todos
+esos reproductores quedaron como guards de regresión — el paso 4 del ciclo. La
+convención sigue vigente para el próximo bug que se documente antes de
+arreglarse.
 
 ---
 
@@ -725,10 +766,10 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 
 ## Notas
 
-- Todos los tests son **async** (`@pytest.mark.asyncio`) — consistente con el código de producción.
-- Los tests **nunca** llaman a APIs externas reales. Si un test hace una request HTTP real, es un bug del test.
+- Los tests que ejercitan corutinas son **async**; `asyncio_mode = "auto"` en `pyproject.toml` hace innecesario el marker, aunque varios archivos viejos lo siguen escribiendo. Los que prueban helpers sincrónicos (slugs, validación, constantes) son `def` común.
+- Los tests **nunca** llaman a APIs externas reales, y el guard autouse de § Guards globales lo hace cumplir: una request saliente lanza `RuntimeError` con el destino en el mensaje.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~50 segundos en la RPi4 de desarrollo, y es exactamente lo que corre CI. Son 1254 tests: 1067 unit, 44 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~42 segundos en la RPi4 de desarrollo (~80 con `--cov`), y es exactamente lo que corre CI. Son 1334 tests: 1147 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

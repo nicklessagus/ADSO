@@ -37,6 +37,8 @@ Este documento especifica en detalle las funciones de `vault_writer.py` y `vault
 | `obsidian daily` | — | Fuera de scope |
 | `obsidian eval` | — | No replicable sin Electron |
 
+> **API documentada sin caller en `adso/`.** Estas funciones existen, están testeadas y se mantienen a propósito para Fase 7 (modo edición y consulta), pero **hoy ningún flujo del bot las invoca**: `append_to_note()`, `set_property()`, `move_note()`, `search()`, `find_by_tag()`, `get_wikilinks()`, `get_note_index()`, `EmbeddingsClient.update_metadata()`, `EmbeddingsClient.count()`, `vault_cache.invalidate()` y el parámetro `create_note(dry_run=True)`. Cada una lo aclara en su sección. Consecuencia práctica al leer este documento: lo que describen es el **contrato de la función**, no comportamiento observable del bot en producción.
+
 ---
 
 ## Dependencias
@@ -151,19 +153,19 @@ async def create_note(
 2. Calcula el directorio destino a partir del frontmatter según estas reglas (en orden):
    - `type: reference` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: reference` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
-   - `type: reference` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones: `[Elegir área]` `[Elegir proyecto]` `[Inbox]`)
+   - `type: reference` sin `project` ni `area` → `{vault_path}/00-Inbox/`. El bot **no** dispara ningún selector: el preview muestra `00-Inbox` como destino y el usuario lo cambia apretando `[Reubicar]` (`[Elegir área]` `[Elegir proyecto]` `[Inbox]`)
    - `type: task` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: task` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
    - `type: task` sin `project` ni `area` → `{vault_path}/00-Inbox/`
    - `type: idea` con `project` → `{vault_path}/01-Projects/{project}/{section}/` (si `section` presente) o `{vault_path}/01-Projects/{project}/` (sin sección)
    - `type: idea` con `area` (sin `project`) → `{vault_path}/02-Areas/{area}/`
-   - `type: idea` sin `project` ni `area` → destino resuelto por el caller (bot.py pregunta con botones)
+   - `type: idea` sin `project` ni `area` → `{vault_path}/00-Inbox/` (mismo camino que `reference`: `_resolve_dest_dir` devuelve `None` y `create_note` cae a Inbox)
    - `type: project-index` → `{vault_path}/01-Projects/{project}/` con nombre fijo `_index.md`
    - `type: area-index` → `{vault_path}/02-Areas/{area}/` con nombre fijo `_index.md`
 3. Si el directorio no existe, lo crea (incluyendo intermedios).
 4. Si ya existe un archivo con ese nombre, agrega sufijo numérico: `-2.md`, `-3.md`, etc.
 5. Construye el archivo: bloque `---` con el frontmatter serializado por `python-frontmatter` + `\n\n` + body.
-6. Si `dry_run=True`: retorna el path calculado sin escribir nada al disco (usado para el preview al usuario).
+6. Si `dry_run=True`: retorna el path calculado (`_unique_path`) sin escribir nada al disco. **Hoy no tiene callers en `adso/`** — el preview lo arma `build_preview()` (`keyboards.py`) a partir del frontmatter, sin tocar el filesystem. Queda como utilidad de inspección.
 7. Si `dry_run=False`: escribe el archivo y retorna el path.
 
 **Coacción de `type`/`status` (defensa en profundidad):** antes de resolver el destino, `create_note()` valida el frontmatter contra `VALID_TYPES`/`VALID_STATUS`:
@@ -189,12 +191,13 @@ async def read_note(note_path: Path) -> NoteData:
 
 **Comportamiento:**
 
-1. Lee el archivo con `python-frontmatter.load()`.
-2. Retorna `NoteData(path=note_path, frontmatter=post.metadata, body=post.content)`.
+1. Lee el archivo y lo parsea con **`load_post()`**, el helper tolerante del propio `vault_writer.py` — no `frontmatter.load()` directo. `frontmatter.loads()` hace `Post(content, handler, **metadata)` por dentro, así que una nota editada a mano cuyo YAML tenga una clave `handler` o `content` lo hace lanzar `TypeError`; `load_post` cae a `frontmatter.parse()` y reconstruye el Post con `_build_post`.
+2. Retorna `NoteData(path=note_path, frontmatter=dict(post.metadata), body=post.content)`.
 
 **Errores:**
 - `FileNotFoundError` si el archivo no existe → propagar.
-- `ValueError` si el archivo no tiene bloque `---` válido → propagar con mensaje que indique el path afectado.
+- `ValueError` **solo si el frontmatter quedó vacío** (`not post.metadata`): archivo sin bloque `---`, o con un bloque que no aporta ninguna clave. El mensaje incluye el path.
+- **YAML sintácticamente inválido no se convierte en `ValueError`:** la excepción de PyYAML (`yaml.YAMLError`) se propaga tal cual desde `load_post`. El caller que quiera tolerarla tiene que atraparla por su cuenta — es lo que hace `vault_cache.parse_cached`, que la traduce a `None`.
 
 ---
 
@@ -218,6 +221,8 @@ async def append_to_note(
 4. Reescribe el archivo completo con `python-frontmatter`.
 
 **Nota:** el `separator` por defecto es una línea horizontal de Obsidian. El caller puede pasar `"\n\n"` si no quiere separador visual.
+
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. El modo edición (que sería su consumidor) es Fase 7.
 
 ---
 
@@ -259,6 +264,8 @@ async def set_property(
 - `ValueError` si la validación falla → propagar sin modificar el archivo (fail-fast).
 - `FileNotFoundError` si el archivo no existe → propagar.
 
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. Su consumidor natural (el modo edición) es Fase 7. Consecuencia práctica: **la tabla de validaciones de arriba no se aplica a ninguna escritura real del bot**; lo que sí corre en toda escritura es la coacción de `type`/`status` de `create_note()`.
+
 ---
 
 ### `delete_note()`
@@ -271,10 +278,16 @@ async def delete_note(note_path: Path) -> None:
 
 **Comportamiento:**
 
-1. Elimina el archivo del filesystem.
-2. No toca ChromaDB — el caller (bot.py) es responsable de llamar a `embeddings.py` para limpiar los embeddings.
+1. Verifica que el archivo exista; si no, lanza `FileNotFoundError` antes de tocar nada.
+2. Elimina el archivo del filesystem (`Path.unlink` en un thread).
+3. No toca ChromaDB — el caller es responsable de llamar a `embeddings.py` para limpiar los embeddings.
 
-**Nota de diseño:** la detección de backlinks antes del borrado es responsabilidad de `bot.py` (usando `vault_search.get_backlinks()`), no de esta función. `delete_note()` solo borra el archivo. Separar la decisión de la ejecución permite reutilizar la función en contextos donde los backlinks ya fueron verificados.
+**Errores:**
+- `FileNotFoundError` si el archivo no existe → propagar. **No es un no-op silencioso.**
+
+**Caller real:** `reclassify_inbox` (`handlers/jobs.py`), que borra la nota vieja del Inbox **después** de haber creado la nota reclasificada (orden "crear antes de descartar").
+
+**Nota de diseño:** la detección de backlinks antes del borrado es responsabilidad del caller (usando `vault_search.get_backlinks()`), no de esta función. `delete_note()` solo borra el archivo. Separar la decisión de la ejecución permite reutilizar la función en contextos donde los backlinks ya fueron verificados.
 
 ---
 
@@ -294,7 +307,12 @@ async def move_note(source: Path, dest_dir: Path) -> Path:
 4. Mueve el archivo (`pathlib.Path.rename()`).
 5. Retorna el nuevo path.
 
+**Errores:**
+- `FileNotFoundError` si `source` no existe → propagar.
+
 **Nota:** actualizar ChromaDB metadata con el nuevo path es responsabilidad del caller.
+
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. No hay flujo de usuario que mueva una nota suelta (`docs/obsidian-vault-structure.md`); se deja para Fase 7.
 
 ---
 
@@ -365,7 +383,7 @@ async def remove_broken_wikilinks(
 
 **Notas:**
 - Los wikilinks en ADSO usan solo el stem (no el path completo), por lo que mover una nota dentro del vault **no rompe links** — y el paso 3 es lo que impide que el delete del origen los borre igual.
-- **Los bloques de código se respetan.** Las dos pasadas llevan estado de fence (los delimitadores de tres backticks) — `_strip_broken_links_in_ver_tambien()` lo trackea mientras recorre, `_remove_empty_ver_tambien()` lo precalcula con el helper `_fence_line_flags()`. Un `## Ver también` que aparece dentro de un ejemplo de código es texto del usuario y no se toca.
+- **Los bloques de código se respetan.** El estado de fence (los delimitadores de tres backticks) y los límites del bloque los resuelve **un solo recorrido**, `_walk_ver_tambien()`, que devuelve cada línea clasificada (`in_fence`, `is_header`, `in_block`). Lo comparten `_strip_broken_links_in_ver_tambien()`, `_remove_empty_ver_tambien()` y `_ver_tambien_link_targets()` — antes cada uno llevaba su propia máquina de estados. Un `## Ver también` que aparece dentro de un ejemplo de código es texto del usuario y no se toca.
 - El header vacío se elimina solo si no queda **ningún** item de lista debajo, contando cualquier `- ` y no solo wikilinks: un bloque con un link roto y un item de texto plano del usuario conserva su header en vez de dejar el item huérfano.
 - La comparación contra el contenido original va **antes** de normalizar el newline final: sin eso, una nota que menciona el link fuera de `## Ver también` y cuyo newline final difiere se reescribía sin cambio real → bump de `mtime` → evento del watcher → re-embed espurio + churn del backup, por cada delete externo.
 - Se llama desde `_remove_external_note` en `bot.py` al detectar un borrado via `VaultWatcher`. Si retorna `> 0`, el bot notifica por Telegram.
@@ -383,10 +401,17 @@ Reconciliación nocturna: wikilinks rotos y adjuntos huérfanos que `remove_brok
 
 **Comportamiento:**
 
-1. Corre entero en un hilo (`_reconcile_vault_sync`).
-2. Limpia wikilinks rotos que apuntan a notas que ya no existen en el vault — cubre el borrado hecho con el contenedor parado, o desde otro dispositivo mientras ADSO estaba caído, que nunca dispara `inotify` (issue #57).
-3. Detecta adjuntos de `03-Resources/` que ninguna nota referencia (ni por `source_file` en frontmatter ni por embed `![[...]]` en el body) y los **mueve** a `05-Archive/03-Resources/` — nunca los borra.
+1. Corre entero en un hilo (`_reconcile_vault_sync`), en **un solo recorrido** del vault (`_vault_files_sync`, que ya saltea dotfiles y carpetas ocultas).
+2. Limpia wikilinks rotos que apuntan a notas que ya no existen en el vault — cubre el borrado hecho con el contenedor parado, o desde otro dispositivo mientras ADSO estaba caído, que nunca dispara `inotify` (issue #57). Solo toca items del bloque `## Ver también`, y **saltea los `_index.md`** (los mantiene el flujo de gestión). Un link se considera roto solo si su target no coincide con ningún **nombre** ni **stem** existente en disco: el criterio es la existencia en el filesystem, nunca la pertenencia al índice semántico — una nota en `05-Archive/` está fuera del índice pero su link sigue abriendo en Obsidian.
+3. Detecta adjuntos de `03-Resources/` que ninguna nota referencia y los **mueve** a `05-Archive/03-Resources/` — nunca los borra, y el nombre en destino se reserva con `O_EXCL` + sufijo numérico para no pisar un huérfano homónimo archivado otra noche.
 4. Retorna `(notas_modificadas, adjuntos_archivados)`.
+
+**Las cuatro reglas de seguridad de la barrida de huérfanos** — todas existen para no llevarse un binario que sí tiene dueño:
+
+- **Qué cuenta como referencia:** *cualquier* `[[wikilink]]` del archivo (`_ANY_WIKILINK_RE` corre sobre el texto crudo, así que cubre tanto el `source_file: "[[paper.pdf]]"` del frontmatter como el embed `![[paper.pdf]]` del body) **y además los links markdown `[texto](path)`** (`_MARKDOWN_LINK_RE`), incluyendo su forma con espacios escapados (`%20`, que es como Obsidian los inserta). Se compara contra el `name` y contra el `stem` del adjunto.
+- **Edad mínima — `_ORPHAN_MIN_AGE_SECONDS = 600`:** un adjunto con menos de 10 minutos **nunca** se archiva. `_cb_confirm` guarda el binario con `save_resource` y recién después escribe la nota que lo referencia; si la barrida cae en ese hueco se lleva un adjunto cuya nota está por nacer. Los huérfanos reales son viejos.
+- **Aborto por nota ilegible:** si *cualquier* `.md` del vault no se pudo leer (`OSError`/`UnicodeDecodeError`), la barrida entera se saltea y se devuelve `([], ...)` de adjuntos. Una sola nota ilegible alcanza para que un adjunto referenciado parezca huérfano. La limpieza de wikilinks que ya se hizo sí se reporta.
+- **`.md` dentro de `03-Resources/` nunca se archiva:** según la taxonomía es material de referencia permanente, no un adjunto binario. Moverlo sería perder una nota.
 
 **Uso:** cron nocturno, mismo espíritu que `reindex_vault()` de `embeddings.py`. Reconcilia el filesystem ante cualquier drift acumulado mientras el bot estuvo caído.
 
@@ -434,12 +459,12 @@ async def get_backlinks(
    - `[[note_name|{alias}]]` — link con alias
    - `[[note_name#{heading}]]` — link a heading interno
    - `[[note_name#{heading}|{alias}]]` — combinado
-3. Escanea todos los `.md` del vault (excluyendo `exclude_dirs`; si `None`, usa `vault.exclude_dirs` de config).
+3. Escanea todos los `.md` del vault vía `_scan_vault` (excluyendo `exclude_dirs`; si `None`, usa la **constante** `DEFAULT_EXCLUDE_DIRS` de `constants.py`, **nunca** `vault.exclude_dirs` de `config.yaml` — ningún caller de `vault_search.py` lee la config). A eso `_scan_vault` le suma siempre `03-Resources` (`_ALWAYS_EXCLUDE`) y descarta los `.md` sueltos en la raíz del vault, la pase o no el caller.
 4. Por cada archivo que contiene al menos un match, extrae un snippet de contexto (la línea completa que contiene el match).
 5. Lee el frontmatter de cada archivo que matchea para obtener `title`, `type`, `status`.
 6. Retorna lista de `NoteRef` ordenada por `path`.
 
-**Performance:** escaneo lineal de todos los `.md` (el listado de archivos, `_scan_vault`/`rglob`, se rehace en cada llamada — no hay índice de paths en memoria). Para un vault personal (< 1000 notas) en RPi4 es aceptable (< 500ms estimado). El costo dominante es el `read()+parse` de cada nota, no el `rglob`, y **ese paso sí está cacheado**: `_parse_note_safe` delega en `vault_cache.parse_cached` (ver esa sección), así que un segundo scan sin cambios en el vault evita releer y reparsear las notas ya vistas.
+**Performance:** escaneo lineal de todos los `.md` (el listado de archivos, `_scan_vault`/`rglob`, se rehace en cada llamada — no hay índice de paths en memoria). Para un vault personal (< 1000 notas) en RPi4 es aceptable (< 500ms estimado). El costo dominante es el `read()+parse` de cada nota, no el `rglob`, y **ese paso sí está cacheado**: todas las funciones de scan llaman directamente a `vault_cache.parse_cached` (ver esa sección), así que un segundo scan sin cambios en el vault evita releer y reparsear las notas ya vistas.
 
 ---
 
@@ -482,6 +507,8 @@ Una nota que pasa los filtros de tokens pero no matchea el texto libre por ningu
 
 **`scope`:** si se provee, restringe el escaneo al subdirectorio `{vault_path}/{scope}`. Ejemplo: `scope="01-Projects/tesis"`.
 
+**Hoy no tiene callers en `adso/`** — `/buscar` usa retrieval semántico (`knowledge_query.py`), no esta función. Queda para Fase 7.
+
 ---
 
 ### `find_by_tag()`
@@ -503,6 +530,10 @@ async def find_by_tag(
    - Frontmatter `tags: [tag1, tag2]`
    - Tags inline `#tag` en el body (regex `(?<!\[)#([\w/-]+)`)
 3. Si `hierarchical=True`: un tag `metodo` también matchea `metodo/cnn`, `metodo/transformer`, etc. (el valor buscado es prefijo del tag real).
+
+**No acepta `exclude_dirs`** — ni esta ni `find_by_property()`. Ambas llaman a `_scan_vault(vault_path)` sin argumento, así que siempre usan `DEFAULT_EXCLUDE_DIRS` más `_ALWAYS_EXCLUDE`; no hay forma de ampliar ni de reducir la exclusión desde el caller.
+
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests.
 
 ---
 
@@ -553,7 +584,7 @@ async def get_all_tags(
 
 **Uso en clasificación LLM:**
 
-Al clasificar nuevo contenido, `bot.py` llama a `get_all_tags()` excluyendo `00-Inbox` (además de los directorios excluidos por defecto) y pasa la lista al system prompt de Gemini. El LLM debe preferir tags de esa lista antes de inventar nuevos. Solo se incluyen los primeros 100 tags (por frecuencia) para no inflar el prompt.
+Al clasificar nuevo contenido, **`_get_existing_tags()` (`bot_utils.py`)** llama a `get_all_tags()` con una lista literal que agrega `00-Inbox` a los directorios excluidos por defecto, y pasa el resultado al system prompt de Gemini. El LLM debe preferir tags de esa lista antes de inventar nuevos. Solo se incluyen los primeros 100 tags (por frecuencia) para no inflar el prompt.
 
 La exclusión de `00-Inbox` es intencional: los tags de notas pendientes de clasificación son tentativas y no deben propagarse como vocabulario canónico.
 
@@ -568,12 +599,19 @@ async def get_wikilinks(note_path: Path) -> list[str]:
 
 **Comportamiento:**
 
-1. Lee el body de la nota.
-2. Extrae todos los `[[...]]` con regex `\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`.
-3. Retorna lista de stems (sin alias, sin heading, sin `.md`).
+1. Lee el archivo **completo** (frontmatter incluido) y le saca los bloques de código con `_strip_code_blocks`.
+2. Extrae todos los `[[...]]` con regex `\[\[([^\]|#]+)(?:[|#][^\]]*)?]]`.
+3. Retorna el **target crudo**, stripeado: sin alias y sin heading (el regex los corta), pero **conservando la extensión y los componentes de directorio**. El regex tampoco excluye el `!` de los embeds, así que los adjuntos también aparecen.
+
+   ```python
+   # Nota con: [[foo.md]]  [[dir/bar|alias]]  ![[file.pdf]]
+   await get_wikilinks(path)   # → ['foo.md', 'dir/bar', 'file.pdf']
+   ```
+
+   Un caller que necesite el stem con el que Obsidian resuelve tiene que normalizarlo él (como hace `_link_target_key` en `vault_writer.py`).
 4. Elimina duplicados, preserva orden de aparición.
 
-**Uso típico:** al crear una nueva nota, el bot verifica los outgoing links para validar que las notas referenciadas existen.
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. En particular **nada la llama al crear una nota**: la captura no valida los outgoing links, y la reconciliación nocturna usa sus propios regex sobre el texto crudo (`_ANY_WIKILINK_RE`).
 
 ---
 
@@ -612,7 +650,7 @@ async def get_note_index(vault_path: Path) -> dict[str, Path]:
 
 Recorre el vault y construye `{stem → path}` para todos los `.md`.
 
-**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. `get_backlinks()` **no** la usa: hace su propio escaneo aplicando un regex por nota. Queda como helper disponible para la resolución de wikilinks.
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. `get_backlinks()` **no** la usa: hace su propio escaneo aplicando un regex por nota. Queda como helper disponible para la resolución de wikilinks en Fase 7.
 
 **Stems repetidos.** La firma sigue siendo `dict[str, Path]`, pero el dict ya no es solo `{stem: path}`: cuando dos o más archivos comparten stem, el **primero** conserva la clave por stem y **todos** los involucrados (el primero incluido) se exponen además bajo su **ruta relativa sin extensión** — el mismo `note_id` que usa el índice de embeddings. Antes se hacía `index[stem] = path` en cada colisión: ganaba el último que devolviera `rglob` y los demás desaparecían del índice. En un vault real las colisiones son los `_index.md`, uno por proyecto y por área, todos con el mismo stem.
 
@@ -635,7 +673,7 @@ No se cachea entre llamadas. Si el vault crece y el tiempo de escaneo se convier
 
 ## `vault_cache.py`
 
-Responsabilidad única: **cachear el parseo de notas** (frontmatter + body). Todas las funciones de scan de `vault_search.py` pasan por `_parse_note_safe`, que delega acá; `EmbeddingsClient.reindex_vault()` (`embeddings.py`) llama a `parse_cached` directamente, por la misma razón — evitar releer notas sin cambios en un scan completo del vault. No decide qué notas existen (eso lo sigue haciendo `_scan_vault`/`rglob` en cada llamada) — solo evita releer y reparsear una nota cuyo contenido no cambió desde el último scan.
+Responsabilidad única: **cachear el parseo de notas** (frontmatter + body). Todas las funciones de scan de `vault_search.py` llaman a `parse_cached` directamente (no hay wrapper intermedio); `EmbeddingsClient.reindex_vault()` (`embeddings.py`) y `_gather_vault_counts` (`/status`) también, por la misma razón — evitar releer notas sin cambios en un scan completo del vault. No decide qué notas existen (eso lo sigue haciendo `_scan_vault`/`rglob` en cada llamada) — solo evita releer y reparsear una nota cuyo contenido no cambió desde el último scan.
 
 ```python
 def parse_cached(path: Path) -> NoteData | None:
@@ -652,7 +690,7 @@ def parse_cached(path: Path) -> NoteData | None:
 7. Thread-safe: protegido con un `threading.Lock` porque las funciones de scan corren dentro de `asyncio.to_thread`.
 
 **Otras funciones del módulo:**
-- `invalidate(path)` — borra una entrada puntual. No hace falta para correctness (la clave por mtime ya se auto-invalida), pero sirve para tests y para forzar relectura inmediata tras una escritura propia.
+- `invalidate(path)` — borra una entrada puntual. **Sin callers en `adso/`**: no hace falta para correctness (la clave por mtime ya se auto-invalida), y queda para tests y para forzar relectura inmediata tras una escritura propia.
 - `clear()` — vacía el caché completo (tests).
 - `stats()` — `{entries, hits, misses, hit_ratio}`, expuesto en `/status`.
 
@@ -694,7 +732,7 @@ else:
     from adso.vault_search import get_backlinks, search, ...
 ```
 
-`bot.py` y el resto de los módulos importan desde `config.py` — nunca importan directamente de `vault_writer` o `vault_search`. El swap es un cambio de una línea en `config.yaml`.
+> **Esto es diseño, no el estado actual.** Hoy **todos** los módulos importan directamente de `vault_writer` y `vault_search` (`bot.py`, `bot_utils.py`, `reporters.py`, `handlers/commands.py`, `handlers/jobs.py`, `handlers/input.py`, `handlers/manage.py`, `handlers/capture.py`), y `config.py` no re-exporta nada de eso. El día que exista un backend CLI, el paso 3 implica además reescribir esos imports — no es un cambio de una línea en `config.yaml`.
 
 ---
 
@@ -717,7 +755,9 @@ El paso de cachear el parseo de cada nota (evitar releer y reparsear las que no 
 
 Responsabilidad única: **gestión de embeddings y ChromaDB**. No escribe archivos al vault ni llama a LLMs de clasificación — solo calcula embeddings (via Gemini Embedding API, modelo `gemini-embedding-001`) y opera sobre la colección de ChromaDB.
 
-Casi toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`**; a nivel de módulo solo viven los helpers puros `should_index()`, `distance_to_similarity()` y `similarity_to_distance()`, más la constante `DEFAULT_EXCLUDE_DIRS`. La instancia del cliente se crea en el arranque del bot y se comparte via `bot_data["embeddings"]`.
+Casi toda la funcionalidad está encapsulada en la clase **`EmbeddingsClient`**; a nivel de módulo viven los helpers puros `should_index()`, `build_note_metadata()`, `distance_to_similarity()` y `similarity_to_distance()`, más las constantes `EMBEDDING_MODEL` (`"gemini-embedding-001"`), `COLLECTION_NAME` (`"vault_notes"`) y `DEFAULT_EXCLUDE_DIRS` (reexportada de `constants.py`).
+
+**`build_note_metadata(rel_path, fm, body) -> dict`** es el **único constructor** del dict de metadata que acompaña a cada embedding: lo usan el reindex nocturno y el indexado inline al confirmar (`_index_note_safe`). Arma `path`/`type`/`status`/`project`/`area`/`tags`/`media_type`/`title` desde el frontmatter más `content_hash` (MD5 del body), que es lo que permite al reindex saltear notas sin cambios. Un caller nuevo usa este helper, no rearma el dict a mano. La instancia del cliente se crea en el arranque del bot y se comparte via `bot_data["embeddings"]`.
 
 ### Dependencias
 
@@ -748,7 +788,8 @@ Retorna `False` — o sea, el archivo **no** se indexa — cuando:
 2. La extensión no es `.md`.
 3. Alguna componente de la ruta relativa está en `exclude_dirs` (`None` → `DEFAULT_EXCLUDE_DIRS`).
 4. El stem es `_index` (los índices de proyecto/área no son notas de contenido).
-5. El nombre contiene `.sync-conflict-` (conflicto de Syncthing).
+5. El `.md` está **suelto en la raíz del vault** (`len(rel.parts) == 1`): ahí viven los dashboards de Obsidian, que declaran `type: area-index` y traen miles de líneas de Dataview. La taxonomía pone las notas dentro de `00-Inbox/`, `01-Projects/`, `02-Areas/` y `05-Archive/` (#60). Como `_index.md`, no es configurable: no es una preferencia, es la taxonomía. `_scan_vault` aplica la misma regla del lado estructural.
+6. El nombre contiene `.sync-conflict-` (conflicto de Syncthing).
 
 **Por qué existe:** los dos caminos que indexan tenían criterios distintos. El reindex nocturno (`reindex_vault()`) filtraba; el re-embed externo que dispara el `VaultWatcher` (callback en `bot.py`) **no filtraba nada**. Editar desde Obsidian una nota de `05-Archive` —o un `_index.md`— la metía al índice contra el diseño, y esa misma noche `reindex_vault()` la borraba como huérfana: un ciclo diario de embed + delete que gastaba quota de la Embedding API y ensuciaba `/buscar` hasta las 3 AM (E2 de `docs/audit-2026-08-26.md`).
 
@@ -855,6 +896,8 @@ async def update_metadata(
 2. Ejecuta `collection.update(ids=[note_id], metadatas=[metadata])`.
 3. No recalcula el embedding — solo actualiza metadata (para cambios de path, status, project, etc.).
 
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. Los flujos que cambian metadata (re-embed del watcher, reindex) re-indexan la nota entera con `index_note()`.
+
 ---
 
 ### `query_similar()`
@@ -886,7 +929,7 @@ class SimilarNote:
 
 1. Calcula el embedding de `query_text` via Gemini Embedding API — **salvo** que se pase `query_embedding`, en cuyo caso se reutiliza ese vector sin llamar a la API. Lo usa `knowledge_query.retrieve` para el reintento con umbral relajado (mismo texto, segunda pasada) y `_suggest_links` en la captura.
 2. Ejecuta `collection.query(query_embeddings=[embedding], n_results=n_results, where=where, include=["documents", "metadatas", "distances"])`.
-3. Filtra resultados con `distance > threshold` (si `threshold` provisto). La distancia coseno va de 0 (idéntico) a 2 (opuesto). Para la conversión a similitud: `similitud = 1 - (distance / 2)`.
+3. Filtra por `threshold` (si se provee). **`threshold` es una similitud en `[0, 1]`, no una distancia** — es el mismo número que `links.similarity_threshold` / `rag.similarity_threshold` de `config.yaml`. Se convierte con `similarity_to_distance(threshold)` = `2 * (1 - threshold)` y recién ahí se descarta lo que supere esa distancia. Un valor más alto es **más** estricto. La distancia coseno va de 0 (idéntico) a 2 (opuesto), y la conversión inversa es `distance_to_similarity(d)` = `1 - d / 2`.
 4. Retorna lista de `SimilarNote` ordenada por distancia ascendente (más similar primero).
 
 > El filtro `where` se pasa **verbatim** a ChromaDB — no se inyecta ninguna exclusión automática de notas archivadas. Las notas de `05-Archive/` no aparecen porque esa carpeta está en `vault.exclude_dirs` y nunca se indexa.
@@ -944,7 +987,9 @@ async def reindex_vault(
 def count(self) -> int:
 ```
 
-**Síncrono** (es el único método público que no es `async`): inicializa la colección si hace falta y devuelve `collection.count()`. Lo usa `/status` para reportar cuántos documentos hay indexados.
+**Síncrono** (es el único método público que no es `async`): inicializa la colección si hace falta y devuelve `collection.count()`.
+
+**Hoy no tiene callers en `adso/`** — solo la ejercitan los tests. `/status` **no** reporta el número de documentos indexados: lee la property `is_initialized` y muestra `activo` / `no iniciado`. El conteo de notas que sí aparece en `/status` sale del filesystem (`_gather_vault_counts`), no de ChromaDB.
 
 ---
 
@@ -976,7 +1021,9 @@ El writer usa `python-frontmatter` que a su vez usa PyYAML. Reglas críticas:
 | `project`, `area` | `Text` | Texto plano (nombre de carpeta). **No** wikilinks — facilita `WHERE project = "x"` en Dataview. |
 | `read_status`, `priority`, `status` | `Text` (enum) | Valores de texto, no Checkbox. Obsidian ofrece autocompletado en la UI de Properties. |
 
-La conversión de fechas ocurre en `_clean_frontmatter()` en `vault_writer.py` y aplica a todos los paths de escritura (`create_note`, `append_to_note`, `set_property`, `update_wikilinks`).
+La conversión de fechas ocurre en `_clean_frontmatter()` en `vault_writer.py` y aplica a todo camino que reconstruya el frontmatter: `create_note`, `append_to_note` y `set_property`. (`update_wikilinks` se borró en 2026-09 por no tener callers; la limpieza de links la hacen hoy `remove_broken_wikilinks` y `_reconcile_vault_sync`, que reescriben el `.md` como texto y **no** tocan el frontmatter.)
+
+> **Qué escribe PyYAML.** Un `datetime` se serializa **con espacio y sin `T`** — `date_created: 2026-09-18 20:35:03` —, y un `date` como `due_date: 2026-09-20`. Las dos formas son timestamps YAML válidos y van sin comillas, que es lo que habilita el widget de Obsidian; el `T` del ISO 8601 solo existe en el string intermedio que produce `now_iso()`, antes de `_parse_date_value`.
 
 ### Nombres de archivo
 
@@ -998,7 +1045,7 @@ El patrón `YYYY-MM-DD-{slug}.md` con `python-slugify` (kebab-case, max 60 chars
 | Embed de archivo | `![[martinez_2024.pdf]]` | Para archivos en `03-Resources/` |
 | Embed con página | `![[martinez_2024.pdf#page=3]]` | Para PDFs en una página específica |
 
-El writer genera links en forma simple (`[[stem]]`) porque el patrón `YYYY-MM-DD-slug` garantiza unicidad. Los alias se agregan solo si el LLM los sugiere.
+El writer genera links en forma simple (`[[stem]]`) porque el patrón `YYYY-MM-DD-slug` garantiza unicidad. **Nunca genera la forma con alias (`[[stem|texto]]`)**: los links del bloque `## Ver también` salen de la similitud de embeddings, no del LLM, y `_cb_confirm` escribe siempre `- [[stem]] — {título o slug}` (el título va *fuera* del wikilink, tras un guión largo). La forma con alias solo aparece si la escribe el usuario en Obsidian.
 
 ### URI scheme `obsidian://`
 

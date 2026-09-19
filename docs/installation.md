@@ -70,8 +70,12 @@ Sin esto el bot funciona normalmente — solo no sincroniza tareas con Google Ta
 ```bash
 python scripts/auth_google_tasks.py --creds /ruta/al/directorio/credentials/google-oauth.json
 
-# Si la RPi4 no tiene browser: el script imprime una URL, abrirla en otra máquina,
-# autorizar, pegar el código de vuelta en la terminal.
+# Si la RPi4 no tiene browser: el script imprime una URL, abrirla en otra máquina
+# y autorizar. Google redirige a http://localhost, que da ERR_CONNECTION_REFUSED
+# — eso es lo esperado. Copiar del navegador la **URL completa de redirección**
+# (la que empieza con http://localhost/?state=...&code=...) y pegarla entera en
+# la terminal. No es el código suelto: el script se la pasa a
+# `flow.fetch_token(authorization_response=...)`.
 ```
 
 7. El script genera `token_tasks.json` en el mismo directorio que el JSON de credenciales.
@@ -122,10 +126,20 @@ GROQ_API_KEY=<tu API key de Groq>
 VAULT_PATH=/ruta/al/vault
 
 # ─── Permisos de archivos (Docker) ────────────────────────────────────────────
-# Obtener con: id -u && id -g
+# Dejar en 1000 salvo que se reconstruya la imagen (ver abajo).
 ADSO_UID=1000
 ADSO_GID=1000
 ```
+
+> **`ADSO_UID`/`ADSO_GID` no son libres: tienen que ser 1000.** El compose los
+> usa en `user:` para correr el proceso, pero la imagen crea un solo usuario,
+> `adso`, con UID/GID **1000 fijos** (`Dockerfile`), y le da `chown` a
+> `/app/data` a ese usuario. Con otro valor el proceso corre como un UID que no
+> tiene entrada en `/etc/passwd` —lo que hace fallar el `git push` por SSH del
+> backup— y sin permiso de escritura sobre `/app/data`, que es donde viven la
+> caché del modelo de whisper y el índice de ChromaDB. Si el usuario del host no
+> es 1000, la salida es editar el `groupadd`/`useradd` del `Dockerfile` y
+> reconstruir la imagen, no cambiar estas variables.
 
 El `config.yaml` copiado del ejemplo es válido para empezar. Ajustá a gusto (ver `docs/configuration.md`).
 
@@ -190,7 +204,28 @@ El bot crea la estructura de carpetas (`00-Inbox`, `01-Projects`, etc.) automát
 
 Si usás Syncthing para sincronizar el vault entre dispositivos, agregar ese directorio como carpeta compartida en Syncthing.
 
-El vault ya incluye un `.gitignore` que excluye archivos de estado local de Obsidian (workspace, cache), conflictos de Syncthing y archivos de sistema.
+**Crear el `.gitignore` del vault.** ADSO no lo escribe: sin él, el backup de
+git (§4) commitea el estado local de Obsidian y los conflictos de Syncthing en
+cada push.
+
+```bash
+cat > /ruta/al/vault/.gitignore <<'EOF'
+# Estado local de Obsidian (por dispositivo, cambia todo el tiempo)
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/cache
+
+# Papelera de Obsidian
+.trash/
+
+# Conflictos de Syncthing
+*.sync-conflict-*
+
+# Sistema
+.DS_Store
+Thumbs.db
+EOF
+```
 
 ---
 
@@ -200,9 +235,14 @@ ADSO puede hacer commit+push automático a un repo git privado cada vez que se e
 
 ### 4.1 Crear el repo en GitHub
 
-Crear un repo privado (ej: `nicklessagus/ADSO_Vault`) en GitHub. No inicializar con README ni .gitignore — el vault ya tiene su propio `.gitignore`.
+Crear un repo privado (ej: `nicklessagus/ADSO_Vault`) en GitHub. No inicializar
+con README ni `.gitignore` — el `.gitignore` del vault se escribe a mano en el
+propio vault (§3) y tiene que existir **antes** del primer `git add`.
 
 ### 4.2 Inicializar git en el vault
+
+Verificar primero que el `.gitignore` de §3 exista (`ls -a /ruta/al/vault`): el
+primer commit es el que fija qué entra al repo.
 
 ```bash
 git -C /ruta/al/vault init -b main
@@ -285,8 +325,13 @@ Deberías ver:
 adso-bot | [adso.vault_writer] INFO: Estructura del vault verificada: /vault
 adso-bot | [adso.bot] INFO: ADSO iniciando — vault en /vault
 adso-bot | [apscheduler.scheduler] INFO: Scheduler started
-adso-bot | [telegram.ext.Application] INFO: Application started
 ```
+
+No esperar una línea de `telegram.ext.Application`: `configure_logging`
+(`adso/logging_setup.py`) pone el logger `telegram` en `WARNING` junto con
+`httpx` y `chromadb`, así que el arranque de PTB no se loguea. La señal de que
+el bot está vivo es responder en Telegram, y el `heartbeat_job` tocando
+`/tmp/adso_heartbeat` (lo mira el healthcheck de Docker).
 
 ### Atajos del Makefile (variante con directorio de deploy separado)
 
@@ -296,11 +341,24 @@ Si se usa la variante de deploy separado (sección 2), el `Makefile` envuelve lo
 |---|---|
 | `make deploy` | copia `config.yaml` al deploy dir + build + reinicia |
 | `make stop` | detiene sin borrar |
-| `make restart` | reinicia sin rebuild |
+| `make restart` | reinicia sin rebuild y **sin copiar `config.yaml`** |
 | `make logs` | tail de logs en vivo |
 | `make status` | estado del contenedor |
 | `make shell` | bash dentro del contenedor |
+| `make check-sync` | reconcilia el índice de ChromaDB contra las notas en disco (read-only, corre dentro del contenedor) |
 | `make prune` | limpia imágenes huérfanas post-rebuild |
+| `make llm-baseline` | baseline del harness de regresión de modelo — **pega contra la API real** |
+| `make llm-check MODEL=… BASE=…` | corre el harness con un modelo candidato y lo compara contra una baseline |
+
+**Un cambio en `config.yaml` no se aplica con `make restart`.** Lo que se monta
+en el contenedor es `$(DEPLOY_DIR)/config.yaml`, y el único comando que copia
+ahí el archivo del repo es `make deploy`. `make restart` reinicia el proceso con
+la copia vieja. Con un solo directorio (sin deploy dir) no hay copia y
+`docker compose restart adso-bot` alcanza.
+
+`make llm-baseline` y `make llm-check` usan el `python` del `PATH`: correrlos
+con el venv activado (`source .venv/bin/activate`). Reglas del harness en
+[`tests/llm_regression/README.md`](../tests/llm_regression/README.md).
 
 ---
 
