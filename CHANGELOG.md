@@ -9,6 +9,69 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.9.0] — 2026-09-18
+
+Auditoría completa de código contra documentación (`docs/audit-2026-09-18.md`) y
+los arreglos que salieron de ella. Ocho agentes leyeron cada documento del repo
+afirmación por afirmación contra `adso/`; los hallazgos de código se reprodujeron
+a mano antes de tocar nada, y los fixes salieron con el ciclo spec → tests →
+implementación de `CLAUDE.md`, con los tests escritos contra la spec y nunca
+contra el código.
+
+Suite: 1254 → **1334 tests** (80 nuevos, 50 de ellos nacidos en `xfail(strict=True)`).
+Cobertura 86% → **91%**.
+
+### Fixed
+
+- **El watcher dejó de reprocesar las notas que escribe el propio bot** (#66). `create_note` produce **dos** eventos inotify por nota —el placeholder `O_EXCL` que reserva el nombre y el `os.replace` de la escritura atómica— y `bot_written_paths` era un set que se consumía en el primero: el segundo llegaba como edición externa, gastaba un embedding de más y metía una entrada duplicada en el commit de backup. Ahora la marca es una ventana de 10 s (`was_bot_written`) que no se consume. Se veía en producción el 2026-09-17: la misma nota indexada dos veces con 3 segundos de diferencia
+- **Ningún test sale a la red, y ahora hay algo que lo hace cumplir** (#67). 14 tests de reportes abrían conexiones reales a `generativelanguage.googleapis.com`: los reportes llaman a `_llm_synthesis`, que construye un cliente genai de verdad y **se traga cualquier excepción**, así que mandaban la request, recibían un 4xx y pasaban igual — o sea que además de salir a la red no verificaban nada de ese camino. Dos fixtures autouse en `conftest.py`: una bloquea todo socket saliente que no sea loopback, la otra neutraliza la síntesis
+- **Los jobs diarios corren en la zona horaria del usuario** (#68). PTB fija el scheduler en UTC salvo que se le pase `tzinfo`, así que `reindex.time: "03:00"` disparaba a las 00:00 locales. Con el reporte semanal —que está configurado y usaría el mismo camino— un `"12:00"` habría corrido a las 09:00
+- **`create_note` siempre escribe un `status`** (#69). El schema documenta un default por tipo, pero la función completaba `date_created`, `date_modified`, `source` y `media_type` y no `status`: bastaba que el LLM devolviera `status: ""` para que la nota terminara en el vault sin el campo, invisible para todo filtro por estado
+- **Un `VAULT_PATH` que no existe aborta el arranque** (#70). Era un `mkdir(parents=True)`: un typo en la variable o un bind mount que no montó arrancaban el bot contra un vault vacío recién creado, con el backup reportando `not_repo` y el watcher mirando el directorio equivocado
+- **El LLM ya no puede crear carpetas de proyecto** (#71). El `project` que devolvía el modelo se concatenaba crudo al path: un nombre alucinado —o `"Tesis "` al lado del `tesis/` que ya existía— creaba un segundo proyecto sin `_index.md` y partía las notas en dos. Ahora se canoniza contra los existentes y, si no matchea, se descarta junto con `section`; la nota cae a Inbox con todo su frontmatter intacto
+- **`03-Resources/` quedó fuera del índice semántico** (#72). Estaba excluido de los scans estructurales pero no de `should_index`, así que un `.md` ahí se embebía y contestaba `/buscar` mientras `/reporte`, el descubrimiento de tags y `find_by_property` no lo veían nunca. La exclusión vive ahora en `constants.py` y la aplican los dos lados
+- **Una descarga fallida de Telegram ya no deja el temporal huérfano** (#73). El archivo se creaba antes del `await`, así que si la descarga lanzaba, el `unlink` del caller nunca corría — y en la RPi4 `/tmp` es tmpfs, o sea RAM filtrada hasta el reinicio
+- **El preview escapa todos los valores del frontmatter** que renderiza, no solo el título, los links y el snippet. La defensa la daba por hecha la auditoría 2026-07-31 (E4) y no estaba
+- **La línea de tiempos de la captura se emite también cuando la captura lanza** (va en un `finally`): el camino que más importa medir era justamente el único que no dejaba marca
+- **`/status` no reporta como activo un watcher que no arrancó.** `start()` traga el error del observer y deja `_observer = None`, pero el estado se calculaba sobre la existencia del objeto
+- **`make check-sync` respeta `vault.exclude_dirs`** de la config desplegada en vez de la constante por defecto, que era justo el falso positivo que el script existe para no producir
+- **Un texto con keywords de gestión que no tienen botón** (`archivar`, `borrar`, `renombrar`) conserva la fila `[🔎 Buscar en el vault]` en vez de quedarse con un teclado sin gestión y sin búsqueda
+
+### Documentation
+
+- Corregida la deriva de **todos** los documentos del repo contra el código: `CLAUDE.md`, `architecture.md`, `vault-interface.md`, `frontmatter-schema.md`, `obsidian-vault-structure.md`, `security.md`, `SECURITY.md`, `configuration.md`, `installation.md`, `testing.md`, `ROADMAP.md`, `improvements-2026-07.md`, `fase6`/`fase7`, `decisions-log.md`, `README` del harness, `.env.example` y `.dockerignore`
+- Trece funcionalidades estaban documentadas como implementadas y no existen. Las más grandes: gestión no archiva, renombra ni borra (solo crea, y no hay doble confirmación de borrado); no hay extracción web de ninguna clase; Google Tasks no lee listas externas; los teclados de consulta de Fase 7 figuraban como reales; los campos académicos `methods`/`dataset`/`contribution`/`conclusions` no los popula nada; un PDF con password es un error duro y no un fallback a OCR
+- Documentada la excepción real a "ninguna nota se escribe sin `[Confirmar]`": el cron de reclasificación persiste la segunda pasada del LLM sin preview
+- `docs/improvements-2026-07.md` (backlog vivo) reconciliado con el código: cuatro ítems estaban hechos y seguían marcados pendientes, dos estaban a medias
+
+---
+
+## [1.8.0] — 2026-09-04
+
+**Lote 4** (#63, #49, #48, #47, #46, #2, #1, #51) más la **simplificación 2026-09**.
+Entrada escrita en retrospectiva el 2026-09-18: la release se tageó sin pasar por
+el CHANGELOG, que es lo que destapó la auditoría.
+
+Suite: 1052 → 1254 tests. Cobertura 90%.
+
+### Added
+
+- `rate_limit` (token bucket en el gate global, después de la autenticación) y límites de tamaño por tipo de medio: `documents.pdf_max_mb`, `image_max_mb`, `audio_max_mb` (#1, #2)
+- `make check-sync`: reconcilia ChromaDB contra las notas en disco y devuelve exit≠0 si difieren
+
+### Fixed
+
+- **El timeout de `classify` salió en 8 s y la API lo rechaza** (el piso del servidor es 10 s), así que durante un día **toda** captura cayó a modo degradado. Corregido a 12 s. Ningún test de unidad podía verlo: el piso vive del lado del servidor y los mocks aceptan cualquier número — de ahí la regla ampliada de correr `scripts/llm_regression.py` antes de tocar cualquier parámetro del `GenerateContentConfig`
+- El cron de reclasificación respeta el body verbatim de `text`/`audio` (#64) y los reportes no cuentan el `_index.md` como nota (#65)
+- `authors` llega como lista desde el extractor de PDFs (#63); `/status` dice la verdad sobre el cron y ChromaDB (#49); el push a Google Tasks es el mismo código en el cron y en la confirmación (#48); guards de comando uniformes con `command_guard` (#47); la síntesis de reportes tiene timeout y se saltea con cero ítems (#46)
+- Los tags de los índices se normalizan a kebab-case y `03-Resources` sale de los scans estructurales (#58)
+
+### Changed
+
+- **Simplificación 2026-09:** taxonomía única en `constants.py`, helpers compartidos en vez de reglas copiadas, y borrado de flujos muertos — `find_tasks` y `update_wikilinks` se fueron sin caller y con defectos conocidos (#61)
+
+---
+
 ## [1.7.1] — 2026-08-27
 
 Dos huecos de resiliencia que venían señalados desde la medición de latencia del 2026-08-22.
