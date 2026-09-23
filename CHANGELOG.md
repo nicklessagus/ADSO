@@ -7,6 +7,10 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+---
+
+## [1.10.1] — 2026-09-22
+
 Lote 6 (`tests/unit/test_lote6.py`), disparado por un pico de `503 UNAVAILABLE` de Gemini Vision en producción el 2026-09-22.
 
 ### Fixed
