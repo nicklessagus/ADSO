@@ -177,7 +177,9 @@ class TestInvalidResponse:
         with pytest.raises(LLMResponseError, match="name"):
             validate_llm_response(data)
 
-    def test_manage_create_project_missing_description(self) -> None:
+    def test_manage_create_project_missing_description_is_accepted(self) -> None:
+        # Lote 5 D2: the description is asked downstream by manage.py (G10);
+        # the validator only requires the name.
         data = {
             "mode": "manage", "confidence": 0.9,
             "payload": {
@@ -185,8 +187,9 @@ class TestInvalidResponse:
                 "params": {"name": "test"},
             },
         }
-        with pytest.raises(LLMResponseError, match="description"):
-            validate_llm_response(data)
+        result = validate_llm_response(data)
+        assert result["mode"] == "manage"
+        assert result["payload"]["params"]["name"] == "test"
 
 
 class TestDisambiguation:
@@ -434,9 +437,12 @@ class TestFrontmatterKeyWhitelist:
         for key in (
             "authors", "year", "doi", "keywords", "journal", "read_status",
             "methods", "dataset", "contribution", "conclusions", "relevance",
-            "context", "summary", "source_url", "source_file", "related",
+            "context", "summary", "related",
         ):
             assert key in fm, key
+        # Lote 5 D8: bot-owned keys are never taken from the LLM.
+        for key in ("source_url", "source_file"):
+            assert key not in fm, key
 
     def test_destination_and_task_fields_preserved(self) -> None:
         result = validate_llm_response({
