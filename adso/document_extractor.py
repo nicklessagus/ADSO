@@ -10,6 +10,7 @@ Texto: lectura directa de archivos planos (.md, .txt, .py, etc.).
 from __future__ import annotations
 
 import asyncio
+import codecs
 import logging
 import re
 from pathlib import Path
@@ -345,7 +346,10 @@ def extract_paper_sections(text: str, metadata: dict) -> dict:
 
     # Fallback keywords: buscar "Keywords:" inline
     if not keywords:
-        m = re.search(r"key\s*words?[:\u2014\-]\s*(.+?)(?=\n\n|\Z)", text[:6000], re.IGNORECASE)
+        # Hasta el fin de la línea: pymupdf casi nunca deja una línea en blanco
+        # antes del encabezado siguiente ("1 Introduction"), y exigirla dejaba
+        # las keywords vacías (B5 del lote 5).
+        m = re.search(r"key\s*words?[:\u2014\-]\s*(.+)$", text[:6000], re.IGNORECASE | re.MULTILINE)
         if m:
             keywords = m.group(1).strip()[:_SECTION_LIMITS["keywords"]]
 
@@ -572,9 +576,18 @@ async def extract_text_file(
 
     def _do_read() -> ExtractedText:
         raw = file_path.read_bytes()
+        # Un BOM declara el encoding: el Bloc de notas de Windows guarda
+        # "Unicode" como UTF-16, que por Latin-1 salía como "ÿþa\x00…" con NULs
+        # (B4 del lote 5). `utf-8-sig` además saca el BOM de UTF-8.
+        if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            bom_encoding = "utf-16"
+        elif raw.startswith(codecs.BOM_UTF8):
+            bom_encoding = "utf-8-sig"
+        else:
+            bom_encoding = None
         try:
-            content = raw.decode("utf-8")
-            encoding = "utf-8"
+            content = raw.decode(bom_encoding or "utf-8")
+            encoding = bom_encoding or "utf-8"
         except UnicodeDecodeError:
             # Latin-1 decodifica cualquier secuencia de bytes: es el fallback
             # que garantiza que un archivo raro no tumbe el flujo entero

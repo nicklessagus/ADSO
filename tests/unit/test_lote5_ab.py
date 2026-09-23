@@ -49,19 +49,15 @@ def _parse(text: str):
 
 
 class TestA1MorningIsTimeOfDay:
-    @_xfail("A1", "'a la mañana' matched as 'mañana' (tomorrow)")
     def test_viernes_a_la_manana_is_friday(self) -> None:
         assert _parse("reunión el viernes a la mañana") == "2026-09-25"
 
-    @_xfail("A1", "'a la mañana' matched as 'mañana' (tomorrow)")
     def test_hoy_a_la_manana_is_today(self) -> None:
         assert _parse("llamar hoy a la mañana") == "2026-09-23"
 
-    @_xfail("A1", "'por la mañana' matched as 'mañana' (tomorrow)")
     def test_por_la_manana_alone_gives_no_date(self) -> None:
         assert _parse("por la mañana revisar mails") is None
 
-    @_xfail("A1", "'de la mañana' matched as 'mañana' (tomorrow)")
     def test_de_la_manana_hour_keeps_the_weekday(self) -> None:
         assert _parse("el viernes a las 9 de la mañana") == "2026-09-25T09:00:00"
 
@@ -82,11 +78,9 @@ class TestA1MorningIsTimeOfDay:
 
 
 class TestA7PmMarkers:
-    @_xfail("A7", "'de la tarde' ignored, hour read as AM")
     def test_cinco_de_la_tarde_is_17h(self) -> None:
         assert _parse("el viernes a las 5 de la tarde") == "2026-09-25T17:00:00"
 
-    @_xfail("A7", "'de la noche' ignored, hour read as AM")
     def test_nueve_de_la_noche_is_21h(self) -> None:
         assert _parse("el viernes a las 9 de la noche") == "2026-09-25T21:00:00"
 
@@ -137,7 +131,6 @@ async def _run_arxiv(mock_context, make_update, fm: dict) -> dict:
 
 
 class TestA2ArxivResync:
-    @_xfail("A2", "arXiv forces reference but keeps task status/due_date/scheduled")
     async def test_llm_task_becomes_clean_reference(self, mock_context, make_update) -> None:
         fm = await _run_arxiv(
             mock_context,
@@ -188,7 +181,6 @@ async def _run_degraded(mock_context, make_update, text: str, **kwargs) -> dict:
 
 
 class TestA3DegradedKeepsChoice:
-    @_xfail("A3", "degraded branch returns before forced_type is applied")
     async def test_forced_task_survives_degraded(self, mock_context, make_update) -> None:
         fm = await _run_degraded(
             mock_context, make_update, "pagar la luz el viernes", forced_type="task"
@@ -261,7 +253,6 @@ async def _correct(mock_context, make_update, pending: dict, text: str) -> None:
 
 
 class TestA4PrefixNeverBecomesTitle:
-    @_xfail("A4", "task branch: unapplied prefix falls back to title")
     @pytest.mark.parametrize(
         "correction", ["fecha el finde", "tag hogar", "prioridad urgente"]
     )
@@ -327,7 +318,6 @@ def _edited_text(query) -> str:
 
 
 class TestA5StaleButtons:
-    @_xfail("A5", "stale [Cancelar] clears the current pending_note")
     async def test_stale_cancel_keeps_current_capture(
         self, mock_context, make_callback_query, tmp_path
     ) -> None:
@@ -342,7 +332,6 @@ class TestA5StaleButtons:
         assert tmp.exists()
         assert _edited_text(upd.callback_query) == STALE_TEXT
 
-    @_xfail("A5", "stale [Corregir] rebinds msg_id / activates correction")
     async def test_stale_note_correct_does_not_touch_pending(
         self, mock_context, make_callback_query, tmp_path
     ) -> None:
@@ -357,7 +346,6 @@ class TestA5StaleButtons:
         assert not pending.get("awaiting_correction")
         assert _edited_text(upd.callback_query) == STALE_TEXT
 
-    @_xfail("A5", "stale [Reubicar] changes the current destination")
     async def test_stale_dest_does_not_touch_pending(
         self, mock_context, make_callback_query, tmp_path
     ) -> None:
@@ -425,7 +413,6 @@ def _long_doc() -> tuple[str, str]:
 
 
 class TestA6DegradedDocumentFullText:
-    @_xfail("A6", "degraded body is built from the classify fragment")
     async def test_degraded_document_body_has_full_text(
         self, mock_context, make_callback_query
     ) -> None:
@@ -508,7 +495,6 @@ async def _dispatch(update, context) -> None:
 
 @patch("adso.security.ALLOWED_USER_IDS", {42})
 class TestB1SingleAnswer:
-    @_xfail("B1", "answer() up front + alert answer = two answers")
     async def test_stale_confirm_does_not_overwrite_saved_message(
         self, make_callback_query, mock_context
     ) -> None:
@@ -521,7 +507,6 @@ class TestB1SingleAnswer:
         assert _alert_text(calls[0]) == "No hay nota pendiente."
         assert _is_alert(calls[0])
 
-    @_xfail("B1", "OCR alert is a second answer and never shows")
     async def test_ocr_without_pending_image_alerts_once(
         self, make_callback_query, mock_context
     ) -> None:
@@ -533,7 +518,6 @@ class TestB1SingleAnswer:
         assert _alert_text(calls[0]) == "No hay imagen pendiente."
         assert _is_alert(calls[0])
 
-    @_xfail("B1", "_cb_dest alert is a second answer")
     async def test_dest_without_pending_note_alerts_once(
         self, make_callback_query, mock_context
     ) -> None:
@@ -545,7 +529,6 @@ class TestB1SingleAnswer:
         assert _alert_text(calls[0]) == "No hay nota pendiente."
         assert _is_alert(calls[0])
 
-    @_xfail("B1", "stale query-report alert is a second answer")
     async def test_expired_query_report_alerts_once(
         self, make_callback_query, mock_context
     ) -> None:
@@ -611,7 +594,6 @@ def _survives(user_data: dict, key: str, tmp: Path) -> bool:
 
 @patch("adso.security.ALLOWED_USER_IDS", {42})
 class TestB2StateSurvivesFailures:
-    @_xfail("B2", "pending_read_status popped before the unguarded status edit")
     async def test_read_status_edit_failure(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -628,7 +610,6 @@ class TestB2StateSurvivesFailures:
             await _dispatch(upd, mock_context)
         assert _survives(mock_context.user_data, "pending_read_status", pdf)
 
-    @_xfail("B2", "pending_duplicate_doc popped before the unguarded edit")
     async def test_doc_create_anyway_edit_failure(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -646,7 +627,6 @@ class TestB2StateSurvivesFailures:
             await _dispatch(upd, mock_context)
         assert _survives(mock_context.user_data, "pending_duplicate_doc", f)
 
-    @_xfail("B2", "pending_fallback_pdf popped before 'Clasificando...' edit")
     async def test_describe_with_caption_edit_failure(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -664,7 +644,6 @@ class TestB2StateSurvivesFailures:
             await _dispatch(upd, mock_context)
         assert _survives(mock_context.user_data, "pending_fallback_pdf", img)
 
-    @_xfail("B2", "pending_description popped before _classify_and_preview")
     async def test_description_classify_failure(
         self, make_update, mock_context, tmp_path
     ) -> None:
@@ -796,7 +775,6 @@ async def _paper_preview(make_callback_query, mock_context, tmp_path, title: str
 
 @patch("adso.security.ALLOWED_USER_IDS", {42})
 class TestB3PaperPreviewLength:
-    @_xfail("B3", "paper preview has no length cap")
     async def test_huge_title_fits(self, make_callback_query, mock_context, tmp_path) -> None:
         sent = await _paper_preview(
             make_callback_query, mock_context, tmp_path, "T" * 5000
@@ -817,7 +795,6 @@ class TestB3PaperPreviewLength:
 
 
 class TestB4TextEncodings:
-    @_xfail("B4", "UTF-16 falls back to latin-1: NULs and 'ÿþ'")
     async def test_utf16_with_bom(self, tmp_path) -> None:
         from adso.document_extractor import extract_text_file
 
@@ -828,7 +805,6 @@ class TestB4TextEncodings:
         assert "ÿþ" not in out
         assert "año de cursada" in out
 
-    @_xfail("B4", "UTF-8 BOM kept as \\ufeff")
     async def test_utf8_with_bom(self, tmp_path) -> None:
         from adso.document_extractor import extract_text_file
 
@@ -862,7 +838,6 @@ _PAPER_HEAD = "A Great Paper About Galaxies\nAbstract\nWe present results.\n"
 
 
 class TestB5InlineKeywords:
-    @_xfail("B5", "keywords regex requires a blank line after the line")
     def test_keywords_followed_by_heading(self) -> None:
         from adso.document_extractor import extract_paper_sections
 

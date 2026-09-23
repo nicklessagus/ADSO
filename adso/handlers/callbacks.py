@@ -118,19 +118,85 @@ async def _aviso_error_al_guardar(query, error: Exception) -> None:
     )
 
 
+class _AnswerOnceQuery:
+    """CallbackQuery que se contesta UNA sola vez (B1 del lote 5).
+
+    Telegram acepta un único `answerCallbackQuery` por query y rechaza el
+    segundo con "Query is too old". El ack incondicional al principio de
+    `handle_callback` convertía toda alerta posterior (`show_alert=True`) en una
+    segunda respuesta: la alerta nunca se veía, y en [Confirmar] el `BadRequest`
+    se leía como fallo de escritura ("Error al guardar" sobre una nota ya
+    guardada). Ahora el ack se difiere: la primera llamada a `answer` es la que
+    vale (con alerta, si la rama la quiere); si la rama edita el mensaje antes,
+    se manda un ack plano justo antes de editar, para no dejar el spinner
+    girando durante un flujo largo; y si nadie contestó, lo hace
+    `handle_callback` al final.
+    """
+
+    def __init__(self, query) -> None:
+        self._query = query
+        self.answered = False
+
+    async def answer(self, text=None, show_alert: bool = False, **kwargs):
+        if self.answered:
+            logger.debug("Callback ya contestado; se omite answer(%r).", text)
+            return False
+        self.answered = True
+        args = () if text is None else (text,)
+        if show_alert:
+            kwargs["show_alert"] = True
+        try:
+            return await self._query.answer(*args, **kwargs)
+        except BadRequest as e:
+            # "Query is too old": el ack llegó tarde a Telegram (lag de red). No
+            # abortar — el tap del usuario sigue siendo válido y debe procesarse.
+            logger.info("query.answer() falló (se procesa igual): %s", e)
+            return False
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._query, name)
+        if name.startswith(("edit_", "delete_")) and callable(attr):
+            async def _acked(*args, **kwargs):
+                await self.answer()
+                return await attr(*args, **kwargs)
+            return _acked
+        return attr
+
+
+class _UpdateWithQuery:
+    """Update que expone el `_AnswerOnceQuery` como `callback_query`.
+
+    Los handlers que reciben el update (y `command_guard`/`handle_clasificar`)
+    contestan por `update.callback_query`: tienen que pasar por el mismo proxy.
+    """
+
+    def __init__(self, update: Update, query: _AnswerOnceQuery) -> None:
+        self._update = update
+        self.callback_query = query
+
+    def __getattr__(self, name: str):
+        return getattr(self._update, name)
+
+
 @authorized
 async def handle_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """Handler de inline keyboard callbacks."""
-    query = update.callback_query
+    """Handler de inline keyboard callbacks.
+
+    Todo callback se contesta exactamente una vez (ver `_AnswerOnceQuery`).
+    """
+    query = _AnswerOnceQuery(update.callback_query)
+    update = _UpdateWithQuery(update, query)
     try:
+        await _dispatch_callback(update, query, context)
+    finally:
         await query.answer()
-    except BadRequest as e:
-        # "Query is too old": el ack llegó tarde a Telegram (lag de red). No
-        # abortar — el tap del usuario sigue siendo válido y debe procesarse.
-        logger.info("query.answer() falló (se procesa igual): %s", e)
+
+
+async def _dispatch_callback(update, query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Despacha el callback a su handler según `query.data`."""
     data = query.data
 
     # Borrar mensajes de bloqueo acumulados
@@ -243,7 +309,10 @@ async def handle_callback(
         await query.edit_message_text("Cancelado.")
 
     elif data == CB_DESCRIBE:
-        pdf_info = context.user_data.pop("pending_fallback_pdf", None)
+        # `get`: el estado se consume recién cuando el paso siguiente terminó; si
+        # la edición o la clasificación fallan, el temporal sigue referenciado y
+        # el botón se puede reintentar (B2 del lote 5).
+        pdf_info = context.user_data.get("pending_fallback_pdf")
         if pdf_info:
             caption = pdf_info.get("user_context")
             if caption:
@@ -268,8 +337,11 @@ async def handle_callback(
                     # descartarla. C6 de la auditoría 2026-08.
                     force_capture=True,
                 )
+                context.user_data.pop("pending_fallback_pdf", None)
             else:
-                context.user_data["pending_description"] = pdf_info
+                context.user_data["pending_description"] = context.user_data.pop(
+                    "pending_fallback_pdf"
+                )
                 await query.edit_message_text(
                     "Describir el contenido del archivo para clasificarlo:"
                 )
@@ -623,7 +695,10 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
     `[Crear igual]` en el duplicado de arXiv. Issue #53.
     """
     query = update.callback_query
-    pending = context.user_data.pop("pending_duplicate_doc", None)
+    # `get` y no `pop`: el estado se consume recién cuando el aviso se editó. Si
+    # la edición falla (red caída), el temporal y el botón siguen vivos para
+    # reintentar (B2 del lote 5).
+    pending = context.user_data.get("pending_duplicate_doc")
     if not pending:
         await query.answer("No hay archivo pendiente.", show_alert=True)
         return
@@ -640,6 +715,7 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
         f"Duplicado: <b>{_esc(filename)}</b>. Creando la nota igual.",
         parse_mode="HTML",
     )
+    context.user_data.pop("pending_duplicate_doc", None)
 
     transferred = False
     try:

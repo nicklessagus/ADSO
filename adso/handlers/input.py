@@ -232,7 +232,9 @@ async def handle_text(
 
     # Descripción de archivo binario
     if context.user_data.get("pending_description"):
-        pd = context.user_data.pop("pending_description")
+        # Se consume recién después de clasificar: si el scan o el LLM fallan, la
+        # descripción pendiente y su temporal siguen vivos (B2 del lote 5).
+        pd = context.user_data["pending_description"]
         resource_info = {
             "temp_path": pd["temp_path"],
             "filename": pd["original_filename"],
@@ -251,6 +253,7 @@ async def handle_text(
             # la auditoría 2026-08.
             force_capture=True,
         )
+        context.user_data.pop("pending_description", None)
         return
 
     # Campos faltantes de operación manage
@@ -825,7 +828,7 @@ async def _process_pdf_after_read_status(
     read_status: str,
 ) -> None:
     """Procesa un PDF después de que el usuario seleccionó read_status."""
-    pending = context.user_data.pop("pending_read_status", None)
+    pending = context.user_data.get("pending_read_status")
     if not pending:
         return
 
@@ -834,6 +837,9 @@ async def _process_pdf_after_read_status(
     filename = pending["original_filename"]
 
     await query.edit_message_text("Extrayendo texto del PDF...")
+    # Se consume recién con el aviso editado: si la edición falla, el temporal y
+    # el teclado siguen vivos para reintentar (B2 del lote 5).
+    context.user_data.pop("pending_read_status", None)
 
     try:
         text, pdf_meta = await extract_pdf(tmp_path)
@@ -888,6 +894,10 @@ async def _process_pdf_after_read_status(
         if is_paper:
             preview_parts = []
             title = paper_title or ""
+            # El título sale de la metadata del PDF, sin tope: uno enorme pasaba
+            # el límite de 4096 de Telegram y se perdía la extracción (B3).
+            if len(title) > 300:
+                title = title[:300] + "…"
             if title:
                 preview_parts.append(f"<b>{_esc(title)}</b>")
             if sections["abstract"]:

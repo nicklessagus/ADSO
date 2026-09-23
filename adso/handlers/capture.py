@@ -41,6 +41,7 @@ from adso.llm_client import (
     check_injection_risk,
     classify,
     extract_original_from_degraded,
+    make_degraded_body,
     make_degraded_result,
 )
 from adso.llm_schema import LLMResponseError, _to_kebab, _validate_capture_payload
@@ -342,6 +343,19 @@ async def _classify_and_preview(
             _stamp_new_note(fm, media_type)
             if user_context:
                 fm["user_context"] = user_context
+            # El body degradado se armó con `text`, que para un documento es el
+            # fragmento recortado para clasificar: con `original_text` el borrador
+            # tiene que llevar el texto completo (A6 del lote 5).
+            if preserve_body and original_text:
+                payload["body"] = make_degraded_body(original_text)
+            # La elección explícita de [Tarea] no depende del LLM: se respeta
+            # también en modo degradado, con la fecha del parser local (A3).
+            if forced_type:
+                fm["type"] = forced_type
+                if forced_type == "task":
+                    local_date = _parse_date_from_text(original_text or text)
+                    if local_date:
+                        fm["due_date"] = local_date
 
             context.user_data["pending_note"] = result
             result["payload"]["suggested_links"] = []
@@ -509,6 +523,9 @@ def _parse_date_from_text(text: str, now: Optional[datetime] = None) -> Optional
         # dejar que datetime.replace() lance ValueError más abajo.
         if 0 <= parsed_hour <= 23 and 0 <= parsed_minute <= 59:
             hour, minute, has_time = parsed_hour, parsed_minute, True
+    # "a las 5 de la tarde" / "9 de la noche": reloj de 12 horas (A7 del lote 5).
+    if has_time and hour < 12 and re.search(r'\bde la (tarde|noche)\b', t):
+        hour += 12
 
     target: Optional[datetime] = None
 
@@ -536,14 +553,17 @@ def _parse_date_from_text(text: str, now: Optional[datetime] = None) -> Optional
                 pass
 
     # Relativos (con límites de palabra para no matchear dentro de otras palabras)
+    # "a/por/de la mañana" es un momento del día, no "mañana" el día siguiente
+    # (A1 del lote 5): se quita antes de buscar los relativos.
+    t_rel = re.sub(r'\b(a|por|de)\s+la\s+ma[ñn]ana\b', ' ', t)
     if not target:
-        if re.search(r'\bpasado\s+ma[ñn]ana\b', t):
+        if re.search(r'\bpasado\s+ma[ñn]ana\b', t_rel):
             base = now + timedelta(days=2)
             target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        elif re.search(r'\bma[ñn]ana\b', t):
+        elif re.search(r'\bma[ñn]ana\b', t_rel):
             base = now + timedelta(days=1)
             target = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        elif re.search(r'\bhoy\b', t):
+        elif re.search(r'\bhoy\b', t_rel):
             target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
     # Día de semana
@@ -679,6 +699,9 @@ def _resync_status_with_type(fm: dict) -> None:
         fm.pop("scheduled", None)
 
 
+_TASK_PREFIX_RE = re.compile(r'^(fecha|agregar\s+tag|tag|prioridad|t[ií]tulo)\b')
+
+
 def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
     """Aplica correcciones a un frontmatter de tarea desde texto libre.
 
@@ -726,7 +749,10 @@ def _apply_task_corrections(fm: dict, text: str, text_lower: str) -> bool:
 
     # Sin fallback de título acá: el caller decide qué hacer cuando no cambió
     # nada (aplica el mismo guard de longitud/multilínea que la rama no-tarea).
-    return changed
+    # Un prefijo explícito que no se pudo aplicar ("fecha el finde", "prioridad
+    # urgente") igual cuenta como atendido: nunca debe terminar como título (A4
+    # del lote 5), igual que en la rama de notas.
+    return changed or bool(_TASK_PREFIX_RE.match(text_lower))
 
 
 async def _handle_text_correction(
@@ -959,16 +985,9 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
     # botones sin estado detrás. G14 de docs/audit-2026-07-31.md.
     # `msg_id` puede faltar si el estado viene de una versión anterior del bot:
     # en ese caso se acepta, para no bloquear una captura ya hecha.
-    esperado = pending.get("msg_id")
-    actual = getattr(getattr(query, "message", None), "message_id", None)
-    if esperado is not None and actual is not None and esperado != actual:
-        logger.info(
-            "Confirmar desde un preview viejo (msg %s, vigente %s) — ignorado.",
-            actual, esperado,
-        )
-        await query.edit_message_text(
-            "Este preview ya no está vigente. Usar los botones del último mensaje."
-        )
+    if _is_stale_preview(pending, query):
+        logger.info("Confirmar desde un preview viejo — ignorado.")
+        await query.edit_message_text(_STALE_PREVIEW_TEXT)
         return
 
     payload = pending["payload"]
@@ -1108,8 +1127,27 @@ async def _cb_confirm(query: Any, context: ContextTypes.DEFAULT_TYPE, vault_path
             logger.warning("Error calculando notas pendientes tras confirmar: %s", e)
 
 
+_STALE_PREVIEW_TEXT = "Este preview ya no está vigente. Usar los botones del último mensaje."
+
+
+def _is_stale_preview(pending: Optional[dict], query: Any) -> bool:
+    """True si el callback viene de un preview anterior al vigente.
+
+    Guard G14 de docs/audit-2026-07-31.md, compartido por [Confirmar],
+    [Cancelar], [Corregir] y [Reubicar] (A5 del lote 5): un botón de un preview
+    viejo no puede tocar la captura vigente. `msg_id` puede faltar si el estado
+    viene de una versión anterior del bot: en ese caso se acepta.
+    """
+    esperado = (pending or {}).get("msg_id")
+    actual = getattr(getattr(query, "message", None), "message_id", None)
+    return esperado is not None and actual is not None and esperado != actual
+
+
 async def _cb_cancel(query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancela la operación pendiente."""
+    if _is_stale_preview(context.user_data.get("pending_note"), query):
+        await query.edit_message_text(_STALE_PREVIEW_TEXT)
+        return
     _cleanup_pending(context)
     await query.edit_message_text("Cancelado.")
 
@@ -1129,6 +1167,9 @@ async def _cb_note_correct(query: Any, context: ContextTypes.DEFAULT_TYPE) -> No
     pending = context.user_data.get("pending_note")
     if not pending:
         await query.answer("No hay nota pendiente.", show_alert=True)
+        return
+    if _is_stale_preview(pending, query):
+        await query.edit_message_text(_STALE_PREVIEW_TEXT)
         return
     pending["awaiting_correction"] = True
     pending["msg_id"] = query.message.message_id
@@ -1150,6 +1191,9 @@ async def _cb_dest(
         # Aviso efímero, no edición: con doble tap este mensaje ya es el preview
         # vigente y editarlo le borra los botones. C8 de la auditoría 2026-08.
         await query.answer("No hay nota pendiente.", show_alert=True)
+        return
+    if _is_stale_preview(pending, query):
+        await query.edit_message_text(_STALE_PREVIEW_TEXT)
         return
 
     fm = pending["payload"]["frontmatter"]
@@ -1434,6 +1478,9 @@ async def _classify_and_preview_arxiv(
     # Sobreescribir con datos literales de la API (tienen prioridad absoluta sobre el LLM)
     fm["title"] = metadata["title"] or fm.get("title", "")
     fm["type"] = "reference"
+    # Si el LLM lo propuso como tarea, el status y las fechas de tarea no
+    # sobreviven al cambio de tipo (A2 del lote 5).
+    _resync_status_with_type(fm)
     fm["source_url"] = url
     if metadata.get("authors"):
         fm["authors"] = metadata["authors"]
