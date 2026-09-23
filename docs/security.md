@@ -340,25 +340,23 @@ Los patrones:
 # español y XML tag-breaking. El chequeo es case-insensitive.
 INJECTION_PATTERNS = [
     # English
-    r"ignore (previous|all|your|the) instructions",
-    r"disregard (previous|all|your|the) instructions",
+    r"(ignore|disregard) (?:all |any |your |the |previous |prior )*instructions",
     r"forget (what|everything|all)",
     r"you are now (a|an|the)",
     r"new instructions\s*:",
-    r"system prompt",
-    r"act as (a|an|the)",
-    r"from now on",
+    r"(show|reveal|print|output|tell|give|display|expose|leak) (?:me |us )?(?:your |the |its )?system prompt",
+    r"(?<!can )(?<!could )(?<!may )(?<!might )(?<!will )(?<!would )(?<!should )(?<!must )act as (a|an|the)",
+    r"from now on,? you\b",
     # XML/tag injection — intentos de cerrar etiquetas propias (<input>, <user_context>)
     r"</?(input|system|instructions?|user_context|prompt)>",
-    # Variantes en español — tuteo y voseo/tildes ("ignorá", "olvidá", "actuá")
-    r"ignor[aá] (las|tus|todas las|las anteriores|tus anteriores) instrucciones",
-    r"olvid[aá] (las instrucciones|todo|el contexto|lo anterior|tus instrucciones)",
+    # Variantes en español — tuteo y voseo/tildes ("ignorá", "olvidá", "olvidate", "actuá")
+    r"ignor[aá] (?:(?:las|tus|todas las|las anteriores|tus anteriores) instrucciones|lo anterior)",
+    r"olvid[aá](?:te)? (?:de )?(?:las |tus |todas las |todo |el )*(?:instrucciones(?: anteriores)?|contexto|lo anterior|todo)",
     r"ahora (eres|actúa como|actua como|actuá como|sos)",
     r"actúa como (un|una|el|la)",
     r"actua como (un|una|el|la)",
     r"actuá como (un|una|el|la)",
     r"nuevas instrucciones\s*:",
-    r"a partir de ahora",
     r"eres (un|una|ahora)",
     r"pretende (ser|que eres)",
 ]
@@ -372,12 +370,26 @@ INJECTION_PATTERNS = [
 > Una alternativa suelta (`r"actuá"`) hubiera llenado de falsos positivos el
 > preview de cualquier nota en el registro habitual del usuario.
 
+> **Lote 5 (D6/D7/F7): el ajuste va en las dos direcciones, con el mismo criterio
+> de frase.** Más recall: `ignore`/`disregard` aceptan cualquier cadena de
+> calificadores antes de `instructions` —"ignore **all previous** instructions",
+> la forma más común, no se detectaba porque el patrón admitía una sola palabra—,
+> y se agregaron el reflexivo "olvidate de las instrucciones anteriores" e
+> "ignorá lo anterior". Menos falsos positivos: `a partir de ahora` a secas se
+> borró (lo cubre `ahora (eres|sos…)` cuando sí es una orden), `from now on` exige
+> `you` detrás, `system prompt` exige un verbo que pida exponerlo, y `act as` no
+> dispara detrás de un modal ("the network *can act as* a filter", frecuente en
+> abstracts). Un falso positivo no es gratis: desvía el texto tipeado al flujo de
+> "patrón sospechoso" y **descarta entero** el caption que acompaña una imagen.
+> Casos en `tests/unit/test_lote5_cd.py`.
+
 El parámetro `user_context` (caption del usuario enviado junto a archivos) se chequea y se sanitiza antes de la interpolación, **en ese orden**: `build_user_message` (`llm_client.py`) corre `check_injection_risk()` sobre el texto **tal como lo mandó el usuario** y recién después elimina los ángulos `<>`. El orden es el punto: corriendo la limpieza primero, un intento con tags embebidos (`</user_context><system>`) dejaba de matchear el patrón *porque la limpieza lo había desarmado*, y el texto seguía llegando perfectamente legible al modelo. Detectar y proteger son dos pasos distintos. Si el chequeo da positivo, el `user_context` se descarta entero (con log a `warning`) pero el contenido principal se procesa normalmente.
 
 Si se detecta un patrón en el contenido principal, la respuesta depende del camino:
 
 - **Texto tipeado por el usuario** (`handle_text` en `input.py`): el bot corta el flujo y pregunta con botones `[Cancelar]` `[Tarea]` `[Nota]` — nada se clasifica hasta que el usuario decida.
 - **Contenido extraído** (PDF, OCR, Vision, documento, metadata de arXiv): el chequeo corre recién con la respuesta del LLM en la mano, así que no puede evitar la llamada. El bot clasifica igual y antepone `_INJECTION_PREVIEW_WARNING` al preview (ver §8). No bloquea: la nota igual necesita `[Confirmar]`.
+- **`/clasificar`** sobre una nota degradada del Inbox (que puede traer texto de PDF/OCR/Vision): mismo aviso y mismo flag `injection_risk` en el preview que se confirma. Hasta el lote 5 (F2) este camino no corría el chequeo.
 
 No es una defensa perfecta (se puede evadir), pero cubre ataques comunes y genera visibilidad. La defensa principal sigue siendo el constrained output schema de Gemini (capa 3).
 
@@ -515,10 +527,10 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `frontmatter` | object | Solo las claves declaradas en `_GEMINI_RESPONSE_SCHEMA` (las del ejemplo) — el constrained decoding no puede emitir otras, y las que llegue a emitir el fallback de Groq las filtra `ALLOWED_FRONTMATTER_KEYS` (§4b). Campos no aplicables van en `null`. `date_created`, `date_modified`, `source` y `media_type` los setea el bot, no el LLM. Las claves legítimas que **no** están en el schema del LLM (`relevance`, `context`, `contribution`, `dataset`, `related`, `source_file`, `source_url`…) las escribe el bot o el pipeline de extracción, no el modelo |
+| `frontmatter` | object | Solo las claves declaradas en `_GEMINI_RESPONSE_SCHEMA` (las del ejemplo) — el constrained decoding no puede emitir otras, y las que llegue a emitir el fallback de Groq las filtra `ALLOWED_FRONTMATTER_KEYS` (§4b). Campos no aplicables van en `null`. `date_created`, `date_modified`, `source`, `media_type`, `source_file` y `source_url` los setea el bot: si el LLM los propone (el fallback de Groq no tiene schema, o una inyección los mete), `_validate_capture_payload` los descarta (`_BOT_OWNED_FRONTMATTER_KEYS`, lote 5 D8) — antes sobrevivían la whitelist y un `setdefault` posterior respetaba el valor del modelo. El resto de las claves legítimas que no están en el schema (`relevance`, `context`, `contribution`, `dataset`, `related`…) pasan la whitelist si llegan por Groq; en el camino normal las escribe el bot o el pipeline de extracción |
 | `frontmatter.type` | string enum | `"reference"`, `"task"`, `"idea"` — nunca `"project-index"` ni `"area-index"` (esos los genera el bot) |
 | `frontmatter.project` | string \| null | Nombre del proyecto destino. Si no coincide con uno existente (strip + casefold), `canonicalize_destination` lo descarta y la nota va al Inbox — el LLM no puede crear carpetas (#71) |
-| `frontmatter.section` | string \| null | Sección dentro del proyecto. Solo si hay proyecto |
+| `frontmatter.section` | string \| null | Sección dentro del proyecto. Sobrevive solo si esa subcarpeta ya existe bajo el proyecto (strip + casefold, se reemplaza por el nombre de disco); si no, se descarta (lote 5, D1) |
 | `frontmatter.area` | string \| null | Área destino. Solo si no hay proyecto |
 | `frontmatter.priority` | string \| null | `low`, `medium`, `high` — solo para `task` e `idea` |
 | `body` | string | Cuerpo de la nota en Markdown (sin frontmatter). El LLM genera wikilinks `[[...]]` donde sea relevante |
@@ -622,7 +634,7 @@ El bot busca la nota, muestra el contenido actual, aplica los cambios y muestra 
 | `convert_idea_to_project` | `note`, `project_name`, `description` | no | ❌ *(no implementado)* |
 | `reclassify_inbox` | — | no | ❌ *(no implementado como operación de gestión — existe solo como cron, `jobs.reclassify_inbox`; tampoco está en la lista de operaciones del prompt)* |
 
-**`description` se valida por contenido, no por presencia.** El schema la declara `nullable`, así que `description: ""` o `null` tenían la clave y pasaban el chequeo anterior: el `_index.md` nacía con la descripción vacía. Hoy `_validate_manage_payload` hace `str(params.get("description") or "").strip()` y lanza `LLMResponseError` si queda vacío. No es cosmético — la `description` es el scope que `_get_existing_items` le pasa al prompt por cada destino, así que un proyecto sin ella se le presenta al LLM sin contexto y degrada el routing de **todas** las capturas siguientes.
+**`description` no la exige el validador: la pide el flujo.** El schema la declara `nullable`, y desde el lote 5 (D2) `_validate_manage_payload` solo exige un `name` no vacío. Rechazarla ahí mandaba toda creación por texto libre a modo degradado cuando el modelo no traía descripción —gastando el presupuesto de reintentos— y terminaba proponiendo el texto crudo del usuario como nombre. La garantía de que el `_index.md` nunca nazca sin descripción la da el guard de `manage.py` (G10): `description` `None`, vacía o en blanco hace que el bot se la pida al usuario antes de crear nada. No es cosmético — la `description` es el scope que `_get_existing_items` le pasa al prompt por cada destino, así que un proyecto sin ella se le presenta al LLM sin contexto y degrada el routing de **todas** las capturas siguientes.
 
 Los nombres de params son los declarados en `_GEMINI_RESPONSE_SCHEMA["...params"].properties` y en el prompt de `llm_client.build_system_prompt`. Una clave que no esté en `properties` **no la puede emitir el constrained decoding** — agregar una operación implica tocar el schema, el prompt y la validación juntos.
 

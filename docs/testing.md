@@ -92,6 +92,9 @@ tests/
 │   ├── test_simplification_2026_09.py # contratos de los helpers compartidos de la pasada de simplificación + tests de #64 y #65
 │   ├── test_audit_2026_09_vault.py    # auditoría 2026-09-18, lado vault: ventana de gracia de las escrituras del bot (#66), status por defecto (#69), vault inexistente (#70), destino canonizado (#71), 03-Resources fuera del índice (#72)
 │   ├── test_audit_2026_09_handlers.py # auditoría 2026-09-18, lado handlers: guard de red (#67), zona horaria de los crons (#68), temporal huérfano (#73), escapado del preview, línea de tiempos ante excepción, estado real del watcher, fila de búsqueda con keywords de gestión
+│   ├── test_lote5_ab.py               # lote 5 (auditoría 2026-09-22), captura y medios: fechas "a la mañana"/"de la tarde" (A1/A7), tipo en modo degradado (A3), prefijos de corrección (A4), botones de previews viejos (A5), un solo answer por callback (B1), estado ante fallos (B2), encoding y keywords (B4/B5)
+│   ├── test_lote5_cd.py               # lote 5, vault y LLM: notas no-UTF8 (C1), copias de conflicto (C2), prefijo de fecha del archivo (C4), links y tags (C5-C8), sección del LLM (D1), gestión sin descripción (D2), normalización del payload (D3-D5, D8), patrones de inyección (D6/D7/F7)
+│   ├── test_lote5_ef.py               # lote 5, índice, reportes y bootstrap: metadata del reindex (E1), `vault.obsidian_name` (E2), fechas de reportes (E3), identidad por carpeta (E4), chat del reporte (E5), comandos editados (F1), aviso en /clasificar (F2), duplicados de proyecto (F3), bools de config (F4), watchdog (F5), /reset (F6)
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -510,7 +513,7 @@ def make_callback_query():
 | `transcriber.py` | ≥ 70% | Wrapper de faster-whisper, poco código propio. |
 | `document_extractor.py` | ≥ 90% | Parsea el input **menos confiable** del sistema: PDFs de terceros. Un paper malicioso llega acá antes que a cualquier otra cosa. |
 
-**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **91%** sobre 5360 statements (2026-09-18).
+**Target global (CI): ≥ 70%** sobre todo `adso/` menos el bootstrap. Actual: **91%** sobre 5494 statements (2026-09-22).
 
 `adso/handlers/*` **sí se mide** desde 2026-08-13. Antes estaba en el `omit` de
 `pyproject.toml` con el argumento de que era territorio e2e — pero los e2e
@@ -520,19 +523,19 @@ del proyecto. Con los handlers omitidos, **un test nuevo sobre un handler no
 movía el gate**, que es justo donde la regla test-first más hace falta. Detalle
 en I3 de `docs/audit-2026-07-31.md`.
 
-Cobertura actual de handlers (el terreno a ganar): `input.py` 94%, `query.py`
-94%, `commands.py` 91%, `capture.py` 89%, `callbacks.py` 87%, `manage.py` 81%,
-`jobs.py` 80%, `reports.py` 77%.
+Cobertura actual de handlers (el terreno a ganar, 2026-09-22): `input.py` 94%,
+`query.py` 94%, `capture.py` 91%, `commands.py` 91%, `callbacks.py` 90%,
+`manage.py` 89%, `jobs.py` 80%, `reports.py` 79%.
 
 Módulos que hoy **no llegan** a su target de la tabla de arriba: `transcriber.py`
 56% (≥ 70% — las líneas 77-101 son la carga real del modelo, que ningún test
-ejercita), `vault_writer.py` 88% (≥ 90%) y `security.py` 96% (target 100%). El
+ejercita), `vault_writer.py` 89% (≥ 90%) y `security.py` 96% (target 100%). El
 resto está en target o por encima: `constants.py`/`knowledge_query.py`/
 `logging_setup.py` 100%, `config.py` 99%, `keyboards.py` 98%,
-`document_extractor.py` 97%, `llm_schema.py` 96%, `arxiv_client.py` 95%,
-`bot_utils.py` 95%, `vault_cache.py` 95%, `embeddings.py` 92%, `reporters.py`
+`document_extractor.py` 97%, `vault_cache.py` 97%, `bot_utils.py` 96%,
+`llm_schema.py` 96%, `arxiv_client.py` 95%, `embeddings.py` 92%, `reporters.py`
 92%, `vault_watcher.py` 91%, `watchdog.py` 91%, `llm_client.py` 90%,
-`vault_search.py` 89%, `tasks_client.py` 85% (dejó atrás su ≥ 80%).
+`vault_search.py` 90%, `tasks_client.py` 85% (dejó atrás su ≥ 80%).
 
 ### Qué NO se mide en CI
 
@@ -598,7 +601,7 @@ ese es el momento de excluirlo por marker (y de actualizar esta sección).
 
 ## Guards globales (`conftest.py`)
 
-Dos fixtures **autouse**, o sea que se aplican a los 1334 tests sin que ninguno
+Dos fixtures **autouse**, o sea que se aplican a los 1545 tests sin que ninguno
 las pida.
 
 `_sin_red` parchea `socket.socket.connect` y `socket.create_connection`, y lanza
@@ -771,5 +774,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~42 segundos en la RPi4 de desarrollo (~80 con `--cov`), y es exactamente lo que corre CI. Son 1334 tests: 1147 unit, 44 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~52 segundos en la RPi4 de desarrollo (~92 con `--cov`), y es exactamente lo que corre CI. Son 1545 tests: 1358 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

@@ -9,6 +9,56 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ---
 
+## [1.10.0] — 2026-09-22
+
+Segunda auditoría en cuatro días (`docs/audit-2026-09-22.md`), sobre código que no
+había cambiado: se repitió porque el modelo auditor era más nuevo, y encontró 39
+bugs que la del 18 no vio. Seis auditores en paralelo, uno por grupo de módulos,
+con dos tareas cada uno: bugs —cada hallazgo con un reproductor que falla en la
+aserción, re-ejecutado después por el árbitro— y deriva de la documentación de su
+grupo. Los fixes salieron como lote 5 con el ciclo spec → tests → implementación
+de `CLAUDE.md`: tres agentes de tests escribieron 135 reproductores
+`xfail(strict=True)` contra la spec, y tres implementadores en worktrees separados
+los hicieron pasar sin tocar ningún test.
+
+Suite: 1334 → **1545 tests**. Cobertura **91%**.
+
+### Fixed
+
+- **Una nota que no es UTF-8 ya no deja al bot sin capturar** (C1). `parse_cached` solo atrapaba `OSError`: un `.md` en Latin-1 en cualquier carpeta hacía fallar el scan de tags que corre antes de cada clasificación, y ninguna captura funcionaba, ni siquiera en modo degradado
+- **"ignore all previous instructions" se detecta como inyección** (F7), y el detector tiene menos falsos positivos: "a partir de ahora", "from now on", "the network can act as a filter" o un paper que menciona el system prompt ya no desvían el texto ni descartan el caption de una imagen (D6). Se agregó el voseo reflexivo "olvidate de las instrucciones anteriores" (D7)
+- **`/clasificar` avisa si el contenido tiene patrones de inyección** (F2), igual que la captura interactiva
+- **Los links `obsidian://` de los reportes y de `/buscar` abren la nota** (E2). Usaban el nombre de la carpeta del vault, que dentro de Docker es `vault`. Nueva clave `vault.obsidian_name`
+- **El reindex nocturno actualiza la metadata cuando solo cambió el frontmatter** (E1): un `status` movido a mano en Obsidian llega a `/buscar` sin gastar un embedding. Al confirmar, se indexa el frontmatter tal como quedó escrito en disco
+- **Un doble tap en [Confirmar] ya no dice "Error al guardar" sobre una nota guardada, y las alertas de los botones se ven** (B1). Cada callback se contesta exactamente una vez; antes toda alerta era una segunda respuesta que Telegram rechazaba
+- **Las copias `.sync-conflict-*` de Syncthing no cuentan como notas** (C2): el cron podía reclasificar la copia, borrarla y pushear la tarea dos veces a Google Tasks
+- **Editar un `/comando` ya enviado no lo vuelve a ejecutar** (F1); antes reventaba con "error inesperado"
+- **"el viernes a la mañana" es el viernes**, no mañana (A1); "a las 5 de la tarde" son las 17:00, no las 05:00 (A7)
+- **Con Gemini caído, [Tarea] se guarda como tarea** (A3), con la fecha si el texto la trae; un documento de texto degradado se guarda completo y no recortado (A6)
+- **En modo corrección, "fecha el finde" o "tag hogar" ya no renombran la tarea** cuando no se pueden aplicar (A4)
+- **Los botones de un preview viejo no tocan la captura actual** (A5): un [Cancelar] viejo descartaba la captura vigente y su texto de OCR/audio
+- **Una nota de arXiv que el modelo propuso como tarea queda como `reference` con `status: active`** (A2), no en `pending-classification`
+- **"crear proyecto tesis" al lado de `Tesis/` responde "ya existe"** (F3) en vez de crear una segunda carpeta
+- **Los reportes ven las fechas con hora sin segundos** (E3), el formato del widget de fecha y hora de Obsidian, y se mandan al chat que los pidió (E5)
+- **Estado que sobrevive a un fallo de red** (B2): cuatro flujos descartaban el estado y el temporal antes de un paso que podía fallar
+- **PDFs y archivos de texto:** el preview de un paper con un título enorme ya no supera el límite de Telegram (B3); los `.txt` en UTF-16 ya no quedan como mojibake (B4); las keywords en línea seguidas de un encabezado se extraen (B5)
+- **Vault:** el prefijo de fecha del nombre de archivo se valida, así que un `date_created` editado a mano no escapa del vault ni rompe la escritura (C4); una nota homónima en `.trash/` ya no impide limpiar un wikilink roto (C5); un adjunto referenciado como `![](<ruta con espacios>)` ya no se archiva como huérfano (C6); los links se resuelven sin distinguir mayúsculas, como en Obsidian (C7); `[[nota#encabezado]]`, los fragmentos de URL y `#47` ya no son tags (C8)
+- **Payload del LLM:** `due_date: 20260101` se guarda `2026-01-01` (D3); un `None` dentro de `authors`/`keywords` ya no se vuelve `"None"` (D4); `mode: "Capture"` ya no degrada la respuesta (D5); `source_file`, `source_url` y el resto de las claves que escribe el bot nunca se toman del LLM (D8)
+- **Config y proceso:** `enabled: "false"` entre comillas es un error de config en vez de dejar el interruptor encendido (F4); el watchdog ya no mata al bot en el primer chequeo por el heartbeat viejo de la corrida anterior (F5); `/reset` limpia también el estado de `/buscar` (F6)
+
+### Changed
+
+- **La sección que propone el LLM ya no crea carpetas** (D1): sobrevive solo si la subcarpeta ya existe bajo el proyecto. `classify()` recibe `vault_path=`
+- **Crear un proyecto sin descripción ya no degrada** (D2): el validador exige solo el nombre, y la descripción la pide el bot (G10), como ya hacía cuando faltaba
+- **La identidad de un proyecto o área es el nombre de su carpeta** (E4): el campo `project:`/`area:` del `_index.md` ya no lo pisa; del índice solo se lee la descripción. Un proyecto renombrado en Obsidian sigue funcionando en `/reporte` y como destino
+- **Nueva clave `vault.obsidian_name`** (E2), opcional
+
+### Documentation
+
+- Las 11 derivas de la auditoría corregidas: Groq como fallback solo ante cuota diaria o respuesta inválida, operaciones de gestión que no llegan a confirmación, `.gitignore` del vault con `*.tmp` y `.stversions/`, citas de línea viejas reemplazadas por símbolos, entre otras
+
+---
+
 ## [1.9.0] — 2026-09-18
 
 Auditoría completa de código contra documentación (`docs/audit-2026-09-18.md`) y

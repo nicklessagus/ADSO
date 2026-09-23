@@ -62,6 +62,7 @@ vault:
     - "05-Archive"
     - ".obsidian"
     - ".trash"
+  obsidian_name: "ADSO"       # opcional — nombre del vault en Obsidian, para los links obsidian://
 
 # ─── Transcripción (Fase 3) ────────────────────────────────────────────────
 whisper:
@@ -174,6 +175,17 @@ silencio hasta que vuelva a haber tokens.
 
 ---
 
+## Nombre del vault en los links `obsidian://`
+
+Los informes de `/reporte`, `/reporte_full` y `/buscar` llevan links
+`obsidian://open?vault=<nombre>&file=<ruta>`. Obsidian resuelve `<nombre>` contra
+las bóvedas que tiene registradas **en el dispositivo que abre el link**, con el
+nombre que muestra su selector de bóvedas. Sin `vault.obsidian_name` el bot usa
+el nombre de la carpeta del vault tal como la ve el proceso, y dentro de Docker
+esa carpeta es el mount `/vault`: todos los links salían `vault=vault` y no abrían
+nada (lote 5, E2). Setear la clave con el nombre que aparece en Obsidian
+(`"ADSO"`, por ejemplo). Vacía o en blanco equivale a no setearla.
+
 ## Claves desconocidas
 
 Una clave que el loader no reconoce **no aborta el arranque**: se ignora y se
@@ -201,14 +213,17 @@ vez de `projects:` sembraba un vault vacío sin decir nada.
 
 ### Tipos que se validan al arrancar (#45)
 
-El loader falla ruidosamente ante una config mal escrita. Tres casos que hasta el
-lote 3 no fallaban y **cambiaban el comportamiento en silencio**:
+El loader falla ruidosamente ante una config mal escrita. Casos que no fallaban
+(los tres primeros hasta el lote 3, los dos últimos hasta el lote 5) y
+**cambiaban el comportamiento en silencio**:
 
 | Clave | Formas válidas | Qué pasaba antes |
 |---|---|---|
 | `vault.exclude_dirs` | lista de strings | Un string suelto cargaba sin error, pero el chequeo de exclusión pasaba a ser un test de substring: dejaba de excluir lo que debía y excluía cualquier carpeta cuyo nombre fuera substring de ese string |
 | `weekly_report.sections` | mapa `{nombre: bool}`, lista de nombres, o ausente | Un tipo externo (string, número) se asignaba verbatim y llegaba así a los reporters. El caso caro es el mapa con valor no-bool: `papers_queue: "false"` es un string, y un string no vacío es truthy — la sección quedaba **encendida justo cuando el usuario la apagó** |
 | `vault_seed.*` | `projects`, `areas` | Ver arriba |
+| `vault.obsidian_name` | string, vacío o ausente | (Clave nueva del lote 5, E2.) Un número o una lista es `ConfigError` en vez de terminar formateado adentro de cada link |
+| `reindex.enabled`, `backup.enabled`, `watcher.debug`, `tasks.debug`, `weekly_report.enabled` | `true`/`false` sin comillas | Mismo defecto que `weekly_report.sections`: `enabled: "false"` cargaba como el string `"false"`, que es truthy — el interruptor quedaba **encendido** justo cuando el usuario lo apagó (lote 5, F4) |
 
 Todos lanzan `ConfigError` desde `load_settings`, con la clave nombrada en el
 mensaje. Nada de validadores diferidos: si el bot arranca, la config es válida.

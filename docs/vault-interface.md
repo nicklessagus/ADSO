@@ -528,8 +528,10 @@ async def find_by_tag(
 1. Normaliza `tag`: elimina `#` inicial si está presente, convierte a lowercase.
 2. Busca el tag en dos fuentes por nota:
    - Frontmatter `tags: [tag1, tag2]`
-   - Tags inline `#tag` en el body (regex `(?<!\[)#([\w/-]+)`)
+   - Tags inline `#tag` en el body (regex `(?:^|(?<=\s))#([\w/-]+)`, multilínea): el `#` tiene que abrir la línea o venir después de un espacio, y se descartan los que son solo dígitos. Es la regla de Obsidian — `[[nota#encabezado]]`, el fragmento de una URL (`…/doc#intro`), `palabra#tag` y `#47` no son tags (lote 5, C8)
 3. Si `hierarchical=True`: un tag `metodo` también matchea `metodo/cnn`, `metodo/transformer`, etc. (el valor buscado es prefijo del tag real).
+
+Las copias de conflicto de Syncthing (`constants.SYNC_CONFLICT_RE`) nunca entran a `_scan_vault` (lote 5, C2), y una nota que no es UTF-8 válido se saltea con un `warning` en vez de cortar el scan (`parse_cached`, C1).
 
 **No acepta `exclude_dirs`** — ni esta ni `find_by_property()`. Ambas llaman a `_scan_vault(vault_path)` sin argumento, así que siempre usan `DEFAULT_EXCLUDE_DIRS` más `_ALWAYS_EXCLUDE`; no hay forma de ampliar ni de reducir la exclusión desde el caller.
 
@@ -1055,15 +1057,18 @@ Para construir links clicables en los informes `.md`. El helper real es `_obsidi
 # adso/reporters.py
 import urllib.parse
 
-def _obsidian_link(vault_path: Path, note_path: Path) -> str:
+def _obsidian_link(
+    vault_path: Path, note_path: Path, vault_name: Optional[str] = None
+) -> str:
     """Genera un link obsidian:// para abrir una nota directamente."""
-    vault_name = urllib.parse.quote(vault_path.name)
+    name = (vault_name or "").strip() or vault_path.name
+    name_encoded = urllib.parse.quote(name)
     rel = str(note_path.relative_to(vault_path).with_suffix(""))
     file_encoded = urllib.parse.quote(rel, safe="/")
-    return f"obsidian://open?vault={vault_name}&file={file_encoded}"
+    return f"obsidian://open?vault={name_encoded}&file={file_encoded}"
 ```
 
-El nombre del vault sale de `vault_path.name`; el `file` es el path relativo al vault **sin** la extensión `.md`.
+El nombre del vault sale de `vault_name` —que los callers llenan con `settings.vault.obsidian_name`— y, si viene vacío, de `vault_path.name`. El fallback solo sirve fuera de Docker: adentro del contenedor la carpeta es el mount `/vault`, y los links salían `vault=vault` (lote 5, E2; ver `docs/configuration.md`). El `file` es el path relativo al vault **sin** la extensión `.md`.
 
 Encoding: los separadores `/` se **preservan** (`safe="/"`) — Obsidian los acepta tal cual en `file=`. Lo que sí se encodea son espacios (`%20`), `#` (`%23`), `^` (`%5E`) y demás caracteres reservados.
 

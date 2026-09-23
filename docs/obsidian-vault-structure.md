@@ -176,7 +176,7 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 - **Nota índice de proyecto:** `_index.md` (prefijo `_` para que aparezca primero)
 - Sin caracteres especiales en nombres de archivo
 
-> **La convención de carpetas es una convención, no una regla que el código imponga.** El nombre del proyecto o del área va **crudo** al disco: `build_index_note` lo guarda tal cual en `project`/`area` (es lo que direcciona la carpeta, y kebab-casearlo apuntaría a un directorio inexistente) y `_resolve_dest_dir` concatena ese valor al path. Lo único que se aplica es `_safe_component`, que bloquea path traversal (`..`, separadores, dots iniciales) — no normaliza mayúsculas, espacios ni acentos. Crear un proyecto llamado `Tesis Doctoral` produce `01-Projects/Tesis Doctoral/`. Lo que sí se normaliza es el **tag** del `_index.md`, que va en kebab-case (`_to_kebab`), para no partir en dos el vocabulario que el prompt reutiliza (#58). La convención de nombres de **archivo** sí está garantizada: la produce `python-slugify` en `_make_filename`.
+> **La convención de carpetas es una convención, no una regla que el código imponga.** El nombre del proyecto o del área va **crudo** al disco: `build_index_note` lo guarda tal cual en `project`/`area` (es lo que direcciona la carpeta, y kebab-casearlo apuntaría a un directorio inexistente) y `_resolve_dest_dir` concatena ese valor al path. Lo único que se aplica es `_safe_component`, que bloquea path traversal (`..`, separadores, dots iniciales) — no normaliza mayúsculas, espacios ni acentos. Crear un proyecto llamado `Tesis Doctoral` produce `01-Projects/Tesis Doctoral/`. Lo que sí se normaliza es el **tag** del `_index.md`, que va en kebab-case (`_to_kebab`), para no partir en dos el vocabulario que el prompt reutiliza (#58). La convención de nombres de **archivo** sí está garantizada: el slug lo produce `python-slugify` en `_make_filename`, y el prefijo de fecha solo se toma de `date_created` si sus primeros 10 caracteres son `YYYY-MM-DD` — si no (un `date_created` editado a mano como `22/09/2026`, o `../../x`), se usa la fecha de hoy (lote 5, C4).
 
 ---
 
@@ -207,7 +207,7 @@ En todos los casos: filesystem, ChromaDB y wikilinks quedan consistentes — no 
 Syncthing genera archivos `.sync-conflict-*` cuando un archivo se modifica simultáneamente en dos dispositivos (ej: el usuario edita en Obsidian mientras ADSO actualiza la misma nota).
 
 Política:
-- ADSO **nunca resuelve conflictos automáticamente** — solo notifica al usuario por Telegram
+- ADSO **nunca resuelve conflictos automáticamente** — solo notifica al usuario por Telegram. Las copias `.sync-conflict-*` tampoco cuentan como notas para ningún scan (reportes, tags, `/clasificar`, el cron de reclasificación): hasta el lote 5 (C2) el cron podía reclasificar la copia y borrarla, resolviendo el conflicto por su cuenta
 - `VaultWatcher` (`watchdog`) corre en background y detecta archivos `.sync-conflict-*` en tiempo real via `inotify`
 - Al detectar uno, envía un mensaje por Telegram indicando el archivo y la carpeta afectada
 - El usuario resuelve manualmente y borra el archivo de conflicto

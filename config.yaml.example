@@ -37,9 +37,11 @@ vault:
   # obsidian_name: "ADSO"      # opcional — nombre del vault registrado en Obsidian.
                                # Los links `obsidian://` de los reportes y de /buscar
                                # usan este nombre si está seteado; si no, el nombre
-                               # del directorio del vault (default de siempre). Hace
-                               # falta solo si el vault se abrió en Obsidian con un
-                               # nombre distinto al de la carpeta.
+                               # del directorio del vault. En Docker ese directorio
+                               # es `/vault`, así que sin esta clave los links dicen
+                               # `vault=vault` y no abren nada: poner el nombre que
+                               # muestra el selector de bóvedas de Obsidian. Vacío o
+                               # en blanco cuenta como no seteado.
 
 # ─── Siembra inicial de proyectos y áreas (opcional) ────────────────────────
 # Solo se aplica en el primer arranque; después se gestionan via el bot.
