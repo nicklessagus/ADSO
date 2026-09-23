@@ -190,14 +190,17 @@ class TestA3DegradedKeepsChoice:
         assert not fm.get("project")
         assert not fm.get("area")
 
-    @_xfail("A3", "degraded branch never runs the local date parser")
     async def test_forced_task_degraded_gets_local_due_date(
         self, mock_context, make_update
     ) -> None:
         fm = await _run_degraded(
             mock_context, make_update, "pagar la luz mañana", forced_type="task"
         )
-        tomorrow = (datetime.now(TZ) + timedelta(days=1)).date().isoformat()
+        # Same zone the parser uses (user_tz), not a hard-coded one: in tests
+        # TZ is unset, so a fixed zone disagrees near midnight (arbiter fix).
+        from adso.bot_utils import user_tz
+
+        tomorrow = (datetime.now(user_tz()) + timedelta(days=1)).date().isoformat()
         assert str(fm.get("due_date", "")).startswith(tomorrow)
 
     # counter-cases

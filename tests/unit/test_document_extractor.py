@@ -86,7 +86,8 @@ class TestExtractTextFile:
     @pytest.mark.asyncio
     async def test_handles_encoding_errors(self, tmp_path: Path) -> None:
         f = tmp_path / "binary.txt"
-        f.write_bytes(b"\xff\xfe\x00\x01 texto")
+        # Invalid UTF-8 without a BOM: "\xff\xfe" would be a valid UTF-16 BOM (lote 5 B4).
+        f.write_bytes(b"\x81\x8d\x00\x01 texto")
 
         result = await extract_text_file(f)
         assert "texto" in result

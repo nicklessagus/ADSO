@@ -1106,7 +1106,7 @@ class TestAvisoDeInyeccionPersiste:
 
         await _preview_con_inyeccion(mock_context, tmp_path, _TEXTO_CON_INYECCION)
 
-        upd = _cb_update(CB_DEST_INBOX, msg_id=502)
+        upd = _cb_update(CB_DEST_INBOX, msg_id=500)  # the live preview (lote 5 A5)
         await callbacks.handle_callback(upd, mock_context)
 
         textos = _rendered_texts(upd.callback_query.edit_message_text)
@@ -1130,7 +1130,7 @@ class TestAvisoDeInyeccionPersiste:
         update = await _preview_con_inyeccion(
             mock_context, tmp_path, "Un resumen perfectamente inocente del documento."
         )
-        upd = _cb_update(CB_DEST_INBOX, msg_id=502)
+        upd = _cb_update(CB_DEST_INBOX, msg_id=500)  # the live preview (lote 5 A5)
         await callbacks.handle_callback(upd, mock_context)
 
         textos = _rendered_texts(
