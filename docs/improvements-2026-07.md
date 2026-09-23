@@ -32,7 +32,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.1 `GitBackup.flush()` al shutdown
 
-- **Estado:** confirmado · **Impacto:** alto · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado · **Impacto:** alto · **Esfuerzo:** bajo · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** el backup con debounce (`vault_writer.py`, `GitBackup`) programa el commit con
   `call_later` y no existe `stop()`/`flush()`. `_post_shutdown` (`bot.py:123-127`) solo detiene el
   watcher. Una nota escrita dentro de la ventana de `backup.debounce_seconds` (default 30s) antes
@@ -44,7 +44,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.2 Watcher: manejar `on_moved`
 
-- **Estado:** confirmado (no existe el método en `_VaultEventHandler`) · **Impacto:** alto · **Esfuerzo:** bajo-medio · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado (no existe el método en `_VaultEventHandler`) · **Impacto:** alto · **Esfuerzo:** bajo-medio · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** `vault_watcher.py:44-93` implementa `on_created`/`on_modified`/`on_deleted` pero no
   `on_moved`. Inotify reporta renames como `FileMovedEvent`. Consecuencias:
   1. **Syncthing aplica cambios remotos escribiendo un temporal y renombrando** → las ediciones
@@ -60,7 +60,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.3 `bot_written_paths` nunca se drena (leak + guard inefectivo)
 
-- **Estado:** confirmado (consecuencia directa de 1.2) · **Impacto:** medio-alto · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado (consecuencia directa de 1.2) · **Impacto:** medio-alto · **Esfuerzo:** bajo · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** cada `create_note` agrega el path al set (`capture.py`, `jobs.py`); el único consumidor
   que hace `discard()` es `_reindex_external_note` (`bot.py:62-65`), que corre en `on_modified`/
   `on_created`. Pero el bot escribe con `os.replace` → el evento real es un move (no manejado) →
@@ -72,7 +72,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.4 Temporales de escritura atómica con sufijo `.md`
 
-- **Estado:** confirmado (`vault_writer.py:101` — `prefix=".adso-tmp-", suffix=path.suffix`) · **Impacto:** medio · **Esfuerzo:** trivial · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado (`vault_writer.py:101` — `prefix=".adso-tmp-", suffix=path.suffix`) · **Impacto:** medio · **Esfuerzo:** trivial · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** el temp `.adso-tmp-XXXX.md` está en un directorio observado → dispara `on_created`
   espurio; `_reindex_external_note` procesa un archivo ya renombrado (trabajo perdido, notificación
   espuria en modo debug). También puede colarse en un `git add -A` concurrente.
@@ -82,7 +82,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.5 `_get_existing_items` bloquea el event loop en cada captura
 
-- **Estado:** confirmado (`bot_utils.py:193-224`) · **Impacto:** medio-alto en RPi4 · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado (`bot_utils.py:193-224`) · **Impacto:** medio-alto en RPi4 · **Esfuerzo:** bajo · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** es `async def` pero hace `iterdir()` + `parse_cached()` de cada `_index.md`
   síncronamente, sin `asyncio.to_thread`. Es el único escaneo del vault que no usa `to_thread`
   (todo `vault_search.py` sí lo hace). Corre en **todo** flujo de clasificación, antes de cada
@@ -93,7 +93,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.6 `/status` hace `rglob` completo bloqueante y saltea el caché
 
-- **Estado:** plausible (`commands.py:108,117`) · **Impacto:** medio · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** resuelto — era plausible (`commands.py:108,117`) · **Impacto:** medio · **Esfuerzo:** bajo · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** `len(list(vault_path.rglob("*.md")))` corre en el event loop; el loop del inbox usa
   `read_note` por archivo en vez de `parse_cached`.
 - **Propuesta:** mover el conteo a `to_thread` y reutilizar `_scan_vault`/`parse_cached`.
@@ -101,7 +101,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.7 Eliminar código muerto y parámetros fantasma
 
-- **Estado:** confirmado · **Impacto:** bajo (funcional) / medio (mantenibilidad) · **Esfuerzo:** trivial · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado · **Impacto:** bajo (funcional) / medio (mantenibilidad) · **Esfuerzo:** trivial · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema y propuesta:**
   - `_handle_capture` y `_handle_degraded` (`capture.py:266-341`): ~76 líneas sin ningún caller
     (verificado con grep). Borrarlas.
@@ -115,7 +115,7 @@ Orden sugerido de bloques (mayor a menor ratio impacto/costo): 1 → 2 → 3 →
 
 ### 1.8 Corregir drift de CLAUDE.md y docs
 
-- **Estado:** confirmado · **Impacto:** medio (confianza en docs) · **Esfuerzo:** trivial · **Decisión:** pendiente
+- **Estado:** resuelto — era confirmado · **Impacto:** medio (confianza en docs) · **Esfuerzo:** trivial · **Decisión:** ✅ implementado (2026-07-08; verificado contra el código 2026-09-22)
 - **Problema:** dos afirmaciones del CLAUDE.md no reflejan el código:
   1. `handlers/jobs.py` listado con cron de "reporte semanal" — no existe tal job (ver 2.2).
   2. "Google Calendar y Tasks: sync cada 30 min... bidireccional (gana el último cambio)" — solo
@@ -439,7 +439,7 @@ corregir la doc (1.8).
 
 ### 5.1 Persistir `gtask_id` en el frontmatter
 
-- **Estado:** confirmado, sigue pendiente (re-verificado 2026-09-18: `create_task` devuelve el id y `push_task_to_google` solo lo loguea — `capture.py:877-896`) · **Impacto:** alto (prerequisito de todo sync) · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** confirmado, sigue pendiente (re-verificado 2026-09-18: `create_task` devuelve el id y `_push_task_safe` (`capture.py`) solo lo loguea) · **Impacto:** alto (prerequisito de todo sync) · **Esfuerzo:** bajo · **Decisión:** pendiente
 - **Propuesta:** guardar `gtask_id` (y opcionalmente el list id) en el frontmatter de la nota task
   al confirmar. Sin esto no hay update/complete/delete posible ni idempotencia ante retries.
 

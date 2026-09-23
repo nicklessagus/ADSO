@@ -517,7 +517,7 @@ El LLM siempre responde con un JSON que tiene un wrapper común y un payload que
 |---|---|---|
 | `frontmatter` | object | Solo las claves declaradas en `_GEMINI_RESPONSE_SCHEMA` (las del ejemplo) — el constrained decoding no puede emitir otras, y las que llegue a emitir el fallback de Groq las filtra `ALLOWED_FRONTMATTER_KEYS` (§4b). Campos no aplicables van en `null`. `date_created`, `date_modified`, `source` y `media_type` los setea el bot, no el LLM. Las claves legítimas que **no** están en el schema del LLM (`relevance`, `context`, `contribution`, `dataset`, `related`, `source_file`, `source_url`…) las escribe el bot o el pipeline de extracción, no el modelo |
 | `frontmatter.type` | string enum | `"reference"`, `"task"`, `"idea"` — nunca `"project-index"` ni `"area-index"` (esos los genera el bot) |
-| `frontmatter.project` | string \| null | Nombre del proyecto destino. Si no existe, el bot pide confirmación para crearlo |
+| `frontmatter.project` | string \| null | Nombre del proyecto destino. Si no coincide con uno existente (strip + casefold), `canonicalize_destination` lo descarta y la nota va al Inbox — el LLM no puede crear carpetas (#71) |
 | `frontmatter.section` | string \| null | Sección dentro del proyecto. Solo si hay proyecto |
 | `frontmatter.area` | string \| null | Área destino. Solo si no hay proyecto |
 | `frontmatter.priority` | string \| null | `low`, `medium`, `high` — solo para `task` e `idea` |

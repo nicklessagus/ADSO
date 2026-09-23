@@ -466,10 +466,10 @@ En todos los casos se guardan **dos archivos** en el vault:
 |---|---|---|
 | **Texto plano** | las 27 extensiones de `TEXT_EXTENSIONS` (`.md`, `.txt`, `.py`, `.csv`, `.json`, `.yaml`, `.tex`, `.bib`, `.sh`, `.sql`, …) | Lectura directa del contenido |
 | **PDF** | `.pdf` | `pymupdf`: texto + metadata (título, autor, páginas) |
-| **Imagen** | `.jpg`, `.png`, `.webp` | OCR local o Gemini Vision (remoto) — el usuario elige con botones |
+| **Imagen** | `.jpg`, `.png`, `.webp` | Mandada como **foto**: OCR local o Gemini Vision (remoto), el usuario elige con botones. Mandada como **archivo**: descripción manual, sin OCR ni Vision (ver más arriba) |
 | **Binario / otro** | `.docx`, `.xlsx`, ejecutables | No disponible — solo descripción del usuario |
 
-Para imágenes, el usuario elige explícitamente entre OCR y modelo de visión al momento de la extracción — no es una configuración global. OCR es más preciso para texto impreso; el modelo de visión da descripciones semánticas más ricas para diagramas, fotos y capturas de pantalla.
+Para imágenes mandadas como foto, el usuario elige explícitamente entre OCR y modelo de visión al momento de la extracción — no es una configuración global. OCR es más preciso para texto impreso; el modelo de visión da descripciones semánticas más ricas para diagramas, fotos y capturas de pantalla.
 
 #### PDFs sin texto extraíble
 

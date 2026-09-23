@@ -26,8 +26,8 @@ Development is organized in phases. Each phase extends the previous one.
 - `tasks.debug` config flag for verbose push logging
 
 **Tasks (pending):**
-- Reading tasks from any list. `tasks_client.py` calls `tasklists().list()` only to find or create the `ADSO` list (`tasks_client.py:113-125`); there is no `tasks().list()`, no update and no delete.
-- Persist `gtask_id` in the note frontmatter — prerequisite for anything below (`create_task` returns the id and the caller drops it, `capture.py:877-896`)
+- Reading tasks from any list. `tasks_client.py` calls `tasklists().list()` only to find or create the `ADSO` list (`TasksClient._get_list_id` in `tasks_client.py`); there is no `tasks().list()`, no update and no delete.
+- Persist `gtask_id` in the note frontmatter — prerequisite for anything below (`create_task` returns the id and the caller drops it: `_push_task_safe` in `capture.py` only logs it)
 - Bidirectional sync: vault `status: done` ↔ Google Tasks completed
 - Re-auth flow for expired OAuth tokens (7-day limit in Testing mode) — today re-auth is manual, via `scripts/auth_google_tasks.py`
 

@@ -278,8 +278,10 @@ generación. Prompt (patrón de `reporters._llm_synthesis`, endurecido):
 
 ## Presentación (reusa el formato ya definido)
 
-Formato de cada ítem (idéntico inline y en informe): **título · estado/área ·
-snippet · link `obsidian://`** (helper `reporters._note_block`).
+Formato de cada ítem: **título · estado/área · % de similitud · snippet**. El
+link `obsidian://` va **solo en el informe `.md`**, no en el inline. Ninguna de
+las dos vistas usa `reporters._note_block`: el inline lo arma `query.py` y el
+informe `_build_report` (también en `query.py`), con `reporters._obsidian_link`.
 
 **Dos secciones separadas** (decisión de diseño — honesto con la procedencia):
 

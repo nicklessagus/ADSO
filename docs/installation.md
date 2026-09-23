@@ -45,7 +45,7 @@ Para obtener tu `TELEGRAM_ALLOWED_USER_ID`:
 
 ### API key de Groq (fallback LLM)
 
-Groq se usa como LLM de respaldo cuando Gemini no responde. Sin esta key el bot igual funciona, pero no tiene fallback ante fallos de la API primaria.
+Groq se usa como LLM de respaldo en dos casos: cuando se agota la cuota **diaria** de Gemini y cuando Gemini devuelve una respuesta inválida. Los errores de red, los timeouts y los 429 por RPM no pasan por Groq: agotados los reintentos, la captura va a modo degradado. Sin esta key el bot igual funciona, pero esos dos casos también caen a modo degradado.
 
 1. Registrate en [console.groq.com](https://console.groq.com)
 2. API Keys → "Create API Key"
@@ -218,8 +218,12 @@ cat > /ruta/al/vault/.gitignore <<'EOF'
 # Papelera de Obsidian
 .trash/
 
-# Conflictos de Syncthing
+# Conflictos y versionado de Syncthing
 *.sync-conflict-*
+.stversions/
+
+# Temporales de la escritura atómica de ADSO (.adso-tmp-*.tmp)
+*.tmp
 
 # Sistema
 .DS_Store

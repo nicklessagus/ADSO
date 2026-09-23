@@ -73,7 +73,7 @@ Toda propuesta de implementación debe evaluarse contra las restricciones de CPU
 | Bot | `python-telegram-bot[job-queue]` v21+ (async) |
 | LLM primario | Gemini API — modelo `gemini-3.5-flash-lite` (línea flash-lite estable; free tier jul-2026: ~1.000-1.500 RPD, 15 RPM, 250k TPM — Google ya no publica el cap del free tier en la doc, verificarlo por proyecto en AI Studio). Clasificación y síntesis de reportes |
 | LLM de Vision | `gemini-3.6-flash` (`GEMINI_VISION_MODEL`) — solo OCR/descripción de imágenes y PDFs escaneados. Constante separada porque la quota del free tier es **por modelo**: rasterizar un PDF de 20 páginas no debe consumir RPD del bucket de la captura diaria |
-| LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). |
+| LLM fallback | Groq — `llama-3.1-8b-instant` (sin schema constrained; post-validado). Solo ante cuota diaria de Gemini agotada o respuesta inválida; red/timeout/429 por RPM van a modo degradado |
 | Embeddings | Gemini Embedding API (remoto, no local) |
 | Vector DB | ChromaDB embebido |
 | Transcripción | `faster-whisper` (modelo `tiny` o `base`) |
@@ -96,7 +96,7 @@ adso/
 │   ├── input.py            # Entrada de mensajes: texto, audio, imagen, documento, links
 │   ├── capture.py          # Flujo de captura: clasificación, preview, corrección, confirmación
 │   ├── callbacks.py        # Callbacks de inline keyboards
-│   ├── manage.py           # Gestión: solo crear proyecto, área y sección (el resto de VALID_OPERATIONS se responde "todavía no está disponible")
+│   ├── manage.py           # Gestión: solo crear proyecto y área (único productor de la operación: `_cb_intent_create`; las ramas de sección/archivar/borrar son código muerto)
 │   ├── query.py            # /buscar — retrieval semántico (Fase 7.0)
 │   ├── reports.py          # /reporte y /reporte_full — flujo interactivo
 │   └── jobs.py             # Crons: reclassify_inbox, reindex nocturno, heartbeat (el reporte semanal está configurado pero aún sin job — ver docs/improvements-2026-07.md §2.2)
@@ -300,7 +300,7 @@ El LLM clasifica cada mensaje en uno de estos modos antes de procesarlo:
 | **Captura** | Texto, audio, link, imagen, PDF con contenido a guardar |
 | **Consulta** | "qué tengo sobre X", "mostrá relaciones", "todo pendiente" |
 | **Edición** | "actualizá la nota X" (solo `reference` e `idea`) |
-| **Gestión** | Crear proyecto, crear área, crear sección. Archivar, renombrar, borrar y convertir idea → proyecto están en `VALID_OPERATIONS` (el LLM puede proponerlos y el bot pide confirmación), pero `_cb_manage_confirm` los responde con `"Operación 'X' todavía no está disponible."` — no hay código que los ejecute. `build_intent_keyboard` solo ofrece `[Crear proyecto]` y `[Crear área]` |
+| **Gestión** | Crear proyecto y crear área, vía `build_intent_keyboard` (`[Crear proyecto]` `[Crear área]`). El único productor de `pending_operation` es `_cb_intent_create`, que solo arma `create_project`/`create_area`; un `mode=manage` del LLM en una captura no llega a ninguna confirmación. Crear sección, archivar, renombrar, borrar y convertir idea → proyecto figuran en `VALID_OPERATIONS`, pero ninguna llega a confirmarse: sus ramas en `_handle_manage`/`_cb_manage_confirm` (`manage.py`) son código muerto |
 
 No hay modo Agenda — el agendamiento se maneja via tasks con `due_date`, que se pushea al campo de fecha límite de Google Tasks. `scheduled` **no crea ningún evento**: no existe `calendar_client.py`, y su único uso es el texto de horario que va al campo `notes` de la task. El evento en un calendario `ADSO` es diseño de Fase 6. Las tasks no se editan via ADSO.
 
@@ -577,7 +577,8 @@ TELEGRAM_ALLOWED_USER_ID   # acepta uno o varios IDs separados por comas. La aut
                            # ignoran con warning; si no queda ninguno, security.py aborta el
                            # arranque en vez de dejar el bot inaccesible en silencio.
 GEMINI_API_KEY
-GROQ_API_KEY               # fallback LLM cuando Gemini no responde; sin esta key el bot funciona pero sin fallback
+GROQ_API_KEY               # fallback LLM solo ante cuota diaria de Gemini agotada o respuesta inválida
+                           # (red/timeout/429 RPM van a modo degradado); sin esta key el bot funciona sin fallback
 
 # Opcionales
 LOG_LEVEL                  # DEBUG | INFO | WARNING | ERROR — default: INFO
@@ -664,7 +665,7 @@ Políticas e invariantes que restringen cómo se escribe código nuevo. Los post
 
 - **Caché de parsing del vault (`vault_cache.py`):** todas las funciones de scan de `vault_search.py` leen con `parse_cached`, que cachea el resultado del parse keyed por `(mtime_ns, size)`. Correctness-preserving: cualquier modificación de una nota cambia el mtime y la entrada se invalida sola en el siguiente `stat()` — no hay acoplamiento con `VaultWatcher` ni ventana de staleness. El costo dominante de un scan en la RPi4 (SD lenta) es el `read()+parse`, no el `rglob`. Una captura corre `get_all_tags` dos veces (escanea todo el vault); con el caché el segundo scan baja ~69% (medido: 427→132 ms con 500 notas en RPi4). LRU acotado a 2000 entradas. El frontmatter devuelto es siempre una copia fresca para que mutaciones del caller no corrompan el caché. Métricas (`entries`, `hit_ratio`) expuestas en `/status`.
 
-- **Escrituras atómicas al vault (`_atomic_write_sync` en `vault_writer.py`):** toda escritura de `.md` (`create_note`, `append_to_note`, `set_property`, limpieza de wikilinks) usa temp en el mismo directorio + `fsync` + `os.replace`. Un crash a mitad de escritura (OOM en RPi4, `docker stop`) nunca deja la nota truncada. Regla de oro: sin pérdida de datos. El temporal usa sufijo `.tmp` (no `.md`): además de ser hidden (`.adso-tmp-*`), el sufijo distinto de `.md` hace que el filtro del `VaultWatcher` lo saltee aunque el `_is_hidden` fallara, y evita que un `git add -A` concurrente lo commitee.
+- **Escrituras atómicas al vault (`_atomic_write_sync` en `vault_writer.py`):** toda escritura de `.md` (`create_note`, `append_to_note`, `set_property`, limpieza de wikilinks) usa temp en el mismo directorio + `fsync` + `os.replace`. Un crash a mitad de escritura (OOM en RPi4, `docker stop`) nunca deja la nota truncada. Regla de oro: sin pérdida de datos. El temporal usa sufijo `.tmp` (no `.md`): además de ser hidden (`.adso-tmp-*`), el sufijo distinto de `.md` hace que el filtro del `VaultWatcher` lo saltee aunque el `_is_hidden` fallara, Lo que evita que un `git add -A` concurrente lo commitee **no** es el sufijo sino el `*.tmp` del `.gitignore` del vault (el backup stagea todo): la plantilla de `docs/installation.md` lo incluye.
 
 - **Sanitización de path (`_safe_component` en `vault_writer.py`):** `project`/`area`/`section` del frontmatter (LLM) y `name`/`project` de operaciones de gestión (`manage.py`) se sanitizan contra path traversal (`..`, separadores, dots iniciales) antes de concatenarse al path del vault. Valor inválido → se descarta (cae a Inbox / se rechaza la operación). Además `create_note` verifica `dest_dir.resolve().is_relative_to(vault_path)` como defensa en profundidad. Complementa el `Path(...).name` que ya protegía `save_resource`.
 

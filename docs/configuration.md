@@ -31,7 +31,7 @@ Separación de responsabilidades:
 # ─── RAG — Consultas en lenguaje natural ────────────────────────────────────
 rag:
   similarity_threshold: 0.75  # umbral mínimo para incluir una nota en el contexto
-  max_results: 10             # máximo de notas a pasar al LLM como contexto
+  max_results: 10             # máximo de notas a retornar por consulta (/buscar no llama al LLM)
   max_expansion_depth: 2      # profundidad máxima en expansión desde nodo (1 = solo directas, 2 = un grado más, etc.)
 
 # ─── Links automáticos ──────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ rate_limit:
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
   degraded_retry_minutes: 30  # intervalo del cron que reintenta clasificar inbox pendiente
-  disambiguation_threshold: 0.7  # confidence del LLM por debajo de este valor → bot pregunta con botones en vez de asumir
+  disambiguation_threshold: 0.7  # sin efecto hoy: classify calcula needs_disambiguation con él, pero nadie lo lee (ver "Campos declarados pero aún sin consumir")
 
 # ─── Reporte semanal ─────────────────────────────────────────────────────────
 weekly_report:
@@ -264,6 +264,7 @@ Se cargan y se validan, pero **ningún módulo los lee todavía** (I1 de
 | `weekly_report.*` (sección entera, incl. `stale_idea_days`) | job del reporte semanal (`improvements-2026-07.md` §2.2) |
 | `sync.interval_minutes` | cron de reconciliación con Google Tasks (§5.2) |
 | `rag.max_expansion_depth` | expansión desde nodo (Fase 7 completa) |
+| `llm.disambiguation_threshold` | teclado de desambiguación de intención (Fase 7). Los callers se lo pasan a `classify`, que calcula `needs_disambiguation`, pero ese flag no lo lee nadie |
 
 Las claves `llm.max_web_tokens` y `llm.max_paper_tokens` **se eliminaron**
 (2026-09): el truncado real son constantes por caracteres en

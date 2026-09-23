@@ -132,8 +132,8 @@ Scope:
 > **Ya implementado de este bloque (2026, fuera del orden de este plan):** el push
 > de `due_date` a Google Tasks. Al confirmar una tarea, `create_task` la inserta en
 > la lista `ADSO` con el `due` armado desde `due_date`
-> (`tasks_client.py:130-183`). Es **unidireccional**: el `task_id` que devuelve la
-> API se descarta (`capture.py:877-896`), así que no hay update, complete ni delete.
+> (`TasksClient.create_task` en `tasks_client.py`). Es **unidireccional**: el `task_id` que devuelve la
+> API se descarta (`_push_task_safe` en `capture.py` solo lo loguea), así que no hay update, complete ni delete.
 
 Scope pendiente:
 - Casos tipo B: tarea específica por nombre en lenguaje natural

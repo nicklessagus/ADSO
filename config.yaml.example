@@ -82,7 +82,7 @@ backup:
 # ─── LLM ────────────────────────────────────────────────────────────────────
 llm:
   degraded_retry_minutes: 30     # intervalo del cron que reintenta clasificar inbox pendiente
-  disambiguation_threshold: 0.7  # confianza mínima del LLM para no preguntar con botones
+  disambiguation_threshold: 0.7  # sin efecto todavía: la desambiguación con botones es diseño de Fase 7
 
 # ─── Google Tasks ────────────────────────────────────────────────────────────
 tasks:
