@@ -460,6 +460,12 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
             "pending_arxiv", "pending_duplicate_doc",
             "manage_missing_fields", "pending_report",
             "block_msg_ids", "clasificar_inbox_path",
+            # /buscar y /reporte_full: sin estas tres, `/reset` a mitad de una
+            # consulta dejaba el `[Generar informe .md]` viejo apuntando a un
+            # `pending_query` fantasma, y `report_full` seguía marcando los
+            # reportes siguientes como full aunque el usuario haya pedido
+            # /reset (LOTE5 F6).
+            "pending_query", "pending_query_msg_id", "report_full",
         )
 
     for key in keys:
@@ -483,42 +489,40 @@ def _cleanup_pending(context: ContextTypes.DEFAULT_TYPE, *keys: str) -> None:
 
 async def _get_existing_items(vault_path: Path) -> tuple[list[dict], list[dict]]:
     """Obtiene proyectos y áreas existentes leyendo los subdirectorios de
-    01-Projects/ y 02-Areas/ directamente. Si existe un _index.md con
-    campo project:/area: y description:, los usa; si no, usa el nombre del
-    directorio como nombre y descripción vacía.
+    01-Projects/ y 02-Areas/ directamente. El nombre es siempre el del
+    directorio — es lo que direcciona la carpeta en disco (reportes, ruteo) —
+    y la descripción viene de `_index.md` si existe (vacía si no).
+
+    Antes el campo `project:`/`area:` del `_index.md` pisaba el nombre del
+    directorio: un proyecto renombrado en Obsidian (carpeta nueva, índice
+    viejo) quedaba con dos identidades distintas — `/reporte` y
+    `canonicalize_destination` buscaban por el nombre del índice y no
+    encontraban las notas de la carpeta real (LOTE5 E4).
 
     El escaneo (iterdir + parse de cada _index.md) es I/O bloqueante y corre en
     todo flujo de clasificación antes de cada classify(); se ejecuta en un thread
     para no congelar el event loop en la RPi4 con SD lenta.
     """
     def _scan() -> tuple[list[dict], list[dict]]:
-        def _read_index(dir_path: Path, field: str) -> dict:
+        def _read_index(dir_path: Path) -> dict:
             index = dir_path / "_index.md"
-            name = dir_path.name
             description = ""
             note = parse_cached(index)
             if note is not None:
-                # `.get(field, name)` solo aplica el default si la clave FALTA:
-                # un `_index.md` con `project:` a secas (YAML lo parsea como
-                # None, trivial de producir editando el índice desde Obsidian)
-                # dejaba `name=None`, y `item_token(None)` reventaba al construir
-                # el selector — el proyecto entero quedaba inalcanzable como
-                # destino. C10 de la auditoría 2026-08.
-                name = str(note.frontmatter.get(field) or "").strip() or dir_path.name
                 description = str(note.frontmatter.get("description") or "").strip()
-            return {"name": name, "description": description}
+            return {"name": dir_path.name, "description": description}
 
         projects_dir = vault_path / "01-Projects"
         areas_dir = vault_path / "02-Areas"
 
         projects = [
-            _read_index(d, "project")
+            _read_index(d)
             for d in sorted(projects_dir.iterdir())
             if d.is_dir()
         ] if projects_dir.exists() else []
 
         areas = [
-            _read_index(d, "area")
+            _read_index(d)
             for d in sorted(areas_dir.iterdir())
             if d.is_dir()
         ] if areas_dir.exists() else []

@@ -21,12 +21,13 @@ from adso.bot_utils import (
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL, Settings
 from adso.constants import CB_CLASIFICAR_INBOX
 from adso.handlers.capture import (
+    _INJECTION_PREVIEW_WARNING,
     _redirect_unimplemented_mode,
     _remember_preview_msg,
     inherit_inbox_frontmatter,
 )
 from adso.keyboards import build_capture_keyboard, build_preview
-from adso.llm_client import classify, extract_original_from_degraded
+from adso.llm_client import check_injection_risk, classify, extract_original_from_degraded
 from adso import vault_cache
 from adso.security import authorized
 from adso.vault_search import find_by_property
@@ -318,6 +319,17 @@ async def handle_clasificar(
     context.user_data["clasificar_inbox_path"] = str(ref.path)
 
     preview_text = "♻️ <b>Nota de Inbox</b>\n\n" + build_preview(new_fm, body, [])
+
+    # Mismo aviso que la captura interactiva (`_classify_and_preview`): el
+    # contenido de una nota de Inbox también puede traer un patrón de posible
+    # inyección (viene de un PDF/OCR/documento igual que en captura), y
+    # /clasificar lo mostraba sin avisar — el usuario confirmaba a ciegas
+    # (LOTE5 F2). No bloquea, solo pide escrutinio antes de confirmar.
+    if check_injection_risk(body):
+        logger.warning("Patrón de inyección detectado en nota de Inbox a clasificar")
+        result["injection_risk"] = True
+        preview_text = _INJECTION_PREVIEW_WARNING + preview_text
+
     keyboard = build_capture_keyboard()
 
     sent = await reply(preview_text, reply_markup=keyboard, parse_mode="HTML")

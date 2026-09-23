@@ -16,6 +16,7 @@ from typing import Any, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from adso import vault_cache
 from adso.bot_utils import (
     Stopwatch,
     _cleanup_pending,
@@ -828,8 +829,19 @@ async def _index_note_safe(
     Args:
         embedding: Vector precomputado de `body` (ej: el del preview de captura,
             si el body no cambió al confirmar). Si None, index_note lo computa.
+
+    La metadata se construye con el frontmatter tal como quedó ESCRITO EN DISCO,
+    no con `fm` (el dict del payload pre-confirmación): `create_note` copia ese
+    dict antes de aplicarle sus defaults (`status` ausente → default por tipo,
+    entre otros), así que `fm` acá podía traer `status: None` mientras la nota
+    ya tenía el default aplicado — ChromaDB quedaba indexando un status que la
+    nota nunca tuvo (LOTE5 E1). Si la relectura falla (archivo mockeado en
+    tests, I/O), se cae al `fm` recibido.
     """
     try:
+        written = await asyncio.to_thread(vault_cache.parse_cached, note_path)
+        if written is not None:
+            fm = written.frontmatter
         rel = note_path.relative_to(vault_path)
         note_id = str(rel.with_suffix(""))
         metadata = build_note_metadata(rel, fm, body)

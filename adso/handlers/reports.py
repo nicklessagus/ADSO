@@ -237,7 +237,9 @@ async def _dispatch_report_callback(
         await query.edit_message_text("Generando reporte de salud del vault...")
         await _send_report(
             query, context,
-            report_bytes_coro=health_report(vault_path, full=full),
+            report_bytes_coro=health_report(
+                vault_path, full=full, vault_name=settings.vault.obsidian_name
+            ),
             filename=f"salud-vault-{date.today()}.md",
         )
         return
@@ -255,7 +257,10 @@ async def _dispatch_report_callback(
         if missing:
             await _aviso_scope_borrado(query, context, suffix)
             return
-        kwargs: dict = {"project": project, "area": area, "full": full}
+        kwargs: dict = {
+            "project": project, "area": area, "full": full,
+            "vault_name": settings.vault.obsidian_name,
+        }
         if reporter is scope_report:
             kwargs["inbox"] = inbox
         await query.edit_message_text(progress)
@@ -376,7 +381,13 @@ async def _send_report(
         filename: Nombre del archivo .md a enviar.
     """
     settings: Settings = context.bot_data["settings"]
-    chat_id = settings.telegram_allowed_user_id
+    # El reporte va al chat que lo pidió, no siempre al primer ID de
+    # `TELEGRAM_ALLOWED_USER_ID`: con más de un usuario autorizado, quien pide
+    # `/reporte` recibía el archivo en el chat de otro (LOTE5 E5). `query.message`
+    # falta solo si el estado llega roto — ahí se cae al comportamiento de
+    # siempre para no perder el aviso.
+    message = getattr(query, "message", None)
+    chat_id = message.chat.id if message is not None else settings.telegram_allowed_user_id
 
     try:
         report_bytes = await report_bytes_coro

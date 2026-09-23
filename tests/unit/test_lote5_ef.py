@@ -78,7 +78,6 @@ def _embeddings_client(tmp_path: Path):
 
 
 class TestE1ReindexRefreshesMetadata:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E1: reindex skips same-body notes, metadata never refreshed")
     async def test_frontmatter_only_change_updates_metadata_without_embedding(self, tmp_path):
         vault = tmp_path / "vault"
         note = vault / "01-Projects" / "Tesis" / "tarea.md"
@@ -135,7 +134,6 @@ class TestE1ReindexRefreshesMetadata:
 
 
 class TestE1ConfirmIndexesFrontmatterAsWritten:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E1: confirm indexes the pre-normalization frontmatter")
     async def test_indexed_status_matches_disk(self, mock_context, vault_path: Path):
         from adso.handlers import capture
 
@@ -180,7 +178,6 @@ def _cfg(tmp_path: Path, text: str) -> Path:
 
 
 class TestE2ObsidianVaultName:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: vault.obsidian_name does not exist")
     def test_config_key_loads(self, tmp_path):
         from adso.config import load_settings
 
@@ -188,21 +185,18 @@ class TestE2ObsidianVaultName:
         assert s.vault.obsidian_name == "ADSO"
         assert "vault.obsidian_name" not in s.unknown_keys
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: vault.obsidian_name does not exist")
     def test_config_key_defaults_to_none(self, tmp_path):
         from adso.config import load_settings
 
         s = load_settings(_cfg(tmp_path, "rag:\n  max_results: 10\n"))
         assert s.vault.obsidian_name is None
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: vault.obsidian_name is not type-validated")
     def test_config_key_rejects_non_string(self, tmp_path):
         from adso.config import ConfigError, load_settings
 
         with pytest.raises(ConfigError):
             load_settings(_cfg(tmp_path, "vault:\n  obsidian_name: 123\n"))
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: _obsidian_link has no vault_name")
     def test_link_uses_given_name_quoted(self, tmp_path):
         from adso.reporters import _obsidian_link
 
@@ -210,7 +204,6 @@ class TestE2ObsidianVaultName:
         link = _obsidian_link(vault, vault / "00-Inbox" / "nota.md", vault_name="Mi Vault")
         assert link == "obsidian://open?vault=Mi%20Vault&file=00-Inbox/nota"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: blank vault.obsidian_name must count as unset")
     @pytest.mark.parametrize("blank", ['""', '"   "'])
     async def test_blank_name_falls_back_to_folder(self, tmp_path, blank):
         from adso.config import load_settings
@@ -242,7 +235,6 @@ class TestE2ObsidianVaultName:
         link = _obsidian_link(vault, vault / "00-Inbox" / "nota.md")
         assert link == "obsidian://open?vault=vault&file=00-Inbox/nota"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: /reporte links ignore vault.obsidian_name")
     async def test_report_links_use_configured_name(self, mock_context, vault_path: Path):
         from adso.constants import CB_REPORT_HEALTH
         from adso.handlers import reports
@@ -265,7 +257,6 @@ class TestE2ObsidianVaultName:
         text = doc.getvalue().decode()
         assert "obsidian://open?vault=ADSO&" in text
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E2: /buscar report links ignore vault.obsidian_name")
     async def test_query_report_links_use_configured_name(self, mock_context, vault_path: Path):
         from adso.handlers import query as query_mod
         from adso.knowledge_query import QueryResult, ScoredNote
@@ -303,7 +294,6 @@ class TestE2ObsidianVaultName:
 
 
 class TestE3IsoDates:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E3: _parse_fm_date rejects ISO without seconds")
     @pytest.mark.parametrize("raw,expected", [
         ("2020-01-01T10:00", datetime(2020, 1, 1, 10, 0)),
         ("2020-01-01T10:00:00.500", datetime(2020, 1, 1, 10, 0, 0, 500000)),
@@ -314,7 +304,6 @@ class TestE3IsoDates:
 
         assert _to_naive(_parse_fm_date(raw)) == expected
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E3: overdue task with due_date without seconds is dropped")
     async def test_overdue_task_with_minutes_only(self, tmp_path):
         from adso import reporters
 
@@ -358,7 +347,6 @@ def _renamed_project_vault(vault: Path) -> None:
 
 
 class TestE4FolderIsIdentity:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E4: _index.md project: field overrides the folder name")
     async def test_existing_items_name_is_folder(self, vault_path: Path):
         from adso.bot_utils import _get_existing_items
 
@@ -366,7 +354,6 @@ class TestE4FolderIsIdentity:
         projects, _ = await _get_existing_items(vault_path)
         assert projects == [{"name": "Tesis-doctoral", "description": "Doctorado"}]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E4: area index field overrides the folder name")
     async def test_existing_items_area_name_is_folder(self, vault_path: Path):
         from adso.bot_utils import _get_existing_items
 
@@ -375,7 +362,6 @@ class TestE4FolderIsIdentity:
         _, areas = await _get_existing_items(vault_path)
         assert areas == [{"name": "docencia-unsam", "description": "Clases"}]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E4: /reporte for a renamed project folder finds no notes")
     async def test_scope_report_of_renamed_folder_via_handler(self, mock_context, vault_path: Path):
         from adso.constants import CB_REPORT_SCOPE_PREFIX, CB_REPORT_SCOPE_SHOW_P
         from adso.handlers import reports
@@ -405,7 +391,6 @@ class TestE4FolderIsIdentity:
         doc = mock_context.bot.send_document.await_args.kwargs["document"]
         assert "Marco teorico" in doc.getvalue().decode()
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E4: capture routes a renamed project into a new folder")
     async def test_llm_folder_name_routes_into_existing_folder(self, vault_path: Path):
         from adso.bot_utils import _get_existing_items
         from adso.llm_client import canonicalize_destination
@@ -465,7 +450,6 @@ def _report_query(chat_id: int):
 
 
 class TestE5ReportChat:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 E5: report sent to first allowed ID, not requester")
     async def test_report_goes_to_requesting_chat(self):
         from adso.handlers import reports
         from adso.reporters import ReportBytes
@@ -517,7 +501,6 @@ def _command_handlers(settings) -> list[CommandHandler]:
 
 
 class TestF1EditedCommands:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F1: CommandHandlers match edited_message")
     def test_no_command_handler_matches_an_edit(self, mock_context):
         handlers = _command_handlers(mock_context.bot_data["settings"])
         assert handlers, "precondition: bootstrap registers command handlers"
@@ -561,7 +544,6 @@ def _inbox_note(vault_path: Path, text: str) -> None:
 
 
 class TestF2ClasificarInjection:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F2: /clasificar preview skips check_injection_risk")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_injected_inbox_note_gets_warning(self, mock_context, make_update, vault_path):
         from adso.handlers import commands
@@ -615,7 +597,6 @@ def _edit_texts(query) -> list[str]:
 
 
 class TestF3CaseInsensitiveDuplicates:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F3: case-variant project creates a second folder")
     @pytest.mark.parametrize("name", ["tesis", " TESIS "])
     async def test_project_case_variant_is_rejected(self, mock_context, vault_path, name):
         from adso.handlers.manage import _cb_manage_confirm
@@ -630,7 +611,6 @@ class TestF3CaseInsensitiveDuplicates:
         assert sorted(p.name for p in (vault_path / "01-Projects").iterdir()) == ["Tesis"]
         assert any("ya existe" in t for t in _edit_texts(query))
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F3: case-variant area creates a second folder")
     async def test_area_case_variant_is_rejected(self, mock_context, vault_path):
         from adso.handlers.manage import _cb_manage_confirm
 
@@ -671,7 +651,6 @@ _BOOL_FLAGS = [
 
 
 class TestF4BoolFlags:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F4: quoted 'false' loads as truthy string")
     @pytest.mark.parametrize("section,key", _BOOL_FLAGS)
     def test_quoted_false_is_rejected(self, tmp_path, section, key):
         from adso.config import ConfigError, load_settings
@@ -702,7 +681,6 @@ def _stale_heartbeat(tmp_path: Path, now: float, age: float) -> Path:
 
 
 class TestF5WatchdogStaleHeartbeat:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F5: watchdog measures from a heartbeat left by the previous run")
     def test_fresh_watchdog_not_tripped_by_previous_run_heartbeat(self, tmp_path):
         from adso.watchdog import check_heartbeat
 
@@ -748,7 +726,6 @@ class TestF5WatchdogStaleHeartbeat:
 
 
 class TestF6ResetLeftovers:
-    @pytest.mark.xfail(strict=True, reason="LOTE5 F6: /reset leaves pending_query/report_full")
     @patch("adso.security.ALLOWED_USER_IDS", {42})
     async def test_reset_clears_query_state(self, mock_context, make_update):
         from adso.handlers.commands import handle_reset

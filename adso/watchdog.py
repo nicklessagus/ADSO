@@ -65,19 +65,26 @@ def _seconds_since_heartbeat(
     startup makes a bot that hung before its first beat trip on the same
     threshold as any other, without tripping during a normal boot.
 
+    The reference is never older than `started_at` either: a heartbeat file
+    left over from a previous run (same bind-mounted `/tmp`, container
+    restarted without clearing it) would otherwise make the watchdog compute
+    an age that already exceeds `threshold` on the very first check, killing
+    the new process before its own heartbeat job got a chance to touch the
+    file once.
+
     Args:
         heartbeat_path: File the heartbeat job touches.
         started_at: Wall-clock time the watchdog started.
         now: Current wall-clock time.
 
     Returns:
-        Seconds since the last sign of life.
+        Seconds since the last sign of life, capped by the watchdog's own age.
     """
     try:
         reference = heartbeat_path.stat().st_mtime
     except OSError:
         reference = started_at
-    return now - reference
+    return now - max(reference, started_at)
 
 
 def check_heartbeat(
