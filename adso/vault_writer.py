@@ -211,7 +211,15 @@ def _make_filename(title: str, date_val: "Optional[str | date | datetime]" = Non
         if isinstance(date_val, (datetime, date)):
             prefix = date_val.strftime("%Y-%m-%d")
         else:
-            prefix = str(date_val)[:10]  # YYYY-MM-DD desde string ISO
+            # `date_val` puede venir de un `date_created` editado a mano o de
+            # una inyección (`../../evil`, `22/09/2026`): los primeros 10
+            # caracteres solo son un prefijo de fecha válido si matchean
+            # YYYY-MM-DD. Si no, usar `../../evil` a secas metía `../../` en
+            # el nombre de archivo y escapaba del vault; `22/09/2026` creaba
+            # subdirectorios `22/09/` inexistentes y `create_note` reventaba
+            # al escribir (C4, lote 5).
+            candidate = str(date_val)[:10]
+            prefix = candidate if _DATE_ONLY_RE.match(candidate) else datetime.now().strftime("%Y-%m-%d")
     else:
         prefix = datetime.now().strftime("%Y-%m-%d")
 
@@ -866,6 +874,23 @@ def _strip_broken_links_in_ver_tambien(content: str, link_re: re.Pattern[str]) -
     )
 
 
+def _is_hidden_path(path: Path, vault_path: Path) -> bool:
+    """True si algún componente de `path` (relativo a `vault_path`) empieza con `.`.
+
+    `.trash/`, `.stversions/`, `.obsidian/` y demás carpetas ocultas de
+    Syncthing/Obsidian no son parte visible del vault: una nota homónima ahí
+    adentro no cuenta como "todavía existe" para resolver un wikilink (C5,
+    lote 5) — si contara, borrar una nota y dejar su homónimo en `.trash/`
+    (el lugar típico donde Syncthing/el filesystem la deja) mantendría vivo un
+    link roto para siempre.
+    """
+    try:
+        rel_parts = path.relative_to(vault_path).parts
+    except ValueError:
+        return False
+    return any(part.startswith(".") for part in rel_parts)
+
+
 async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
     """Elimina de todas las notas del vault wikilinks rotos que apuntaban a una nota borrada.
 
@@ -892,7 +917,12 @@ async def remove_broken_wikilinks(vault_path: Path, deleted_path: Path) -> int:
     # con el mismo stem sigue viva, el link NO está roto y borrarlo es pérdida
     # de datos. Pasa siempre que el usuario MUEVE una nota (el watcher emite un
     # delete del origen) y también con stems duplicados en carpetas distintas.
-    if any(p.stem == stem and p != deleted_path for p in md_files):
+    # Un homónimo en una carpeta oculta (`.trash/`, `.stversions/`) no cuenta:
+    # esas carpetas no son parte visible del vault (C5, lote 5).
+    if any(
+        p.stem == stem and p != deleted_path and not _is_hidden_path(p, vault_path)
+        for p in md_files
+    ):
         logger.debug(
             "Limpieza de wikilinks omitida: [[%s]] sigue resolviendo a otra nota.", stem
         )
@@ -950,7 +980,11 @@ _VER_TAMBIEN_ITEM_RE = re.compile(r"^- \[\[([^\]\n]+)\]\]")
 # Link markdown `[texto](ruta)`. El bot siempre escribe wikilinks, pero Obsidian
 # puede estar configurado para escribir links markdown: una nota editada a mano
 # referencia su adjunto así, y la barrida de huérfanos no puede ignorarlo.
-_MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)")
+# La ruta entre `<...>` es la forma que exige Markdown para un path con
+# espacios (`![](<03-Resources/my file.pdf>)`): sin la alternativa, `[^)\s]+`
+# cortaba en el primer espacio y el adjunto quedaba "sin referencias" (C6,
+# lote 5). Grupo 1 = target entre ángulos, grupo 2 = target sin ellos.
+_MARKDOWN_LINK_RE = re.compile(r"\]\((?:<([^>]+)>|([^)\s]+))")
 
 
 def _link_target_key(raw_target: str) -> str:
@@ -981,13 +1015,9 @@ def _vault_files_sync(vault_path: Path) -> list[Path]:
     """Lista los archivos visibles del vault (sin dotfiles ni carpetas ocultas)."""
     files: list[Path] = []
     for path in vault_path.rglob("*"):
-        try:
-            rel_parts = path.relative_to(vault_path).parts
-        except ValueError:
-            continue
         # `.obsidian/`, `.trash/`, los temporales `.adso-tmp-*`: nada de eso es
         # una nota ni un adjunto del usuario.
-        if any(part.startswith(".") for part in rel_parts):
+        if _is_hidden_path(path, vault_path):
             continue
         try:
             if path.is_file():
@@ -1032,8 +1062,14 @@ def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
     # Obsidian abre su link; borrarlo sería pérdida de datos (archivar no es
     # borrar). Ídem los adjuntos de `03-Resources/`. Es el mismo criterio de #3:
     # mover una nota no rompe sus links, porque resuelven por stem.
-    existing_names = {p.name for p in files}
-    existing_stems = {p.stem for p in files}
+    #
+    # Comparación case-insensitive (`casefold`, no solo `.lower()`, por si
+    # algún día hay nombres no-ASCII): Obsidian resuelve `[[Foo]]` contra
+    # `foo.md` y `![[paper.pdf]]` contra `Paper.pdf` sin quejarse, así que
+    # tratarlos como rotos/huérfanos sería falso positivo (C7, lote 5). El
+    # nombre en pantalla nunca se toca — solo la comparación.
+    existing_names = {p.name.casefold() for p in files}
+    existing_stems = {p.stem.casefold() for p in files}
 
     modified: list[Path] = []
     referenced: set[str] = set()
@@ -1050,12 +1086,12 @@ def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
             continue
 
         for match in _ANY_WIKILINK_RE.finditer(raw):
-            referenced.add(_link_target_key(match.group(1)))
+            referenced.add(_link_target_key(match.group(1)).casefold())
         for match in _MARKDOWN_LINK_RE.finditer(raw):
-            destino = _link_target_key(match.group(1))
-            referenced.add(destino)
+            destino = _link_target_key(match.group(1) or match.group(2))
+            referenced.add(destino.casefold())
             # Obsidian escapa los espacios como %20 al insertar el link.
-            referenced.add(unquote(destino))
+            referenced.add(unquote(destino).casefold())
 
         # Los índices se dejan como están: los mantiene el flujo de gestión.
         if md_path.stem == "_index":
@@ -1064,8 +1100,8 @@ def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
         broken = {
             _link_target_key(target)
             for target in _ver_tambien_link_targets(raw)
-            if _link_target_key(target) not in existing_names
-            and _link_target_key(target) not in existing_stems
+            if _link_target_key(target).casefold() not in existing_names
+            and _link_target_key(target).casefold() not in existing_stems
         }
         if not broken:
             continue
@@ -1115,7 +1151,7 @@ def _reconcile_vault_sync(vault_path: Path) -> tuple[list[Path], list[Path]]:
         # referencia permanente, no basura — moverlo sería perder una nota.
         if path.suffix == ".md":
             continue
-        if path.name in referenced or path.stem in referenced:
+        if path.name.casefold() in referenced or path.stem.casefold() in referenced:
             continue
         # Un adjunto recién escrito es indistinguible de una captura en vuelo:
         # `_cb_confirm` guarda el binario con `save_resource` y recién después

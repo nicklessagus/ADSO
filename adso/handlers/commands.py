@@ -294,6 +294,7 @@ async def handle_clasificar(
         existing_tags=existing_tags,
         disambiguation_threshold=settings.llm.disambiguation_threshold,
         user_context=orig_fm.get("user_context") or None,
+        vault_path=vault_path,
     )
 
     if result.get("mode") == "degraded":

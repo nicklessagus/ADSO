@@ -88,6 +88,12 @@ def parse_cached(path: Path) -> Optional[NoteData]:
         # Archivo borrado/inaccesible entre el stat y el read: transitorio, debug.
         logger.debug("No se pudo leer nota %s: %s", path, exc)
         return None
+    except UnicodeDecodeError as exc:
+        # Nota con bytes no-UTF-8 (típicamente editada a mano con otro
+        # encoding). Igual que el YAML corrupto: invisible a los scans, pero
+        # logueado para poder diagnosticarla.
+        logger.warning("Encoding inválido en %s, nota omitida de scans: %s", path, exc)
+        return None
     try:
         post = load_post(raw)
     except Exception as exc:

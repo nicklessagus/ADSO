@@ -68,12 +68,10 @@ class TestC1NonUtf8Notes:
         path.write_bytes(LATIN1_NOTE.encode("latin-1"))
         return path
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C1: parse_cached only catches OSError, UnicodeDecodeError escapes")
     def test_parse_cached_returns_none_for_latin1(self, vault_path: Path) -> None:
         p = self._latin1(vault_path / "00-Inbox" / "latin1.md")
         assert vault_cache.parse_cached(p) is None
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C1: find_by_property aborts on a latin-1 note")
     async def test_find_by_property_skips_latin1(self, vault_path: Path) -> None:
         _write(vault_path / "00-Inbox" / "good.md", GOOD_INBOX_NOTE)
         self._latin1(vault_path / "00-Inbox" / "latin1.md")
@@ -84,7 +82,6 @@ class TestC1NonUtf8Notes:
 
         assert [r.path.name for r in refs] == ["good.md"]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C1: get_all_tags aborts on a latin-1 note")
     async def test_get_all_tags_skips_latin1(self, vault_path: Path) -> None:
         _write(vault_path / "02-Areas" / "a" / "good.md", GOOD_INBOX_NOTE)
         self._latin1(vault_path / "02-Areas" / "a" / "latin1.md")
@@ -94,7 +91,6 @@ class TestC1NonUtf8Notes:
         assert "good" in tags
         assert "latin" not in tags
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C1: _get_existing_tags (runs before every classify) aborts")
     async def test_existing_tags_used_by_every_capture_skips_latin1(self, vault_path: Path) -> None:
         from adso.bot_utils import _get_existing_tags
 
@@ -103,7 +99,6 @@ class TestC1NonUtf8Notes:
 
         assert await _get_existing_tags(vault_path) == ["good"]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C1: count_unclassified_inbox aborts on a latin-1 note")
     async def test_count_unclassified_inbox_skips_latin1(self, vault_path: Path) -> None:
         from adso.bot_utils import count_unclassified_inbox
 
@@ -132,14 +127,12 @@ class TestC1NonUtf8Notes:
 
 class TestC2SyncConflictCopies:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C2: SYNC_CONFLICT_RE does not exist in constants yet")
     def test_shared_regex_lives_in_constants(self) -> None:
         from adso.constants import SYNC_CONFLICT_RE
 
         assert SYNC_CONFLICT_RE.search(CONFLICT_NAME)
         assert not SYNC_CONFLICT_RE.search("2026-09-01-x.md")
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C2: _scan_vault returns .sync-conflict copies")
     def test_scan_vault_skips_conflict_copies(self, vault_path: Path) -> None:
         _write(vault_path / "00-Inbox" / "2026-09-01-x.md", GOOD_INBOX_NOTE)
         _write(vault_path / "00-Inbox" / CONFLICT_NAME, GOOD_INBOX_NOTE)
@@ -148,7 +141,6 @@ class TestC2SyncConflictCopies:
 
         assert names == ["2026-09-01-x.md"]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C2: reclassify/clasificar would pick up the conflict copy")
     async def test_inbox_lookup_skips_conflict_copies(self, vault_path: Path) -> None:
         from adso.bot_utils import count_unclassified_inbox
 
@@ -162,7 +154,6 @@ class TestC2SyncConflictCopies:
         assert [r.path.name for r in refs] == ["2026-09-01-x.md"]
         assert await count_unclassified_inbox(vault_path) == 1
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C2: conflict copies feed the tag vocabulary")
     async def test_tags_skip_conflict_copies(self, vault_path: Path) -> None:
         _write(
             vault_path / "02-Areas" / "a" / CONFLICT_NAME,
@@ -205,7 +196,6 @@ def _prefix_is_about_today(name: str) -> bool:
 
 class TestC4FilenameDatePrefix:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C4: date_created prefix is raw, '../../' escapes the vault")
     async def test_traversal_in_date_created_stays_in_dest_dir(self, vault_path: Path) -> None:
         fm = {"title": "Nota", "type": "idea", "date_created": "../../evil"}
 
@@ -215,7 +205,6 @@ class TestC4FilenameDatePrefix:
         assert path.parent == vault_path / "00-Inbox"
         assert _prefix_is_about_today(path.name), path.name
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C4: '22/09/2026' creates nested dirs and crashes create_note")
     async def test_non_iso_date_created_does_not_crash(self, vault_path: Path) -> None:
         fm = {"title": "Nota", "type": "idea", "date_created": "22/09/2026"}
 
@@ -245,7 +234,6 @@ _VER_TAMBIEN_GONE = "---\ntitle: o\n---\nx\n\n## Ver también\n\n- [[gone]] — 
 
 class TestC5HiddenFoldersDontResolve:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C5: a homonym in .trash/ keeps the broken link alive")
     async def test_trashed_homonym_does_not_keep_link(self, vault_path: Path) -> None:
         _write(vault_path / ".trash" / "gone.md", "---\ntitle: old\n---\n")
         other = _write(vault_path / "02-Areas" / "a" / "other.md", _VER_TAMBIEN_GONE)
@@ -257,7 +245,6 @@ class TestC5HiddenFoldersDontResolve:
         assert modified == 1
         assert "[[gone]]" not in other.read_text(encoding="utf-8")
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C5: any dot-folder homonym keeps the broken link alive")
     async def test_other_dot_folder_homonym_does_not_keep_link(self, vault_path: Path) -> None:
         _write(vault_path / ".stversions" / "gone.md", "---\ntitle: old\n---\n")
         other = _write(vault_path / "02-Areas" / "a" / "other.md", _VER_TAMBIEN_GONE)
@@ -286,7 +273,6 @@ class TestC5HiddenFoldersDontResolve:
 
 class TestC6AngleBracketLinks:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C6: link regex stops at the space, attachment archived as orphan")
     async def test_angle_bracket_link_keeps_attachment(self, vault_path: Path) -> None:
         pdf = vault_path / "03-Resources" / "my file.pdf"
         pdf.write_bytes(b"%PDF-1.4 x")
@@ -321,7 +307,6 @@ class TestC6AngleBracketLinks:
 
 class TestC7CaseInsensitiveResolution:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C7: [[Foo]] with foo.md is treated as broken")
     async def test_case_mismatched_wikilink_is_kept(self, vault_path: Path) -> None:
         _write(vault_path / "02-Areas" / "a" / "foo.md", "---\ntitle: foo\n---\nx\n")
         note = _write(
@@ -334,7 +319,6 @@ class TestC7CaseInsensitiveResolution:
         assert modified == []
         assert "[[Foo]]" in note.read_text(encoding="utf-8")
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C7: [[paper.pdf]] does not protect Paper.pdf")
     async def test_case_mismatched_resource_reference_is_kept(self, vault_path: Path) -> None:
         pdf = vault_path / "03-Resources" / "Paper.pdf"
         pdf.write_bytes(b"%PDF-1.4 x")
@@ -372,23 +356,18 @@ def _tags(body: str, fm: dict | None = None) -> set[str]:
 
 class TestC8InlineTags:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C8: [[note#heading]] yields a tag")
     def test_heading_anchor_in_wikilink_is_not_a_tag(self) -> None:
         assert _tags("ver [[paper#methods]] ahora") == set()
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C8: URL fragments yield a tag")
     def test_url_fragment_is_not_a_tag(self) -> None:
         assert _tags("ver https://x.org/doc#intro ahora") == set()
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C8: digits-only #47 yields a tag")
     def test_digits_only_is_not_a_tag(self) -> None:
         assert _tags("arreglado en #47") == set()
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C8: word#tag without whitespace yields a tag")
     def test_hash_glued_to_word_is_not_a_tag(self) -> None:
         assert _tags("palabra#tag pegada") == set()
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 C8: mixed body extracts fake tags")
     async def test_get_all_tags_ignores_fake_tags(self, vault_path: Path) -> None:
         _write(
             vault_path / "02-Areas" / "a" / "n.md",
@@ -427,7 +406,6 @@ def _llm_json(fm: dict | None = None, mode: str = "capture", params: dict | None
 
 class TestD1SectionNeverCreatesFolders:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: without vault_path the LLM section survives")
     def test_without_vault_path_section_is_dropped(self) -> None:
         fm = {"title": "n", "type": "reference", "project": "tesis", "section": "experimentos"}
 
@@ -436,7 +414,6 @@ class TestD1SectionNeverCreatesFolders:
         assert fm["project"] == "tesis"
         assert "section" not in fm
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: canonicalize_destination has no vault_path keyword")
     def test_inexistent_section_dir_is_dropped(self, vault_path: Path) -> None:
         (vault_path / "01-Projects" / "tesis").mkdir()
         fm = {"title": "n", "type": "reference", "project": "Tesis ", "section": "Capitulo Inventado"}
@@ -446,7 +423,6 @@ class TestD1SectionNeverCreatesFolders:
         assert fm["project"] == "tesis"
         assert "section" not in fm
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: canonicalize_destination has no vault_path keyword")
     def test_existing_section_dir_is_canonicalized(self, vault_path: Path) -> None:
         (vault_path / "01-Projects" / "tesis" / "Experimentos").mkdir(parents=True)
         fm = {"title": "n", "type": "reference", "project": "tesis", "section": "  experimentos "}
@@ -456,7 +432,6 @@ class TestD1SectionNeverCreatesFolders:
         assert fm["project"] == "tesis"
         assert fm["section"] == "Experimentos"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: classify keeps a hallucinated section and create_note mkdirs it")
     async def test_classify_then_create_note_creates_no_folder(self, vault_path: Path) -> None:
         (vault_path / "01-Projects" / "tesis").mkdir()
         fm = {"title": "Nota", "type": "reference", "tags": [], "status": "active",
@@ -486,7 +461,6 @@ class TestD1SectionNeverCreatesFolders:
 
 class TestD2ManageWithoutDescription:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: validator rejects a null/absent/empty description")
     @pytest.mark.parametrize("params", [
         {"name": "Almagesto", "description": None},
         {"name": "Almagesto"},
@@ -496,7 +470,6 @@ class TestD2ManageWithoutDescription:
     def test_validator_accepts_missing_description(self, operation: str, params: dict) -> None:
         _validate_manage_payload({"operation": operation, "params": dict(params)})
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: manage without description falls to degraded mode")
     def test_validate_llm_response_keeps_manage_and_name(self) -> None:
         r = validate_llm_response({
             "mode": "manage",
@@ -509,7 +482,6 @@ class TestD2ManageWithoutDescription:
         assert r["payload"]["params"]["name"] == "Almagesto"
         assert r["payload"]["params"].get("description") in (None, "")
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: classify burns retries and degrades a good name")
     async def test_classify_keeps_the_name(self) -> None:
         raw = _llm_json(mode="manage", operation="create_project",
                         params={"name": "Almagesto", "description": None})
@@ -527,7 +499,6 @@ class TestD2ManageWithoutDescription:
             _validate_manage_payload({"operation": "create_project",
                                       "params": {"description": "d"}})
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: only the key's presence is checked, an empty name passes")
     @pytest.mark.parametrize("name", ["", "   ", None])
     def test_empty_name_raises(self, name) -> None:
         with pytest.raises(LLMResponseError):
@@ -548,12 +519,10 @@ def _validated_fm(fm: dict) -> dict:
 
 class TestD3NormalizedDueDate:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D3: basic-format date is stored raw")
     @pytest.mark.parametrize("raw", [20260101, "20260101"])
     def test_basic_date_is_extended(self, raw) -> None:
         assert _validated_fm({"due_date": raw})["due_date"] == "2026-01-01"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D3: basic-format datetime is stored raw")
     def test_basic_datetime_is_extended(self) -> None:
         assert _validated_fm({"due_date": "20260101T100000"})["due_date"] == "2026-01-01T10:00:00"
 
@@ -573,7 +542,6 @@ class TestD3NormalizedDueDate:
 
 class TestD4NoneInLists:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D4: None becomes the string 'None'")
     @pytest.mark.parametrize("field", ["authors", "keywords"])
     def test_none_item_is_dropped(self, field: str) -> None:
         fm = _validated_fm({field: ["Ada", None]})
@@ -599,11 +567,9 @@ def _response(mode, payload: dict | None = None) -> dict:
 
 class TestD5ModeNormalized:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D5: 'Capture' raises Invalid mode")
     def test_capitalized_capture(self) -> None:
         assert validate_llm_response(_response("Capture"))["mode"] == "capture"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D5: ' MANAGE ' raises Invalid mode")
     def test_spaced_upper_manage(self) -> None:
         payload = {"operation": "create_project", "params": {"name": "x", "description": "d"}}
         assert validate_llm_response(_response(" MANAGE ", payload))["mode"] == "manage"
@@ -631,7 +597,6 @@ _BOT_OWNED = {
 
 class TestD8BotOwnedKeys:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D8: bot-owned keys from the LLM survive validation")
     @pytest.mark.parametrize("key", sorted(_BOT_OWNED))
     def test_bot_owned_key_is_dropped(self, key: str) -> None:
         payload = {"frontmatter": {"title": "t", "type": "reference", key: _BOT_OWNED[key]}, "body": ""}
@@ -646,7 +611,6 @@ class TestD8BotOwnedKeys:
         assert fm["doi"] == "10.1/x"
         assert fm["tags"] == ["python"]
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D8: LLM source_file wins over the real resource (setdefault)")
     async def test_captured_pdf_keeps_real_source_file(
         self, mock_context, vault_path: Path, tmp_path: Path
     ) -> None:
@@ -713,17 +677,14 @@ _MUST_NOT_DETECT_EXISTING = ["actualizar", "olvidadizo", "ignorante"]
 
 class TestInjectionDetector:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D7/F7: common injection phrasings are not detected")
     @pytest.mark.parametrize("text", _MUST_DETECT_NEW)
     def test_detected(self, text: str) -> None:
         assert check_injection_risk(text) is True
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D6: ordinary sentences are flagged as injection")
     @pytest.mark.parametrize("text", _MUST_NOT_DETECT_NEW)
     def test_not_detected(self, text: str) -> None:
         assert check_injection_risk(text) is False
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D6: a benign caption is discarded as injection")
     def test_benign_caption_is_forwarded(self) -> None:
         msg = llm_client.build_user_message(
             "contenido", user_context="a partir de ahora voy a entrenar los martes"
@@ -748,7 +709,6 @@ class TestInjectionDetector:
 
 class TestD1ClassifyForwardsVaultPath:
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: classify has no vault_path keyword")
     async def test_classify_canonicalizes_existing_section(self, vault_path: Path) -> None:
         (vault_path / "01-Projects" / "tesis" / "Experimentos").mkdir(parents=True)
         fm = {"title": "n", "type": "reference", "tags": [], "status": "active",
@@ -759,7 +719,6 @@ class TestD1ClassifyForwardsVaultPath:
         assert result["payload"]["frontmatter"]["project"] == "tesis"
         assert result["payload"]["frontmatter"]["section"] == "Experimentos"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: _classify_and_preview does not pass vault_path to classify")
     async def test_classify_and_preview_keeps_existing_section(
         self, mock_context, make_update, vault_path: Path
     ) -> None:
@@ -794,7 +753,6 @@ class TestD2ManageFlowAsksForDescription:
         u.message = None
         return u
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: LLM name dropped (degraded) when description is null")
     async def test_intent_create_keeps_llm_name_and_confirm_asks_description(
         self, mock_context, vault_path: Path
     ) -> None:

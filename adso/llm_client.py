@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
 from adso.config import GEMINI_MODEL, GEMINI_VISION_MODEL
@@ -571,10 +572,32 @@ def _match_existing(value: Any, existing: list[dict[str, str]]) -> Optional[str]
     return None
 
 
+def _match_existing_section_dir(project_dir: Path, section: Any) -> Optional[str]:
+    """Devuelve el nombre exacto (de disco) del subdirectorio que matchea ``section``.
+
+    Comparación por ``strip()`` + ``casefold()``, igual que `_match_existing`.
+    ``None`` si `section` no es un string usable, si `project_dir` no existe, o
+    si ningún subdirectorio coincide.
+    """
+    if not isinstance(section, str) or not section.strip():
+        return None
+    objetivo = section.strip().casefold()
+    try:
+        if not project_dir.is_dir():
+            return None
+        for child in project_dir.iterdir():
+            if child.is_dir() and child.name.casefold() == objetivo:
+                return child.name
+    except OSError:
+        return None
+    return None
+
+
 def canonicalize_destination(
     frontmatter: dict,
     existing_projects: list[dict[str, str]],
     existing_areas: list[dict[str, str]],
+    vault_path: Path | None = None,
 ) -> None:
     """Deja en el frontmatter solo destinos que ya existen en el vault (in-place).
 
@@ -585,10 +608,20 @@ def canonicalize_destination(
     no existe se descarta y la nota cae al Inbox, donde el usuario la reubica:
     **nunca** se descarta la nota ni ningún otro campo del frontmatter.
 
+    La `section` corre la misma suerte que el proyecto (#D1, lote 5): sin
+    `vault_path` no hay cómo verificar que el subdirectorio exista, así que se
+    descarta siempre — el LLM no puede crear carpetas, y una `section`
+    inventada terminaba mkdireada por `create_note` igual que un proyecto
+    alucinado. Con `vault_path`, sobrevive solo si ya existe un subdirectorio
+    de ese nombre (case-insensitive, trimmed) bajo `01-Projects/<proyecto>/`,
+    y se reemplaza por el nombre exacto de disco.
+
     Args:
         frontmatter: Frontmatter propuesto por el LLM. Se muta.
         existing_projects: Proyectos del vault ``[{name, description}]``.
         existing_areas: Áreas del vault, mismo formato.
+        vault_path: Raíz del vault, para verificar que la `section` exista de
+            verdad. `None` (default) → `section` siempre se descarta.
     """
     for clave, existentes in (("project", existing_projects), ("area", existing_areas)):
         if clave not in frontmatter:
@@ -606,6 +639,21 @@ def canonicalize_destination(
             # Una `section` solo significa algo dentro de un proyecto: sin él
             # queda apuntando a un subdirectorio del Inbox.
             frontmatter.pop("section", None)
+
+    if "section" not in frontmatter:
+        return
+
+    project = frontmatter.get("project")
+    canonico_dir = None
+    if project and vault_path is not None:
+        canonico_dir = _match_existing_section_dir(
+            vault_path / "01-Projects" / project, frontmatter["section"]
+        )
+
+    if canonico_dir is not None:
+        frontmatter["section"] = canonico_dir
+    else:
+        del frontmatter["section"]
 
 
 def _validate_response(
@@ -636,6 +684,7 @@ async def classify(
     disambiguation_threshold: float = 0.7,
     on_retry: Optional[Callable[[int, int], Coroutine[Any, Any, None]]] = None,
     user_context: Optional[str] = None,
+    vault_path: Path | None = None,
 ) -> dict:
     """Classify content using the Gemini API.
 
@@ -652,6 +701,9 @@ async def classify(
             "quiero leer esto esta semana"). Injected into the prompt so the LLM can
             infer priority and relevance. Used when reclassifying degraded notes that
             were saved with this metadata.
+        vault_path: Vault root, forwarded to `canonicalize_destination` so a
+            proposed `section` survives only if the directory really exists.
+            `None` (default) drops `section` unconditionally.
 
     Returns:
         Validated LLM response dict, or a dict with mode="degraded"
@@ -673,7 +725,7 @@ async def classify(
         if validated.get("mode") != "manage" and isinstance(payload, dict):
             fm = payload.get("frontmatter")
             if isinstance(fm, dict):
-                canonicalize_destination(fm, existing_projects, existing_areas)
+                canonicalize_destination(fm, existing_projects, existing_areas, vault_path=vault_path)
         return _fill_title_fallback(validated, content)
 
     invalid_response_attempts = 0
