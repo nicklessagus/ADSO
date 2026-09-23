@@ -341,8 +341,12 @@ class TestE3ErrorEnOcrNoBloquea:
     una acción pendiente" cuando ya no había botones. Única salida: `/reset`,
     que borra el temporal — había que reenviar la imagen."""
 
+    @pytest.mark.xfail(strict=True, reason="LOTE6 V2: el error de OCR descarta la imagen en vez de reponer los botones")
     @pytest.mark.asyncio
-    async def test_error_en_ocr_limpia_el_estado(self, mock_context, tmp_path: Path) -> None:
+    async def test_error_en_ocr_no_deja_estado_sin_botones(self, mock_context, tmp_path: Path) -> None:
+        """Invariante de E3 (sin callejón sin salida), con el contrato del lote 6
+        (V2): el estado y la imagen se conservan y el mensaje de error trae los
+        botones para reintentar. Antes se cumplía descartando todo."""
         from adso.handlers import callbacks
 
         img = tmp_path / "x.png"
@@ -364,7 +368,10 @@ class TestE3ErrorEnOcrNoBloquea:
             await callbacks._cb_ocr(update, mock_context)
 
         from adso.bot_utils import _has_pending_keyboard
-        assert _has_pending_keyboard(mock_context) is False, (
+        assert img.exists(), "se borró la imagen: hay que reenviarla"
+        assert _has_pending_keyboard(mock_context) is True
+        kwargs = update.callback_query.edit_message_text.await_args.kwargs
+        assert kwargs.get("reply_markup") is not None, (
             "el estado quedó colgado: el bot rechaza todo input sin mostrar botones"
         )
 
