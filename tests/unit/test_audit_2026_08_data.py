@@ -441,7 +441,6 @@ class TestB8DescriptionVacia:
     # nullable) y tiraba un nombre bueno; la descripción faltante la pide el bot
     # aguas abajo (`manage.py`, G10), que es donde B8 queda cubierto.
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description vacía")
     @pytest.mark.parametrize("vacia", ["", "   ", "\n\t "])
     @pytest.mark.parametrize("operation", ["create_project", "create_area"])
     def test_description_vacia_se_acepta(self, operation: str, vacia: str) -> None:
@@ -449,7 +448,6 @@ class TestB8DescriptionVacia:
             {"operation": operation, "params": {"name": "tesis", "description": vacia}}
         )
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description null")
     def test_description_null_se_acepta(self) -> None:
         _validate_manage_payload(
             {"operation": "create_project", "params": {"name": "tesis", "description": None}}
@@ -464,7 +462,6 @@ class TestB8DescriptionVacia:
             }
         )
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description ausente")
     def test_description_ausente_se_acepta(self) -> None:
         _validate_manage_payload({"operation": "create_project", "params": {"name": "tesis"}})
 

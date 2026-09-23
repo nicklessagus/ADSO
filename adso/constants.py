@@ -3,6 +3,8 @@
 Este módulo no tiene imports locales — es la raíz del grafo de dependencias.
 """
 
+import re
+
 # ---------------------------------------------------------------------------
 # Taxonomía del vault
 # ---------------------------------------------------------------------------
@@ -60,6 +62,12 @@ DEFAULT_EXCLUDE_DIRS = ("05-Archive", ".obsidian", ".trash")
 # ahí no es una nota del vault. No es configurable porque no es una preferencia
 # — si una nota tiene que ser buscable, no va en `03-Resources` (#58, #72).
 ALWAYS_EXCLUDE_DIRS = ("03-Resources",)
+
+# Patrón de Syncthing: nombre.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.md. Una
+# copia de conflicto no es una nota para ningún scan estructural (`_scan_vault`
+# en `vault_search.py`) — misma regex que ya usaba `vault_watcher.CONFLICT_RE`,
+# ahora compartida para que los dos caminos (watcher y scans) coincidan.
+SYNC_CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]+\.md$", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Callback data constants

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,10 +22,14 @@ from watchdog.events import (
     FileSystemEventHandler,
 )
 
+from adso.constants import SYNC_CONFLICT_RE
+
 logger = logging.getLogger(__name__)
 
-# Patrón de Syncthing: nombre.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.md
-CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]+\.md$", re.IGNORECASE)
+# Alias: la regex vive en `constants.py` (compartida con `vault_search._scan_vault`)
+# desde el lote 5 (C2). Se mantiene importable acá porque el resto del módulo y
+# callers externos la referencian como `vault_watcher.CONFLICT_RE`.
+CONFLICT_RE = SYNC_CONFLICT_RE
 
 
 def _is_hidden(path: Path) -> bool:

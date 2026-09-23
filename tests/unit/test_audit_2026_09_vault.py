@@ -363,7 +363,6 @@ class TestCanonicalizacionDeDestino:
 
         assert fm["project"] == "tesis"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: sin vault_path la section del LLM sobrevive")
     def test_un_proyecto_existente_se_canoniza_y_la_seccion_sin_vault_se_descarta(self) -> None:
         """Contrato lote 5 (D1): sin `vault_path` no hay cómo verificar que la
         sección exista, así que se descarta — el LLM no puede crear carpetas."""
@@ -424,7 +423,6 @@ class TestCanonicalizacionDeDestino:
 
         assert fm["project"] == "tesis"
 
-    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: la section del LLM sobrevive aunque no exista la carpeta")
     def test_un_proyecto_exacto_sobrevive_con_su_seccion_solo_si_existe(self, tmp_path: Path) -> None:
         """Contra-caso F4 reescrito al contrato del lote 5 (D1): la sección
         sobrevive solo si la carpeta existe, con el nombre exacto de disco."""

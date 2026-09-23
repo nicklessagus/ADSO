@@ -64,6 +64,19 @@ ALLOWED_FRONTMATTER_KEYS = frozenset({
     "description", "sections",
 })
 
+# Claves que el BOT setea después de validar (el adjunto real que guardó, la
+# URL de arXiv, `source`/`media_type` que vienen del tipo de mensaje de
+# Telegram, y las dos fechas de `create_note`) — nunca del LLM. Están en
+# `ALLOWED_FRONTMATTER_KEYS` porque son legítimas en la nota final, pero si el
+# LLM las propone (o una prompt injection las mete) sobreviven la whitelist y
+# después un `setdefault` aguas abajo las respeta en vez de pisarlas: un PDF
+# duplicado podía terminar con `source_file` apuntando a OTRO adjunto (D8,
+# lote 5).
+_BOT_OWNED_FRONTMATTER_KEYS = frozenset({
+    "source_file", "source_url", "source", "media_type",
+    "date_created", "date_modified",
+})
+
 VALID_OPERATIONS = {
     "create_project", "create_area", "archive_project", "unarchive_project",
     "delete_project", "delete_area", "rename_project", "rename_area",
@@ -74,14 +87,29 @@ VALID_OPERATIONS = {
 # Checks are case-insensitive (re.IGNORECASE in check_injection_risk).
 INJECTION_PATTERNS = [
     # English
-    r"ignore (previous|all|your|the) instructions",
-    r"disregard (previous|all|your|the) instructions",
+    # "ignore/disregard ... instructions" con cualquier combinación de
+    # calificadores en el medio (D6/D7, lote 5): el patrón viejo solo aceptaba
+    # UNO ("ignore all instructions"), y fallaba con la frase natural "ignore
+    # all previous instructions" — el `*` deja pasar cero, uno o varios.
+    r"(ignore|disregard) (?:all |any |your |the |previous |prior )*instructions",
     r"forget (what|everything|all)",
     r"you are now (a|an|the)",
     r"new instructions\s*:",
-    r"system prompt",
-    r"act as (a|an|the)",
-    r"from now on",
+    # "system prompt" a secas matcheaba también una mención descriptiva ("el
+    # paper analiza cómo un system prompt afecta la salida", "we study the
+    # system prompt design of LLM agents"). Ahora exige un verbo que pida
+    # exponerlo/revelarlo, no cualquier oración que lo mencione (D6).
+    r"(show|reveal|print|output|tell|give|display|expose|leak) (?:me |us )?(?:your |the |its )?system prompt",
+    # "act as (a|an|the)" solo si NO es una descripción técnica de capacidad
+    # ("the network can act as a filter for noise" es diseño, no un intento de
+    # hacerle jugar un rol al modelo). Los lookbehind de ancho fijo excluyen el
+    # modal inmediatamente anterior (D6).
+    r"(?<!can )(?<!could )(?<!may )(?<!might )(?<!will )(?<!would )(?<!should )(?<!must )act as (a|an|the)",
+    # "from now on" a secas es demasiado amplio ("from now on we use the new
+    # API" es un cambio de proceso, no una instrucción al modelo). Exigir que
+    # venga seguido de "you" es lo que separa el jailbreak ("From now on, you
+    # are DAN") de la oración descriptiva (D6/D7).
+    r"from now on,? you\b",
     # XML/tag injection — breaking out of <input> wrapper
     r"</?(input|system|instructions?|user_context|prompt)>",
     # Spanish variants — tuteo y voseo/tildes (#44B): "ignorá"/"olvidá"/"actuá"
@@ -90,14 +118,19 @@ INJECTION_PATTERNS = [
     # "instrucciones"/"como + artículo") es lo que evita falsos positivos con
     # "ignorante", "olvidadizo" y "actualizar", que comparten la raíz pero no
     # la frase.
-    r"ignor[aá] (las|tus|todas las|las anteriores|tus anteriores) instrucciones",
-    r"olvid[aá] (las instrucciones|todo|el contexto|lo anterior|tus instrucciones)",
+    # "lo anterior" se agrega como cierre alternativo a "... instrucciones"
+    # (D6/D7, lote 5): "ignorá lo anterior" no menciona instrucciones.
+    r"ignor[aá] (?:(?:las|tus|todas las|las anteriores|tus anteriores) instrucciones|lo anterior)",
+    # "olvidate" (reflexivo voseo de "olvidar") y "de las instrucciones
+    # anteriores"/"de todo lo anterior" (orden natural, calificador ANTES del
+    # sustantivo) se agregan como formas nuevas (D6/D7, lote 5); el `*`
+    # permite cero o más calificadores entre el verbo y el cierre.
+    r"olvid[aá](?:te)? (?:de )?(?:las |tus |todas las |todo |el )*(?:instrucciones(?: anteriores)?|contexto|lo anterior|todo)",
     r"ahora (eres|actúa como|actua como|actuá como|sos)",
     r"actúa como (un|una|el|la)",
     r"actua como (un|una|el|la)",
     r"actuá como (un|una|el|la)",
     r"nuevas instrucciones\s*:",
-    r"a partir de ahora",
     r"eres (un|una|ahora)",
     r"pretende (ser|que eres)",
 ]
@@ -222,11 +255,16 @@ def validate_llm_response(response_json: dict) -> dict:
     if not isinstance(response_json, dict):
         raise LLMResponseError("LLM response is not a JSON object")
 
-    mode = response_json.get("mode")
+    # Normalizado con `_norm_enum` igual que type/status/priority (D5, lote 5):
+    # "Capture"/" MANAGE " son justo la capitalización habitual de un modelo
+    # chico o de texto pegado con espacios de más, y sin esto tiraban toda la
+    # respuesta a `Invalid mode`.
+    mode = _norm_enum(response_json.get("mode"))
     if not mode:
         raise LLMResponseError("Missing 'mode' field in response")
     if mode not in VALID_MODES:
         raise LLMResponseError(f"Invalid mode: {mode!r}")
+    response_json["mode"] = mode
 
     # Coerce confidence to a float in [0,1]. Small models (o el fallback de Groq
     # sin schema) a veces devuelven "high" o un string; sin esto, la comparación
@@ -418,6 +456,12 @@ def _validate_capture_payload(payload: dict) -> None:
         logger.warning("Clave de frontmatter fuera del schema, descartada: %r", key)
         del fm[key]
 
+    # Claves que el bot setea él mismo aguas abajo (D8, lote 5): un valor del
+    # LLM acá sobrevivía la whitelist y un `setdefault` posterior lo respetaba
+    # en vez de escribir el real.
+    for key in _BOT_OWNED_FRONTMATTER_KEYS:
+        fm.pop(key, None)
+
     # El título puede venir null o no-string (Groq sin schema constrained);
     # coaccionar antes de limpiarlo evita un TypeError en el `re.sub`.
     title = _clean_title(fm.get("title"))
@@ -495,17 +539,24 @@ def _validate_capture_payload(payload: dict) -> None:
     for date_field in ("due_date", "scheduled"):
         val = fm.get(date_field)
         if val is not None:
+            raw = str(val)
             try:
                 from datetime import datetime as _dt
-                _dt.fromisoformat(str(val))
+                parsed = _dt.fromisoformat(raw)
             except (ValueError, TypeError):
                 fm[date_field] = None
             else:
-                # Coaccionar además de validar: Groq (sin schema constrained)
-                # devuelve `due_date: 20260101` como int, que `fromisoformat`
-                # acepta vía `str(val)` pero después rompe el slice
-                # `due_date[:10]` de tasks_client al pushear la tarea.
-                fm[date_field] = str(val)
+                # Normalizar a forma extendida (D3, lote 5): Groq (sin schema
+                # constrained) devuelve `due_date: 20260101` como int, o el
+                # LLM propone el formato básico `20260101T100000`.
+                # `fromisoformat` acepta las dos formas desde Python 3.11, pero
+                # todo lo que consume `due_date` aguas abajo (el preview,
+                # `tasks_client`, los reportes) asume guiones y `T` — dejarlo
+                # crudo rompía el slice `due_date[:10]` de `tasks_client`.
+                if "T" in raw.upper():
+                    fm[date_field] = parsed.isoformat()
+                else:
+                    fm[date_field] = parsed.date().isoformat()
 
     # Campos académicos: forzar tipos y descartar si no se puede (nunca crashear
     # aguas abajo por un tipo inesperado del LLM, sobre todo del fallback de Groq).
@@ -523,7 +574,12 @@ def _validate_capture_payload(payload: dict) -> None:
         if val is None:
             continue
         if isinstance(val, list):
-            fm[list_field] = [str(x).strip() for x in val if str(x).strip()]
+            # `x is not None` antes del `str(x)`: sin el chequeo, un `None`
+            # suelto en la lista (Groq, o un JSON con huecos) se convertía en
+            # la string literal "None" en vez de descartarse (D4, lote 5).
+            fm[list_field] = [
+                str(x).strip() for x in val if x is not None and str(x).strip()
+            ]
         elif isinstance(val, str):
             fm[list_field] = [p.strip() for p in val.split(",") if p.strip()]
         else:
@@ -564,16 +620,17 @@ def _validate_manage_payload(payload: dict) -> None:
 
     # Validate required params per operation
     if operation in ("create_project", "create_area"):
-        if "name" not in params:
-            raise LLMResponseError(f"{operation} requires 'name'")
-        # Se valida el CONTENIDO, no la presencia de la clave: `description: ""`
-        # (y `null`, que el schema declara legal) pasaban el chequeo anterior y
-        # llegaban al `_index.md`. No es cosmético — `description` es lo que
-        # `_get_existing_items` le pasa al prompt como scope de cada destino, así
-        # que un proyecto sin descripción se le presenta al LLM sin contexto y
-        # degrada el routing de todas las capturas. B8 de la auditoría 2026-08.
-        if not str(params.get("description") or "").strip():
-            raise LLMResponseError(f"{operation} requires a non-empty 'description'")
+        # Se valida el CONTENIDO, no la presencia de la clave: `name: ""`/`"   "`
+        # (o `None`, que el schema declara legal) pasaban el chequeo de
+        # presencia anterior y llegaban a `manage.py` con un nombre inservible.
+        if not str(params.get("name") or "").strip():
+            raise LLMResponseError(f"{operation} requires a non-empty 'name'")
+        # `description` YA NO es obligatoria acá (D2, lote 5 — decisión del
+        # árbitro): rechazarla mandaba toda la creación por texto libre a modo
+        # degradado y tiraba un `name` bueno del LLM, aunque el schema de Gemini
+        # ya la declara `nullable`. La descripción faltante la pide el bot aguas
+        # abajo (`manage.py`, G10) — B8 de la auditoría 2026-08 queda cubierto
+        # ahí, no acá.
 
     if operation == "create_section":
         if "project" not in params:

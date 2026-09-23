@@ -314,6 +314,7 @@ async def _classify_and_preview(
                 disambiguation_threshold=settings.llm.disambiguation_threshold,
                 on_retry=on_retry,
                 user_context=user_context,
+                vault_path=vault_path,
             )
 
         # Modos no implementados (query, edit) → tratar como captura, re-validando

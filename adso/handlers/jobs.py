@@ -121,6 +121,7 @@ async def _reclassify_inbox_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
                 existing_tags=existing_tags,
                 disambiguation_threshold=settings.llm.disambiguation_threshold,
                 user_context=orig_fm.get("user_context") or None,
+                vault_path=vault_path,
             )
 
             if result.get("mode") == "degraded":

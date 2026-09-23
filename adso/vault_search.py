@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from adso.constants import ALWAYS_EXCLUDE_DIRS, DEFAULT_EXCLUDE_DIRS
+from adso.constants import ALWAYS_EXCLUDE_DIRS, DEFAULT_EXCLUDE_DIRS, SYNC_CONFLICT_RE
 from adso.vault_cache import parse_cached
 from adso.vault_writer import NoteRef, NoteData
 
@@ -22,8 +22,14 @@ logger = logging.getLogger(__name__)
 # Regex para extraer wikilinks (excluye code blocks)
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?]]")
 
-# Regex para extraer tags inline (no dentro de code blocks)
-_INLINE_TAG_RE = re.compile(r"(?<!\[)#([\w/-]+)")
+# Regex para extraer tags inline (no dentro de code blocks), siguiendo las
+# reglas de Obsidian (C8, lote 5): el `#` tiene que estar al principio de
+# línea o precedido de espacio (así "[[nota#heading]]", "url#fragment" y
+# "palabra#tag" pegada no matchean — en los tres casos el `#` está pegado a un
+# carácter de palabra, no a un espacio). Un tag puramente numérico ("#47") se
+# filtra aparte en `_extract_tags_from_note`: la clase de caracteres no puede
+# distinguir "solo dígitos" de "dígitos y letras" (`#2026-plan`, válido).
+_INLINE_TAG_RE = re.compile(r"(?:^|(?<=\s))#([\w/-]+)", re.MULTILINE)
 
 # Default exclude dirs (la taxonomía vive en constants.py)
 _DEFAULT_EXCLUDE = list(DEFAULT_EXCLUDE_DIRS)
@@ -93,6 +99,11 @@ def _scan_vault(
         # reales pasan su propia lista.
         if len(parts) == 1:
             continue
+        # Una copia de conflicto de Syncthing tampoco es una nota (#C2 lote 5):
+        # sin esto, `find_by_property`/`get_all_tags`/reportes/`/clasificar` la
+        # veían como una nota más y podían reclasificarla por separado.
+        if SYNC_CONFLICT_RE.search(md_file.name):
+            continue
         results.append(md_file)
 
     return results
@@ -138,7 +149,11 @@ def _extract_tags_from_note(note: NoteData) -> set[str]:
     # Tags inline del body
     clean_body = _strip_code_blocks(note.body)
     for match in _INLINE_TAG_RE.finditer(clean_body):
-        tags.add(match.group(1).lower())
+        inline_tag = match.group(1)
+        if inline_tag.isdigit():
+            # "#47" (un número de issue, una referencia) no es un tag semántico.
+            continue
+        tags.add(inline_tag.lower())
 
     return tags
 
