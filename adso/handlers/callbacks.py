@@ -523,16 +523,15 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-    except Exception as e:
-        # Sin limpiar el estado, `_has_pending_keyboard` sigue en True y todo
-        # input posterior recibe "Hay una acción pendiente" cuando ya no hay
-        # botones: el bot queda muerto hasta `/reset`, que además borra el
-        # temporal (hay que reenviar la imagen). E3 de docs/audit-2026-07-31.md.
-        logger.error("Error en OCR: %s", e)
-        context.user_data.pop("pending_fallback_pdf", None)
-        tmp_path.unlink(missing_ok=True)
+    except Exception:
+        # El estado y la imagen se conservan y vuelven los botones: reintentar
+        # es un toque, no reenviar la imagen (lote 6, V2). Sin teclado el
+        # estado quedaba colgado hasta `/reset` (E3 de docs/audit-2026-07-31.md).
+        # El detalle va al log, nunca al chat (V3).
+        logger.exception("Error en OCR")
         await query.edit_message_text(
-            f"Error en OCR: {e}\n\nReenviar la imagen para reintentar."
+            "No se pudo ejecutar el OCR. Reintentar o elegir otro método.",
+            reply_markup=build_fallback_pdf_keyboard(),
         )
         return
 
@@ -551,6 +550,15 @@ async def _cb_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # `getattr` en vez de `sent.message_id`: un `edit_message_text` puede
     # devolver `True` (mensaje inline) y ahí el acceso directo lanzaría.
     context.user_data["pending_transcript"]["msg_id"] = getattr(sent, "message_id", None)
+
+
+def _vision_error_text(e: Exception) -> str:
+    """Mensaje legible para un fallo de Gemini Vision, sin el detalle crudo."""
+    from google.genai import errors as genai_errors
+
+    if isinstance(e, genai_errors.ServerError):
+        return "Gemini Vision está saturado en este momento."
+    return "No se pudo consultar Gemini Vision."
 
 
 async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -590,6 +598,11 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     await query.edit_message_text("Consultando Gemini Vision...")
 
+    async def _on_retry(attempt: int, max_attempts: int) -> None:
+        await query.edit_message_text(
+            f"Gemini Vision saturado, reintentando ({attempt}/{max_attempts})..."
+        )
+
     tmp_path = Path(pending["temp_path"])
     media_type = pending.get("media_type", "image")
 
@@ -602,16 +615,20 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         if media_type == "document":
             images = await asyncio.to_thread(_render_pdf_pages, tmp_path, _PDF_SCAN_PAGES)
-            text = await describe_image_with_vision(images, prompt=_VISION_PROMPT_PDF)
+            text = await describe_image_with_vision(
+                images, prompt=_VISION_PROMPT_PDF, on_retry=_on_retry
+            )
         else:
             image_bytes = await asyncio.to_thread(tmp_path.read_bytes)
             text = await describe_image_with_vision(
-                [(image_bytes, "image/jpeg")], prompt=_VISION_PROMPT_IMAGE
+                [(image_bytes, "image/jpeg")], prompt=_VISION_PROMPT_IMAGE,
+                on_retry=_on_retry,
             )
 
     except Exception as e:
-        # Mismo dead-end que en OCR — ver E3 de docs/audit-2026-07-31.md.
-        logger.error("Error en Gemini Vision: %s", e)
+        # El detalle va al log con traceback, nunca al chat (lote 6, V3).
+        logger.exception("Error en Gemini Vision")
+        error_text = _vision_error_text(e)
         if from_ocr:
             # Llegado desde el resultado OCR, el estado vivo es
             # `pending_transcript`: popear `pending_fallback_pdf` era un no-op y
@@ -621,7 +638,7 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # auditoría 2026-08.
             transcript = context.user_data.get("pending_transcript") or {}
             sent = await query.edit_message_text(
-                f"Error consultando Gemini Vision: {_esc(str(e))}\n\n"
+                f"{_esc(error_text)}\n\n"
                 + _build_extract_preview(
                     "Texto extraído (OCR)", transcript.get("text", "")
                 ),
@@ -631,10 +648,11 @@ async def _cb_vision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if transcript and sent is not None:
                 transcript["msg_id"] = getattr(sent, "message_id", None)
             return
-        context.user_data.pop("pending_fallback_pdf", None)
-        tmp_path.unlink(missing_ok=True)
+        # El estado y la imagen se conservan y vuelven los botones: reintentar
+        # es un toque, no reenviar la imagen (lote 6, V2).
         await query.edit_message_text(
-            f"Error consultando Gemini Vision: {e}\n\nReenviar la imagen para reintentar."
+            f"{error_text} Reintentar o elegir otro método.",
+            reply_markup=build_fallback_pdf_keyboard(),
         )
         return
 
@@ -723,9 +741,9 @@ async def _cb_doc_create_anyway(update: Update, context: ContextTypes.DEFAULT_TY
             query.message, context, tmp_path, filename,
             pending.get("user_context"), pending.get("mime_type"),
         )
-    except Exception as e:
-        logger.error("Error procesando documento duplicado: %s", e)
-        await query.message.reply_text(f"Error al procesar documento: {e}")
+    except Exception:
+        logger.exception("Error procesando documento duplicado")
+        await query.message.reply_text("No se pudo procesar el documento.")
     finally:
         # Mismo contrato que el `finally` de `handle_document`: si ningún estado
         # pendiente se quedó con el temporal, se borra (en la RPi4 /tmp es

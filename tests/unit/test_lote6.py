@@ -77,13 +77,11 @@ async def _describe(**kwargs):
 
 
 class TestV1VisionRetries:
-    @_xfail("V1", "VISION_RETRY_DELAYS does not exist")
     def test_retry_delays_constant(self) -> None:
         from adso.llm_client import VISION_RETRY_DELAYS
 
         assert list(VISION_RETRY_DELAYS) == [2, 5]
 
-    @_xfail("V1", "a 503 is raised at once, no retry")
     async def test_503_then_success_returns_text(self) -> None:
         with _vision_api([_server_503(), _ok("hola")]) as (call, sleep):
             text = await _describe()
@@ -91,7 +89,6 @@ class TestV1VisionRetries:
         assert call.call_count == 2
         assert [c.args[0] for c in sleep.await_args_list] == [2]
 
-    @_xfail("V1", "a 503 is raised at once, no retry")
     async def test_two_503_then_success_waits_2_then_5(self) -> None:
         with _vision_api([_server_503(), _server_503(), _ok("hola")]) as (call, sleep):
             text = await _describe()
@@ -99,7 +96,6 @@ class TestV1VisionRetries:
         assert call.call_count == 3
         assert [c.args[0] for c in sleep.await_args_list] == [2, 5]
 
-    @_xfail("V1", "a 503 is raised at once, no retry")
     async def test_three_503_raise_last_after_three_attempts_no_final_wait(self) -> None:
         last = _server_503()
         with _vision_api([_server_503(), _server_503(), last]) as (call, sleep):
@@ -109,7 +105,6 @@ class TestV1VisionRetries:
         assert call.call_count == 3
         assert [c.args[0] for c in sleep.await_args_list] == [2, 5]
 
-    @_xfail("V1", "a 500 is raised at once, no retry")
     async def test_any_5xx_is_transient(self) -> None:
         err_500 = genai_errors.ServerError(500, {"error": {"code": 500, "message": "x",
                                                            "status": "INTERNAL"}})
@@ -117,33 +112,28 @@ class TestV1VisionRetries:
             assert await _describe() == "hola"
         assert call.call_count == 2
 
-    @_xfail("V1", "a network timeout is raised at once, no retry")
     async def test_timeout_is_transient(self) -> None:
         with _vision_api([httpx.ReadTimeout("slow"), _ok("hola")]) as (call, _):
             assert await _describe() == "hola"
         assert call.call_count == 2
 
-    @_xfail("V1", "a connection error is raised at once, no retry")
     async def test_transport_error_is_transient(self) -> None:
         with _vision_api([httpx.ConnectError("down"), _ok("hola")]) as (call, _):
             assert await _describe() == "hola"
         assert call.call_count == 2
 
-    @_xfail("V1", "on_retry kwarg does not exist")
     async def test_on_retry_called_with_attempt_and_max(self) -> None:
         on_retry = AsyncMock()
         with _vision_api([_server_503(), _server_503(), _ok()]):
             await _describe(on_retry=on_retry)
         assert [c.args for c in on_retry.await_args_list] == [(2, 3), (3, 3)]
 
-    @_xfail("V1", "on_retry kwarg does not exist")
     async def test_on_retry_failure_does_not_abort_retry(self) -> None:
         on_retry = AsyncMock(side_effect=RuntimeError("telegram down"))
         with _vision_api([_server_503(), _ok("hola")]) as (call, _):
             assert await _describe(on_retry=on_retry) == "hola"
         assert call.call_count == 2
 
-    @_xfail("V1", "on_retry kwarg does not exist")
     async def test_first_success_never_calls_on_retry(self) -> None:
         on_retry = AsyncMock()
         with _vision_api([_ok("hola")]) as (call, sleep):
@@ -238,7 +228,6 @@ async def _ocr_fails(make_callback_query, ctx, exc) -> MagicMock:
 
 
 class TestV2KeepImageAndButtons:
-    @_xfail("V2", "Vision failure pops pending_fallback_pdf and deletes the temp file")
     async def test_vision_failure_keeps_state_and_file(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -248,7 +237,6 @@ class TestV2KeepImageAndButtons:
         assert mock_context.user_data.get("pending_fallback_pdf", {}).get("temp_path") == str(img)
         assert img.exists()
 
-    @_xfail("V2", "Vision failure edits the message without any keyboard")
     async def test_vision_failure_shows_fallback_keyboard(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -258,7 +246,6 @@ class TestV2KeepImageAndButtons:
         data = _callback_data(_last_markup(update.callback_query))
         assert {CB_VISION, CB_OCR, CB_EXTRACTION_CANCEL} <= data
 
-    @_xfail("V2", "OCR failure pops pending_fallback_pdf and deletes the temp file")
     async def test_ocr_failure_keeps_state_and_file(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -268,7 +255,6 @@ class TestV2KeepImageAndButtons:
         assert mock_context.user_data.get("pending_fallback_pdf", {}).get("temp_path") == str(img)
         assert img.exists()
 
-    @_xfail("V2", "OCR failure edits the message without any keyboard")
     async def test_ocr_failure_shows_fallback_keyboard_with_ocr(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -278,7 +264,6 @@ class TestV2KeepImageAndButtons:
         data = _callback_data(_last_markup(update.callback_query))
         assert {CB_VISION, CB_OCR, CB_EXTRACTION_CANCEL} <= data
 
-    @_xfail("V2", "scanned-PDF Vision failure pops the state and deletes the temp file")
     async def test_scanned_pdf_vision_failure_keeps_state_and_buttons(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -297,7 +282,6 @@ class TestV2KeepImageAndButtons:
         data = _callback_data(_last_markup(update.callback_query))
         assert {CB_VISION, CB_OCR, CB_EXTRACTION_CANCEL} <= data
 
-    @_xfail("V2", "after a failure the image is gone, a second tap finds nothing")
     async def test_second_vision_tap_retries_with_same_file(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -317,7 +301,6 @@ class TestV2KeepImageAndButtons:
         assert transcript and transcript["text"] == "Texto recuperado"
         assert "pending_fallback_pdf" not in mock_context.user_data
 
-    @_xfail("V2", "no retry, so no 'reintentando' status edit")
     async def test_status_says_retrying_while_vision_retries(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -409,7 +392,6 @@ def _assert_logged_with_traceback(caplog) -> None:
 class TestV3NoRawErrors:
     # --- callbacks: Vision (both branches), OCR, duplicate-doc processing ---
 
-    @_xfail("V3", "Vision error prints str(e) and logs without traceback")
     async def test_vision_error_is_clean(
         self, make_callback_query, mock_context, tmp_path, caplog
     ) -> None:
@@ -421,7 +403,6 @@ class TestV3NoRawErrors:
         _assert_clean(_all_sent_texts(q.edit_message_text, q.message.reply_text))
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "Vision-from-OCR error prints str(e) and logs without traceback")
     async def test_vision_from_ocr_error_is_clean(
         self, make_callback_query, mock_context, tmp_path, caplog
     ) -> None:
@@ -438,7 +419,6 @@ class TestV3NoRawErrors:
         _assert_clean(_all_sent_texts(q.edit_message_text, q.message.reply_text))
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "Vision 503 message is the raw API error, not 'saturado/no disponible'")
     async def test_vision_503_message_says_saturated(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -451,7 +431,6 @@ class TestV3NoRawErrors:
         assert "saturad" in final.lower() or "no está disponible" in final.lower(), final
         assert "{'error'" not in final and "UNAVAILABLE" not in final, final
 
-    @_xfail("V3", "Vision-from-OCR 503 message is the raw API error")
     async def test_vision_from_ocr_503_message_says_saturated(
         self, make_callback_query, mock_context, tmp_path
     ) -> None:
@@ -468,7 +447,6 @@ class TestV3NoRawErrors:
         assert "saturad" in final.lower() or "no está disponible" in final.lower(), final
         assert "UNAVAILABLE" not in final, final
 
-    @_xfail("V3", "OCR error prints str(e) and logs without traceback")
     async def test_ocr_error_is_clean(
         self, make_callback_query, mock_context, tmp_path, caplog
     ) -> None:
@@ -480,7 +458,6 @@ class TestV3NoRawErrors:
         _assert_clean(_all_sent_texts(q.edit_message_text, q.message.reply_text))
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "duplicate-doc processing error prints str(e)")
     async def test_doc_create_anyway_error_is_clean(
         self, make_callback_query, mock_context, tmp_path, caplog
     ) -> None:
@@ -504,7 +481,6 @@ class TestV3NoRawErrors:
 
     # --- input.py sites ---
 
-    @_xfail("V3", "transcription error prints str(e)")
     @AUTH
     async def test_transcription_error_is_clean(
         self, make_update, mock_context, tmp_path, caplog
@@ -527,7 +503,6 @@ class TestV3NoRawErrors:
         _assert_clean(sent)
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "text-file read error prints str(e)")
     async def test_text_file_read_error_is_clean(
         self, make_update, mock_context, tmp_path, caplog
     ) -> None:
@@ -546,7 +521,6 @@ class TestV3NoRawErrors:
         _assert_clean(sent)
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "document processing error prints str(e)")
     @AUTH
     async def test_document_error_is_clean(
         self, make_update, mock_context, tmp_path, caplog
@@ -574,7 +548,6 @@ class TestV3NoRawErrors:
         _assert_clean(sent)
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "image options error prints str(e)")
     @AUTH
     async def test_image_error_is_clean(
         self, make_update, mock_context, tmp_path, caplog
@@ -600,7 +573,6 @@ class TestV3NoRawErrors:
         _assert_clean(sent)
         _assert_logged_with_traceback(caplog)
 
-    @_xfail("V3", "PDF extraction error prints str(e)")
     @AUTH
     async def test_pdf_extraction_error_is_clean(
         self, make_callback_query, mock_context, tmp_path, caplog
@@ -656,7 +628,6 @@ def _unescape(s: str) -> str:
 
 
 class TestR1BracketsInReportLinks:
-    @_xfail("R1", "brackets in the title are not escaped in the link text")
     def test_note_line_escapes_brackets(self, tmp_path) -> None:
         from adso.reporters import _note_line
 
@@ -666,7 +637,6 @@ class TestR1BracketsInReportLinks:
             r"- [\[Sin clasificar\] Lácteos](obsidian://open?vault=ADSO&file=00-Inbox/n)"
         )
 
-    @_xfail("R1", "brackets in the title break the markdown link")
     def test_note_line_is_one_well_formed_link(self, tmp_path) -> None:
         from adso.reporters import _note_line
 
@@ -676,7 +646,6 @@ class TestR1BracketsInReportLinks:
         assert m, line
         assert _unescape(m.group(1)) == title
 
-    @_xfail("R1", "brackets in the title are not escaped in the block heading")
     def test_note_block_heading_escapes_brackets(self, tmp_path) -> None:
         from adso.reporters import _note_block
 

@@ -334,6 +334,15 @@ async def _llm_synthesis(
         return None
 
 
+def _link_text(title: object) -> str:
+    """Escapa los corchetes del título para usarlo como texto de un link Markdown.
+
+    Un título como ``[Sin clasificar] X`` (el de toda nota degradada) abría el
+    link con ``[[``, que Obsidian lee como wikilink: la línea se rompía.
+    """
+    return str(title).replace("[", r"\[").replace("]", r"\]")
+
+
 def _note_line(
     vault_path: Path, note: NoteData, extra: str = "", vault_name: Optional[str] = None
 ) -> str:
@@ -348,7 +357,7 @@ def _note_line(
     Returns:
         Línea Markdown formateada.
     """
-    title = note.frontmatter.get("title") or note.path.stem
+    title = _link_text(note.frontmatter.get("title") or note.path.stem)
     link = _obsidian_link(vault_path, note.path, vault_name)
     base = f"- [{title}]({link})"
     if extra:
@@ -372,7 +381,7 @@ def _note_block(
     Returns:
         Bloque Markdown con título como heading, metadata y cuerpo de la nota.
     """
-    title = note.frontmatter.get("title") or note.path.stem
+    title = _link_text(note.frontmatter.get("title") or note.path.stem)
     link = _obsidian_link(vault_path, note.path, vault_name)
     parts = [f"#### [{title}]({link})"]
     if extra:

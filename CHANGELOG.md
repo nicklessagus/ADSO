@@ -7,6 +7,15 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/). Dates are 
 
 ## [Unreleased]
 
+Lote 6 (`tests/unit/test_lote6.py`), disparado por un pico de `503 UNAVAILABLE` de Gemini Vision en producción el 2026-09-22.
+
+### Fixed
+
+- **Gemini Vision reintenta los errores transitorios.** Un 503 "high demand", un 5xx o un timeout de red se reintentan hasta 3 veces (esperas de 2 y 5 s), con aviso "reintentando (N/3)" en el mensaje. Antes se rendía al primer intento. Un 429 de cuota no se reintenta
+- **Un fallo de OCR o Vision ya no tira la imagen:** el estado y el temporal se conservan y vuelven los botones [OCR] / [Gemini Vision] / [Describir] / [Cancelar]. Antes había que reenviar la imagen
+- **Los errores ya no muestran la excepción cruda en el chat** (ítem 4.6): transcripción, lectura de archivo, documento, imagen, extracción de PDF, documento duplicado, OCR y Vision dan un mensaje legible y el detalle va al log con traceback
+- **Los títulos con corchetes no rompen los links de los reportes:** `[Sin clasificar] X` abría el link con `[[`, que Obsidian lee como wikilink. Ahora los corchetes se escapan
+
 ---
 
 ## [1.10.0] — 2026-09-22

@@ -341,7 +341,6 @@ class TestE3ErrorEnOcrNoBloquea:
     una acción pendiente" cuando ya no había botones. Única salida: `/reset`,
     que borra el temporal — había que reenviar la imagen."""
 
-    @pytest.mark.xfail(strict=True, reason="LOTE6 V2: el error de OCR descarta la imagen en vez de reponer los botones")
     @pytest.mark.asyncio
     async def test_error_en_ocr_no_deja_estado_sin_botones(self, mock_context, tmp_path: Path) -> None:
         """Invariante de E3 (sin callejón sin salida), con el contrato del lote 6

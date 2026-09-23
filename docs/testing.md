@@ -95,6 +95,7 @@ tests/
 │   ├── test_lote5_ab.py               # lote 5 (auditoría 2026-09-22), captura y medios: fechas "a la mañana"/"de la tarde" (A1/A7), tipo en modo degradado (A3), prefijos de corrección (A4), botones de previews viejos (A5), un solo answer por callback (B1), estado ante fallos (B2), encoding y keywords (B4/B5)
 │   ├── test_lote5_cd.py               # lote 5, vault y LLM: notas no-UTF8 (C1), copias de conflicto (C2), prefijo de fecha del archivo (C4), links y tags (C5-C8), sección del LLM (D1), gestión sin descripción (D2), normalización del payload (D3-D5, D8), patrones de inyección (D6/D7/F7)
 │   ├── test_lote5_ef.py               # lote 5, índice, reportes y bootstrap: metadata del reindex (E1), `vault.obsidian_name` (E2), fechas de reportes (E3), identidad por carpeta (E4), chat del reporte (E5), comandos editados (F1), aviso en /clasificar (F2), duplicados de proyecto (F3), bools de config (F4), watchdog (F5), /reset (F6)
+│   ├── test_lote6.py                  # lote 6: reintentos de Gemini Vision (V1), estado y botones conservados tras un fallo de OCR/Vision (V2), errores sin excepción cruda en el chat (V3), corchetes en los links de reportes (R1)
 │   └── test_suite_hygiene.py      # markers por directorio (guard de G15)
 ├── integration/
 │   ├── test_capture_flow.py       # LLM mock → vault_writer → archivo en disco
@@ -601,7 +602,7 @@ ese es el momento de excluirlo por marker (y de actualizar esta sección).
 
 ## Guards globales (`conftest.py`)
 
-Dos fixtures **autouse**, o sea que se aplican a los 1545 tests sin que ninguno
+Dos fixtures **autouse**, o sea que se aplican a los 1586 tests sin que ninguno
 las pida.
 
 `_sin_red` parchea `socket.socket.connect` y `socket.create_connection`, y lanza
@@ -774,5 +775,5 @@ Si el prompt al LLM cambia significativamente, regenerar las fixtures afectadas.
 - Los tests de filesystem usan `tmp_path` de pytest — se limpian automáticamente.
 - `tests/helpers.py` tiene `write_note(path, body, **frontmatter)`, el único escritor de notas de prueba (antes había cinco copias en distintos archivos). Con `defaults=False` no completa `title`/`type`/`status`.
 - ChromaDB en tests usa un directorio temporal — no contamina la DB de producción.
-- La suite completa (unit + integration + e2e) corre en ~52 segundos en la RPi4 de desarrollo (~92 con `--cov`), y es exactamente lo que corre CI. Son 1545 tests: 1358 unit, 44 integration, 143 e2e.
+- La suite completa (unit + integration + e2e) corre en ~52 segundos en la RPi4 de desarrollo (~92 con `--cov`), y es exactamente lo que corre CI. Son 1586 tests: 1399 unit, 44 integration, 143 e2e.
 - **Test-first es obligatorio** (`CLAUDE.md` § Validación de código): el test se escribe antes que el código. Un cambio que llega sin test se devuelve.

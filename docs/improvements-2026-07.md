@@ -408,7 +408,7 @@ la revisión encontró qué unificar exactamente:
 
 ### 4.6 Errores crudos al chat
 
-- **Estado:** confirmado, **sigue pendiente** (re-verificado 2026-09-18) · **Impacto:** medio (fuga de detalles internos) · **Esfuerzo:** bajo · **Decisión:** pendiente
+- **Estado:** ✅ implementado (lote 6, 2026-09-22): mensaje genérico al chat y `logger.exception` en los seis sitios más `_cb_ocr` y `_cb_vision`; tests en `tests/unit/test_lote6.py::TestV3NoRawErrors` · **Impacto:** medio (fuga de detalles internos) · **Esfuerzo:** bajo
 - **Problema:** varios `reply_text(f"Error…: {e}")` vuelcan la excepción cruda (paths, detalles
   de API) al usuario.
 - **Sitios vivos hoy** (las referencias de julio quedaron desfasadas por el split de `bot.py`;

@@ -470,15 +470,15 @@ async def handle_audio(
         )
         context.user_data["pending_transcript"]["msg_id"] = sent.message_id
 
-    except Exception as e:
+    except Exception:
         # `pending_transcript` se setea antes del reply que muestra la
         # transcripción; si ese reply falla, el estado quedaba apuntando a un
         # temporal que este mismo except borra — todo bloqueado hasta `/reset`,
         # y un `[Confirmar]` de un teclado fantasma leería un path inexistente.
         # E9 de docs/audit-2026-07-31.md.
-        logger.error("Error transcribiendo audio: %s", e)
+        logger.exception("Error transcribiendo audio")
         context.user_data.pop("pending_transcript", None)
-        await msg.reply_text(f"Error al transcribir: {e}")
+        await msg.reply_text("No se pudo transcribir el audio. Reenviarlo para reintentar.")
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
@@ -662,9 +662,9 @@ async def _dispatch_document(
                 raise
             return True
 
-        except Exception as e:
-            logger.error("Error leyendo archivo de texto: %s", e)
-            await msg.reply_text(f"Error leyendo archivo: {e}")
+        except Exception:
+            logger.exception("Error leyendo archivo de texto")
+            await msg.reply_text("No se pudo leer el archivo.")
             return False
 
     context.user_data["pending_description"] = {
@@ -758,9 +758,9 @@ async def handle_document(
         transferred = await _dispatch_document(
             msg, context, tmp_path, filename, caption, doc.mime_type
         )
-    except Exception as e:
-        logger.error("Error procesando documento: %s", e)
-        await msg.reply_text(f"Error al procesar documento: {e}")
+    except Exception:
+        logger.exception("Error procesando documento")
+        await msg.reply_text("No se pudo procesar el documento.")
     finally:
         if tmp_path is not None and not transferred:
             tmp_path.unlink(missing_ok=True)
@@ -808,16 +808,16 @@ async def handle_photo(
             "Imagen recibida. ¿Cómo extraer el contenido?",
             reply_markup=build_fallback_pdf_keyboard(),
         )
-    except Exception as e:
+    except Exception:
         # Este reply no estaba dentro de ningún `try`: la excepción escapaba del
         # handler con `pending_fallback_pdf` ya seteado (todo input posterior
         # rechazado hasta `/reset`) y el temporal huérfano en /tmp, que en la
         # RPi4 es tmpfs. Ver E9 en `handle_audio`.
-        logger.error("Error mostrando opciones de imagen: %s", e)
+        logger.exception("Error mostrando opciones de imagen")
         context.user_data.pop("pending_fallback_pdf", None)
         tmp_path.unlink(missing_ok=True)
         try:
-            await msg.reply_text(f"Error al procesar la imagen: {e}")
+            await msg.reply_text("No se pudo procesar la imagen. Reenviarla para reintentar.")
         except Exception:
             pass  # la red sigue caída; el log ya lo registró
 
@@ -917,8 +917,8 @@ async def _process_pdf_after_read_status(
             parse_mode="HTML",
         )
 
-    except Exception as e:
-        logger.error("Error extrayendo PDF: %s", e)
+    except Exception:
+        logger.exception("Error extrayendo PDF")
         # Si lo que falló fue el edit del preview, el estado ya está seteado y
         # apunta al temporal que este mismo `except` borra: quedaba un
         # `pending_extraction` con `_has_pending_keyboard` en True, sin botones,
@@ -927,7 +927,7 @@ async def _process_pdf_after_read_status(
         context.user_data.pop("pending_extraction", None)
         context.user_data.pop("pending_fallback_pdf", None)
         try:
-            await query.edit_message_text(f"Error extrayendo PDF: {e}")
+            await query.edit_message_text("No se pudo extraer el texto del PDF.")
         except Exception:
             pass  # la red sigue caída; el log ya lo registró
         tmp_path.unlink(missing_ok=True)

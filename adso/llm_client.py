@@ -942,10 +942,25 @@ _VISION_PROMPT_PDF = (
 )
 
 
+# Esperas antes del 2.º y 3.º intento de Vision ante un error transitorio. El
+# 503 "high demand" del free tier suele resolverse en segundos: sin reintento,
+# el usuario tenía que reenviar la imagen a mano una y otra vez (lote 6, V1).
+VISION_RETRY_DELAYS = [2, 5]
+
+
+def _is_transient_vision_error(e: Exception) -> bool:
+    """True para errores que vale la pena reintentar: 5xx del servidor o red."""
+    import httpx
+    from google.genai import errors as genai_errors
+
+    return isinstance(e, (genai_errors.ServerError, httpx.TimeoutException, httpx.TransportError))
+
+
 async def describe_image_with_vision(
     images: list[tuple[bytes, str]],
     prompt: str = _VISION_PROMPT_IMAGE,
     model: Optional[str] = None,
+    on_retry: Optional[Callable[[int, int], Coroutine[Any, Any, None]]] = None,
 ) -> str:
     """Describe una o más imágenes usando Gemini Vision.
 
@@ -954,12 +969,18 @@ async def describe_image_with_vision(
         prompt: Instrucción para el modelo.
         model: Modelo a usar. Default ``GEMINI_VISION_MODEL``, distinto del de
             clasificación para no compartir la quota de free tier (ver config.py).
+        on_retry: Callback async ``(intento, max_intentos)`` antes de cada
+            reintento (para avisar al usuario). Si lanza, se ignora.
 
     Returns:
         Texto extraído o descripción generada.
 
     Raises:
-        RuntimeError: Si la API falla o devuelve respuesta vacía.
+        Exception: La última excepción si un error transitorio (5xx, timeout o
+            error de red) persiste tras ``len(VISION_RETRY_DELAYS) + 1``
+            intentos; cualquier otro error (4xx, incluido el 429 de cuota) se
+            propaga sin reintentar.
+        RuntimeError: Si la API devuelve respuesta vacía (no se reintenta).
     """
     from google.genai import types
 
@@ -971,11 +992,25 @@ async def describe_image_with_vision(
     ]
     contents.append(prompt)
 
-    response = await asyncio.to_thread(
-        client.models.generate_content,
-        model=model or GEMINI_VISION_MODEL,
-        contents=contents,
-    )
+    max_attempts = len(VISION_RETRY_DELAYS) + 1
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model or GEMINI_VISION_MODEL,
+                contents=contents,
+            )
+            break
+        except Exception as e:
+            if attempt == max_attempts or not _is_transient_vision_error(e):
+                raise
+            logger.warning("Gemini Vision falló (intento %d/%d): %s", attempt, max_attempts, e)
+            if on_retry:
+                try:
+                    await on_retry(attempt + 1, max_attempts)
+                except Exception as cb_err:
+                    logger.warning("on_retry falló (no bloqueante): %s", cb_err)
+            await asyncio.sleep(VISION_RETRY_DELAYS[attempt - 1])
 
     if not response.text:
         raise RuntimeError("Gemini Vision returned empty response")
