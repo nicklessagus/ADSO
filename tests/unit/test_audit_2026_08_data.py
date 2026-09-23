@@ -435,19 +435,25 @@ class TestB7IndiceDeNotasConStemsRepetidos:
 
 
 class TestB8DescriptionVacia:
+    # Contrato reemplazado por el lote 5 (D2, decisión del árbitro): el
+    # validador exige solo `name`. Rechazar la descripción mandaba toda la
+    # creación por texto libre a modo degradado (el schema de Gemini la declara
+    # nullable) y tiraba un nombre bueno; la descripción faltante la pide el bot
+    # aguas abajo (`manage.py`, G10), que es donde B8 queda cubierto.
+
+    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description vacía")
     @pytest.mark.parametrize("vacia", ["", "   ", "\n\t "])
     @pytest.mark.parametrize("operation", ["create_project", "create_area"])
-    def test_description_vacia_se_rechaza(self, operation: str, vacia: str) -> None:
-        with pytest.raises(LLMResponseError):
-            _validate_manage_payload(
-                {"operation": operation, "params": {"name": "tesis", "description": vacia}}
-            )
+    def test_description_vacia_se_acepta(self, operation: str, vacia: str) -> None:
+        _validate_manage_payload(
+            {"operation": operation, "params": {"name": "tesis", "description": vacia}}
+        )
 
-    def test_description_null_se_rechaza(self) -> None:
-        with pytest.raises(LLMResponseError):
-            _validate_manage_payload(
-                {"operation": "create_project", "params": {"name": "tesis", "description": None}}
-            )
+    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description null")
+    def test_description_null_se_acepta(self) -> None:
+        _validate_manage_payload(
+            {"operation": "create_project", "params": {"name": "tesis", "description": None}}
+        )
 
     def test_description_real_pasa(self) -> None:
         """Contra-caso: una descripción con contenido no debe rechazarse."""
@@ -458,7 +464,13 @@ class TestB8DescriptionVacia:
             }
         )
 
-    def test_description_ausente_sigue_rechazandose(self) -> None:
-        """Contra-caso: el guard que sí funciona hoy."""
+    @pytest.mark.xfail(strict=True, reason="LOTE5 D2: el validador rechaza description ausente")
+    def test_description_ausente_se_acepta(self) -> None:
+        _validate_manage_payload({"operation": "create_project", "params": {"name": "tesis"}})
+
+    def test_name_ausente_sigue_rechazandose(self) -> None:
+        """Contra-caso: el nombre sigue siendo obligatorio."""
         with pytest.raises(LLMResponseError):
-            _validate_manage_payload({"operation": "create_project", "params": {"name": "tesis"}})
+            _validate_manage_payload(
+                {"operation": "create_project", "params": {"description": "d"}}
+            )

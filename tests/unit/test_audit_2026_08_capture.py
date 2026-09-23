@@ -616,8 +616,16 @@ class TestC10IndexConCampoVacio:
         etiquetas = [btn.text for fila in teclado.inline_keyboard for btn in fila]
         assert "Tesis" in etiquetas
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="LOTE5 E4: folder name is the project identity; the index field no longer overrides it",
+    )
     async def test_index_bien_formado_sigue_andando(self, vault_path: Path) -> None:
-        """Contra-caso: con `project:` poblado el nombre del índice manda."""
+        """Con `project:` poblado el nombre sigue siendo el de la carpeta (lote 5, E4).
+
+        Antes el nombre del índice mandaba; se reemplazó ese contrato porque el
+        nombre es lo que direcciona la carpeta en disco (reportes, ruteo).
+        """
         from adso import vault_cache
         from adso.bot_utils import _get_existing_items
 
@@ -630,7 +638,7 @@ class TestC10IndexConCampoVacio:
         )
 
         projects, _ = await _get_existing_items(vault_path)
-        assert projects[0]["name"] == "Tesis doctoral"
+        assert projects[0]["name"] == "tesis"
 
 
 # ---------------------------------------------------------------------------

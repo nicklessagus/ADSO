@@ -358,11 +358,22 @@ class TestCanonicalizacionDeDestino:
     def test_un_proyecto_existente_se_canoniza(self) -> None:
         from adso.llm_client import canonicalize_destination
 
+        fm = {"title": "n", "type": "reference", "project": "  Tesis "}
+        canonicalize_destination(fm, _PROYECTOS, _AREAS)
+
+        assert fm["project"] == "tesis"
+
+    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: sin vault_path la section del LLM sobrevive")
+    def test_un_proyecto_existente_se_canoniza_y_la_seccion_sin_vault_se_descarta(self) -> None:
+        """Contrato lote 5 (D1): sin `vault_path` no hay cómo verificar que la
+        sección exista, así que se descarta — el LLM no puede crear carpetas."""
+        from adso.llm_client import canonicalize_destination
+
         fm = {"title": "n", "type": "reference", "project": "  Tesis ", "section": "experimentos"}
         canonicalize_destination(fm, _PROYECTOS, _AREAS)
 
         assert fm["project"] == "tesis"
-        assert fm["section"] == "experimentos"
+        assert "section" not in fm
 
     def test_un_proyecto_inventado_se_descarta_con_su_seccion(self, caplog) -> None:
         from adso.llm_client import canonicalize_destination
@@ -404,12 +415,24 @@ class TestCanonicalizacionDeDestino:
         assert "project" not in fm
         assert "area" not in fm
 
-    def test_un_proyecto_exacto_sobrevive_con_su_seccion(self) -> None:
-        """Contra-caso F4."""
+    def test_un_proyecto_exacto_sobrevive(self) -> None:
+        """Contra-caso F4 (el proyecto; la sección pasó a D1 del lote 5)."""
         from adso.llm_client import canonicalize_destination
 
-        fm = {"title": "n", "type": "reference", "project": "tesis", "section": "experimentos"}
+        fm = {"title": "n", "type": "reference", "project": "tesis"}
         canonicalize_destination(fm, _PROYECTOS, _AREAS)
+
+        assert fm["project"] == "tesis"
+
+    @pytest.mark.xfail(strict=True, reason="LOTE5 D1: la section del LLM sobrevive aunque no exista la carpeta")
+    def test_un_proyecto_exacto_sobrevive_con_su_seccion_solo_si_existe(self, tmp_path: Path) -> None:
+        """Contra-caso F4 reescrito al contrato del lote 5 (D1): la sección
+        sobrevive solo si la carpeta existe, con el nombre exacto de disco."""
+        from adso.llm_client import canonicalize_destination
+
+        (tmp_path / "01-Projects" / "tesis" / "experimentos").mkdir(parents=True)
+        fm = {"title": "n", "type": "reference", "project": "tesis", "section": "experimentos"}
+        canonicalize_destination(fm, _PROYECTOS, _AREAS, vault_path=tmp_path)
 
         assert fm["project"] == "tesis"
         assert fm["section"] == "experimentos"
