@@ -13,6 +13,7 @@ import asyncio
 import logging
 import urllib.parse
 from datetime import date, datetime
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -115,7 +116,16 @@ def _parse_fm_date(val) -> Optional[datetime]:
         val = val.strip()
         if not val:
             return None
-        # Intentar varios formatos
+        # `fromisoformat` (3.11+) cubre las variantes ISO 8601 que
+        # `strptime` de abajo no soportaba: sin segundos ("...T10:00"),
+        # fracciones de segundo de cualquier longitud y offsets — una nota
+        # editada a mano con `due_date: 2020-01-01T10:00` quedaba fuera de
+        # "Tareas vencidas" (LOTE5 E3).
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            pass
+        # Formatos legacy que `fromisoformat` no cubre (compat con datos viejos).
         for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
             try:
                 return datetime.strptime(val, fmt)
@@ -146,20 +156,29 @@ def _normalize_authors(authors) -> list[str]:
     return []
 
 
-def _obsidian_link(vault_path: Path, note_path: Path) -> str:
+def _obsidian_link(
+    vault_path: Path, note_path: Path, vault_name: Optional[str] = None
+) -> str:
     """Genera un link obsidian:// para abrir una nota directamente.
 
     Args:
         vault_path: Raíz del vault.
         note_path: Path absoluto a la nota.
+        vault_name: Nombre del vault tal como está registrado en Obsidian
+            (`vault.obsidian_name` en `config.yaml`). El nombre del directorio
+            no siempre coincide —Obsidian identifica el vault por el nombre
+            elegido al abrirlo, no por la carpeta—, así que sin este override
+            el link fallaba en silencio. Vacío o solo espacios cuenta como no
+            seteado (LOTE5 E2).
 
     Returns:
         String con el link obsidian://.
     """
-    vault_name = urllib.parse.quote(vault_path.name)
+    name = (vault_name or "").strip() or vault_path.name
+    name_encoded = urllib.parse.quote(name)
     rel = str(note_path.relative_to(vault_path).with_suffix(""))
     file_encoded = urllib.parse.quote(rel, safe="/")
-    return f"obsidian://open?vault={vault_name}&file={file_encoded}"
+    return f"obsidian://open?vault={name_encoded}&file={file_encoded}"
 
 
 def _report_header(title: str, today: Optional[date] = None, full: bool = False) -> str:
@@ -315,26 +334,31 @@ async def _llm_synthesis(
         return None
 
 
-def _note_line(vault_path: Path, note: NoteData, extra: str = "") -> str:
+def _note_line(
+    vault_path: Path, note: NoteData, extra: str = "", vault_name: Optional[str] = None
+) -> str:
     """Genera una línea de referencia a una nota con link obsidian://.
 
     Args:
         vault_path: Raíz del vault.
         note: NoteData de la nota.
         extra: Información adicional (status, priority, etc.).
+        vault_name: Nombre configurado del vault en Obsidian (ver `_obsidian_link`).
 
     Returns:
         Línea Markdown formateada.
     """
     title = note.frontmatter.get("title") or note.path.stem
-    link = _obsidian_link(vault_path, note.path)
+    link = _obsidian_link(vault_path, note.path, vault_name)
     base = f"- [{title}]({link})"
     if extra:
         base += f" — {extra}"
     return base
 
 
-def _note_block(vault_path: Path, note: NoteData, extra: str = "") -> str:
+def _note_block(
+    vault_path: Path, note: NoteData, extra: str = "", vault_name: Optional[str] = None
+) -> str:
     """Genera un bloque completo de una nota con título, link, metadata y cuerpo.
 
     Usado en reportes full para mostrar el contenido completo de cada nota.
@@ -343,12 +367,13 @@ def _note_block(vault_path: Path, note: NoteData, extra: str = "") -> str:
         vault_path: Raíz del vault.
         note: NoteData de la nota.
         extra: Información adicional (status, priority, etc.).
+        vault_name: Nombre configurado del vault en Obsidian (ver `_obsidian_link`).
 
     Returns:
         Bloque Markdown con título como heading, metadata y cuerpo de la nota.
     """
     title = note.frontmatter.get("title") or note.path.stem
-    link = _obsidian_link(vault_path, note.path)
+    link = _obsidian_link(vault_path, note.path, vault_name)
     parts = [f"#### [{title}]({link})"]
     if extra:
         parts.append(f"_{extra}_")
@@ -371,6 +396,7 @@ async def scope_report(
     area: Optional[str] = None,
     inbox: bool = False,
     full: bool = False,
+    vault_name: Optional[str] = None,
 ) -> ReportBytes:
     """Genera un reporte de scope para un proyecto, área o el inbox.
 
@@ -383,6 +409,7 @@ async def scope_report(
         area: Nombre del área (o None).
         inbox: True si el scope es el inbox (00-Inbox/).
         full: True para incluir el cuerpo completo de cada nota.
+        vault_name: Nombre configurado del vault en Obsidian (`_obsidian_link`).
 
     Returns:
         `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
@@ -437,7 +464,7 @@ async def scope_report(
     )
 
     # --- Construir documento ---
-    _render = _note_block if full else _note_line
+    _render = partial(_note_block if full else _note_line, vault_name=vault_name)
     lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
@@ -513,6 +540,7 @@ async def ideas_report(
     project: Optional[str] = None,
     area: Optional[str] = None,
     full: bool = False,
+    vault_name: Optional[str] = None,
 ) -> ReportBytes:
     """Genera un reporte de todas las ideas, opcionalmente filtradas por proyecto/área.
 
@@ -523,6 +551,7 @@ async def ideas_report(
         project: Filtrar por proyecto (o None para todo el vault).
         area: Filtrar por área (o None).
         full: True para incluir el cuerpo completo de cada nota.
+        vault_name: Nombre configurado del vault en Obsidian (`_obsidian_link`).
 
     Returns:
         `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
@@ -547,7 +576,7 @@ async def ideas_report(
     # Sin ideas/papers en el scope no hay nada que sintetizar (#46).
     synthesis = await _llm_synthesis("\n".join(summary_parts)) if all_notes else None
 
-    _render = _note_block if full else _note_line
+    _render = partial(_note_block if full else _note_line, vault_name=vault_name)
     lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:
@@ -586,7 +615,12 @@ async def ideas_report(
 # ---------------------------------------------------------------------------
 
 
-async def health_report(vault_path: Path, stale_days: int = 30, full: bool = False) -> ReportBytes:
+async def health_report(
+    vault_path: Path,
+    stale_days: int = 30,
+    full: bool = False,
+    vault_name: Optional[str] = None,
+) -> ReportBytes:
     """Genera un reporte de salud del vault.
 
     Detecta:
@@ -599,6 +633,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         vault_path: Raíz del vault.
         stale_days: Umbral de inactividad en días (default 30).
         full: True para incluir el cuerpo completo de cada nota.
+        vault_name: Nombre configurado del vault en Obsidian (`_obsidian_link`).
 
     Returns:
         `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
@@ -691,7 +726,7 @@ async def health_report(vault_path: Path, stale_days: int = 30, full: bool = Fal
         else None
     )
 
-    _render = _note_block if full else _note_line
+    _render = partial(_note_block if full else _note_line, vault_name=vault_name)
     title = f"Salud del vault (umbral: {stale_days} días)"
     lines: list[str] = [_report_header(title, full=full)]
 
@@ -768,6 +803,7 @@ async def reading_queue(
     project: Optional[str] = None,
     area: Optional[str] = None,
     full: bool = False,
+    vault_name: Optional[str] = None,
 ) -> ReportBytes:
     """Genera un reporte de la cola de lectura (papers con read_status: unread).
 
@@ -778,6 +814,7 @@ async def reading_queue(
         project: Filtrar por proyecto (o None para todo el vault).
         area: Filtrar por área (o None).
         full: True para incluir el cuerpo completo de cada nota.
+        vault_name: Nombre configurado del vault en Obsidian (`_obsidian_link`).
 
     Returns:
         `ReportBytes` — bytes del .md con `item_count` (cuántas notas del scope
@@ -802,7 +839,7 @@ async def reading_queue(
     # Sin ideas/papers en el scope no hay nada que sintetizar (#46).
     synthesis = await _llm_synthesis("\n".join(summary_parts)) if all_notes else None
 
-    _render = _note_block if full else _note_line
+    _render = partial(_note_block if full else _note_line, vault_name=vault_name)
     lines: list[str] = [_report_header(title, full=full)]
 
     if synthesis:

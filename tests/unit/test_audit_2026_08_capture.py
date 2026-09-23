@@ -616,10 +616,6 @@ class TestC10IndexConCampoVacio:
         etiquetas = [btn.text for fila in teclado.inline_keyboard for btn in fila]
         assert "Tesis" in etiquetas
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="LOTE5 E4: folder name is the project identity; the index field no longer overrides it",
-    )
     async def test_index_bien_formado_sigue_andando(self, vault_path: Path) -> None:
         """Con `project:` poblado el nombre sigue siendo el de la carpeta (lote 5, E4).
 

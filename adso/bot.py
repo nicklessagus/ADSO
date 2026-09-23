@@ -330,14 +330,22 @@ def create_application(settings: Optional[Settings] = None) -> Application:
     app.add_error_handler(_global_error_handler)
 
     # Handlers
-    app.add_handler(CommandHandler("start", handle_start))
-    app.add_handler(CommandHandler("help", handle_help))
-    app.add_handler(CommandHandler("status", handle_status))
-    app.add_handler(CommandHandler("reset", handle_reset))
-    app.add_handler(CommandHandler("clasificar", handle_clasificar))
-    app.add_handler(CommandHandler("buscar", handle_buscar))
-    app.add_handler(CommandHandler("reporte", handle_reporte_command))
-    app.add_handler(CommandHandler("reporte_full", handle_reporte_full_command))
+    # `filters.UpdateType.MESSAGE` en las ocho: `CommandHandler.check_update`
+    # mira `update.effective_message` (message U edited_message), así que sin
+    # esto editar un "/reset" ya mandado (corregir un typo) volvía a disparar
+    # el comando — un `[Cancelar]` fantasma sobre un estado que el usuario creía
+    # cerrado (LOTE5 F1). Editar no es un comando nuevo.
+    app.add_handler(CommandHandler("start", handle_start, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler("help", handle_help, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler("status", handle_status, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler("reset", handle_reset, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler(
+        "clasificar", handle_clasificar, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler("buscar", handle_buscar, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler(
+        "reporte", handle_reporte_command, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(CommandHandler(
+        "reporte_full", handle_reporte_full_command, filters=filters.UpdateType.MESSAGE))
     # `filters.UpdateType.MESSAGE` en las cuatro: los filtros de contenido
     # (TEXT, PHOTO, Document.ALL, VOICE|AUDIO) matchean también un
     # `edited_message`, donde `update.message` es None. Editar un mensaje ya

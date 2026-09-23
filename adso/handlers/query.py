@@ -165,7 +165,9 @@ def _format_inline(result: QueryResult) -> str:
     return "\n".join(lines).strip()
 
 
-def _build_report(result: QueryResult, vault_path) -> bytes:
+def _build_report(
+    result: QueryResult, vault_path, vault_name: Optional[str] = None
+) -> bytes:
     """Construye el informe .md (bytes) con header estándar y links obsidian://."""
     lines = [_report_header(f"Consulta: {result.query}")]
     if result.below_threshold:
@@ -189,7 +191,9 @@ def _build_report(result: QueryResult, vault_path) -> bytes:
             # del cuerpo de la nota aparecía como sección del reporte (#49).
             quoted = "> " + n.snippet.strip().replace("\n", "\n> ")
             lines.append(f"\n{quoted}\n")
-        lines.append(f"- [Abrir en Obsidian]({_obsidian_link(vault_path, n.path)})\n")
+        lines.append(
+            f"- [Abrir en Obsidian]({_obsidian_link(vault_path, n.path, vault_name)})\n"
+        )
     return "\n".join(lines).encode("utf-8")
 
 
@@ -198,7 +202,7 @@ async def _send_report_to(
 ) -> None:
     """Construye el informe .md de una consulta y lo manda como documento a ``chat_id``."""
     settings: Settings = context.bot_data["settings"]
-    doc = io.BytesIO(_build_report(result, settings.vault_path))
+    doc = io.BytesIO(_build_report(result, settings.vault_path, settings.vault.obsidian_name))
     doc.name = "consulta.md"
     await context.bot.send_document(chat_id=chat_id, document=doc, filename="consulta.md")
 

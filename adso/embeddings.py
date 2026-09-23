@@ -469,8 +469,9 @@ class EmbeddingsClient:
 
         stats = {"indexed": 0, "skipped": 0, "removed": 0, "errors": 0}
 
-        # Cargar hashes existentes en una sola llamada batch
+        # Cargar hashes y metadata existentes en una sola llamada batch
         existing_hashes: dict[str, str] = {}
+        existing_metadata: dict[str, dict] = {}
         try:
             existing_docs = await asyncio.to_thread(
                 self._collection.get,
@@ -479,6 +480,7 @@ class EmbeddingsClient:
             for doc_id, meta in zip(
                 existing_docs["ids"], existing_docs["metadatas"] or []
             ):
+                existing_metadata[doc_id] = meta or {}
                 existing_hashes[doc_id] = (meta or {}).get("content_hash", "")
         except Exception as e:
             logger.warning("No se pudo cargar hashes existentes: %s", e)
@@ -530,6 +532,17 @@ class EmbeddingsClient:
                 # Comparar hash para evitar re-embeds innecesarios
                 metadata = build_note_metadata(rel, fm, body)
                 if existing_hashes.get(note_id) == metadata["content_hash"]:
+                    # El cuerpo no cambió, pero el frontmatter puede haberlo
+                    # hecho (ej: un `status` movido a mano en un kanban de
+                    # Obsidian) — un reindex que solo mira el hash del cuerpo
+                    # nunca refrescaba esos campos, y el reporte de salud podía
+                    # seguir mostrando una tarea como "pending" mientras la
+                    # nota ya decía "done" (LOTE5 E1). Se compara serializado
+                    # contra lo guardado en Chroma, que también está
+                    # serializado, para no reescribir cuando no cambió nada.
+                    serialized = _serialize_metadata(metadata)
+                    if existing_metadata.get(note_id) != serialized:
+                        await self.update_metadata(note_id, metadata)
                     stats["skipped"] += 1
                     continue
 

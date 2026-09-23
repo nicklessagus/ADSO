@@ -77,6 +77,13 @@ class VaultSeedConfig:
 @dataclass
 class VaultConfig:
     exclude_dirs: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE_DIRS))
+    # Nombre del vault tal como está registrado en Obsidian. Los links
+    # `obsidian://` de los reportes usan el nombre del directorio si esto no
+    # está seteado — Obsidian identifica un vault por el nombre elegido al
+    # abrirlo por primera vez, no por la carpeta, así que sin este override el
+    # link fallaba en silencio para cualquiera que lo haya abierto con otro
+    # nombre (LOTE5 E2). Vacío/solo espacios cuenta como no seteado.
+    obsidian_name: str | None = None
 
 
 @dataclass
@@ -431,6 +438,14 @@ def _validate_types(settings: Settings) -> None:
         ("rate_limit.enabled", settings.rate_limit.enabled, bool),
         ("rate_limit.burst", settings.rate_limit.burst, int),
         ("rate_limit.refill_seconds", settings.rate_limit.refill_seconds, (int, float)),
+        # YAML sin comillas resuelve `false`/`true` a bool, pero `"false"` entre
+        # comillas es un string truthy — la sección quedaba "encendida" justo
+        # cuando el usuario la apagó (LOTE5 F4).
+        ("reindex.enabled", settings.reindex.enabled, bool),
+        ("backup.enabled", settings.backup.enabled, bool),
+        ("watcher.debug", settings.watcher.debug, bool),
+        ("tasks.debug", settings.tasks.debug, bool),
+        ("weekly_report.enabled", settings.weekly_report.enabled, bool),
     ]
     for name, value, expected in checks:
         if not isinstance(value, expected):
@@ -450,6 +465,13 @@ def _validate_types(settings: Settings) -> None:
         raise ConfigError(
             f"vault.exclude_dirs: se esperaba una lista de strings, "
             f"se obtuvo {exclude_dirs!r}"
+        )
+
+    obsidian_name = settings.vault.obsidian_name
+    if obsidian_name is not None and not isinstance(obsidian_name, str):
+        raise ConfigError(
+            f"vault.obsidian_name: se esperaba string o vacío, "
+            f"se obtuvo {type(obsidian_name).__name__} ({obsidian_name!r})"
         )
 
     # Un bucket de capacidad 0 descarta TODO update y deja el bot mudo sin

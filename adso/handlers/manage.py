@@ -249,9 +249,16 @@ async def _cb_manage_confirm(
     try:
         if operation in ("create_project", "create_area"):
             kind = "project" if operation == "create_project" else "area"
-            folder = "01-Projects" if kind == "project" else "02-Areas"
             label, done = ("proyecto", "creado") if kind == "project" else ("área", "creada")
-            if (vault_path / folder / params["name"]).exists():
+            # Comparación case-insensitive contra los nombres existentes, no un
+            # `.exists()` sobre el nombre crudo: en un filesystem case-sensitive
+            # (ext4, el de la RPi4) "tesis" y "Tesis" son directorios distintos,
+            # así que "tesis"/"TESIS"/" TESIS " creaban un segundo proyecto al
+            # lado del que ya existía (LOTE5 F3).
+            projects, areas = await _get_existing_items(vault_path)
+            existing = projects if kind == "project" else areas
+            existing_names = {item["name"].strip().casefold() for item in existing}
+            if params["name"].strip().casefold() in existing_names:
                 await query.edit_message_text(f"El {label} '{params['name']}' ya existe.")
                 return
             fm, body = build_index_note(kind, params["name"], params["description"])
