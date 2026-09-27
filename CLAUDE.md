@@ -383,8 +383,8 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 
 ## Validación de código
 
-- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`; actual 91%).
-- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (1586 tests) — ningún test toca la red, y desde 2026-09-18 eso lo **hace cumplir** una fixture autouse de `conftest.py` que bloquea todo socket saliente que no sea loopback (#67): antes era una convención, y 14 tests de reportes la violaban en silencio porque `_llm_synthesis` se traga cualquier excepción.
+- Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`).
+- **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa — ningún test toca la red, y desde 2026-09-18 eso lo **hace cumplir** una fixture autouse de `conftest.py` que bloquea todo socket saliente que no sea loopback (#67): antes era una convención, y 14 tests de reportes la violaban en silencio porque `_llm_synthesis` se traga cualquier excepción.
 - `adso/handlers/*` **está en la medición de cobertura**. No volver a ponerlo en el `omit` de `pyproject.toml`: los e2e sí lo ejercitan, y omitirlo hacía que un test nuevo sobre un handler no moviera el gate (I3 en `docs/audit-2026-07-31.md`).
 
 ### Test-first — obligatorio
