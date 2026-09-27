@@ -1438,7 +1438,6 @@ Configuración del lado del cliente, no requiere desarrollo en el bot:
 
 ## Validación de código
 
-- Todo el código generado para este proyecto es validado con **OpenAI Codex** antes de incorporarse al repositorio.
 - Estrategia de testing completa en [`testing.md`](testing.md): unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre módulos de lógica).
 
 ---

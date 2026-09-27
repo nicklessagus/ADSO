@@ -103,3 +103,26 @@ Dos cosas que deja:
 2. **El guard mockeable que sí sirve es un piso duro sobre la constante**, anclado al mensaje de error que reportó el incidente (`test_the_timeout_clears_the_floor_the_api_enforces`). No sustituye al harness: fija el número conocido, no descubre el próximo límite del servidor.
 
 Valor nuevo: `12_000`. No `10_000` clavado, para no depender de cómo redondea el borde el SDK; el costo es 2 s más de espera en un stall.
+
+## Spec → tests → implementación: lo que destaparon los lotes 1 y 2 (2026-08-26)
+
+Por qué existen los pasos 2b y 5 del método de `CLAUDE.md`. En el lote 2, el paso 2b encontró tres requisitos sin test que los verificara (uno de ellos, "la reconciliación corre sin cliente de embeddings", era el escenario donde el fix más falta hacía). En el lote 1 nadie lo auditó y el hueco pasó desapercibido.
+
+Ese recorrido no es redundante con el paso 2b: son dos redes distintas. En el
+lote 1 nadie auditó cobertura —ni el agente ni yo— y quedaron **dos requisitos
+del addendum sin verificar**: que `authors` fuera lista (el test decía
+explícitamente "la spec no fija la forma: se acepta cualquiera", escrito antes
+de que la fijara) y que el whitespace quedara colapsado. La implementación
+resultó correcta en los dos casos, pero eso fue suerte: nada lo exigía. Contar
+tests y ver la suite verde **no** detecta un requisito que ningún test ejecuta.
+
+**Qué destapó en su primera corrida** (lote 1, 2026-08-26), que es la razón de
+mantenerlo: 10 contra-casos pasaban **sin ejecutar nada** (a sus updates les
+faltaba `effective_user` y `@authorized` los descartaba en silencio), y un test
+e2e preexistente pasaba por accidente porque nunca seteaba `doc.mime_type` y el
+`MagicMock` era truthy. Además, tener que *decidir* un contrato ambiguo en vez de
+copiar lo que hacía el código destapó un bug que nadie buscaba (#63).
+
+## Latencia medida de `classify` (RPi4, ago-2026, vault de 86 notas, 40 llamadas medidas)
+
+`classify` tiene un piso de 1,5 s y p50 ~2,2 s, y **no depende del tamaño**: texto corto (228 tok de salida) p50 4,1 s vs texto largo (341 tok) p50 2,0 s, y el tope real de un PDF (3509 chars — `build_classify_content` en `document_extractor.py` recorta un documento genérico de más de 3500 chars a `[:2500] + [-1000:]`) p50 2,69 s. Ningún input legítimo pasa de ~3 s. Lo que sí pasa es que **~20% de las llamadas hacen un stall del lado del servidor**: mismo input, mismos token counts, **una sola** request HTTP con `200 OK` — medidos 5,7 / 6,7 / 10,1 / 19,6 / 34,4 / 35,0 s. No es reintento interno del SDK (verificado con `httpx` en DEBUG) ni rate limit (medido a ~7 RPM contra un límite de 15). Free tier, sin error: no hay nada que arreglar del lado del bot salvo **no esperarlo** — que es lo que hace `CLASSIFY_TIMEOUT_MS` (ver el bullet siguiente). Complementos: scans del vault 0,02-0,41 s, `compute_embedding` 1,2 s, y el setup de conexión es irrelevante (DNS 0,01 s + TCP/TLS 0,11 s + construcción del cliente 0,14 s = 0,26 s). Corolario para optimizar: recortar tokens de salida **no** compra latencia — en particular, que el LLM genere un `body` que para `text`/`audio` se descarta es desperdicio de quota, no de tiempo.

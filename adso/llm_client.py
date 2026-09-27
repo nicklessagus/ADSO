@@ -350,7 +350,7 @@ Today is {today} ({weekday} / {weekday_es}). Use this to resolve relative date e
 - type=reference: information, content, references, papers
 - type=task: actions to perform, pending items
 - type=idea: ideas, exploratory thoughts, or anything that doesn't clearly fit reference or task
-- priority: infer from language (urgent/important=high, normal=medium, low-priority=low). If no signal, use medium for task/idea
+- priority: tasks only — infer from language (urgent/important=high, normal=medium, low-priority=low), medium if no signal; null for reference and idea
 - project/area: assign to the most relevant existing project/area. If none fits, use null
 - tags: kebab-case, always in English. Capture thematic/topical content (methods, domains, concepts). Prefer tags from the existing list when semantically applicable; only create new tags if no existing tag fits. NEVER tag with: note type (paper, reference, task, idea), project name, area name, or any value already expressed by another frontmatter field
 - If the user wants to create or manage projects/areas, use mode=manage
@@ -412,15 +412,8 @@ For any other content (non-paper): free-form Markdown in Spanish. If you include
 Brief summary in Spanish (1-2 sentences, plain text, no callout syntax) | null
 
 ## Manage mode — field semantics:
-- operation: one of: create_project, create_area, create_section, archive_project, unarchive_project, delete_project, delete_area, rename_project, rename_area, convert_idea_to_project
-- params: object with fields depending on the operation:
-  - create_project: {{"name": "...", "description": "..."}}
-  - create_area: {{"name": "...", "description": "..."}}
-  - create_section: {{"project": "...", "name": "..."}}
-  - archive_project / unarchive_project / delete_project: {{"name": "..."}}
-  - delete_area: {{"name": "..."}}
-  - rename_project / rename_area: {{"old_name": "...", "new_name": "..."}}
-  - convert_idea_to_project: {{"note": "...", "project_name": "...", "description": "..."}}
+- operation: "create_project" | "create_area"
+- params: {{"name": "...", "description": "..."}} — name as the user wrote it; description null if none was given
 
 ## REQUIRED output format (always wrap your response in this exact JSON structure):
 {{
@@ -915,14 +908,20 @@ async def _call_gemini(system_prompt: str, user_message: str) -> str:
     if not response.text:
         raise RuntimeError("Gemini returned empty response")
 
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        logger.info(
+            "Gemini tokens: in=%s out=%s",
+            usage.prompt_token_count, usage.candidates_token_count,
+        )
     return response.text
 
 
 _VISION_PROMPT_IMAGE = (
     "Analizá esta imagen y respondé en español con dos partes:\n\n"
-    "1. **Texto visible:** transcribí todo el texto que aparezca en la imagen, "
+    "1. Texto visible: transcribí todo el texto que aparezca en la imagen, "
     "respetando el orden de lectura. Si no hay texto, escribí 'Sin texto'.\n\n"
-    "2. **Descripción visual:** describí el contenido de la imagen — "
+    "2. Descripción visual: describí el contenido de la imagen — "
     "qué muestra, qué tipo de imagen es (foto, captura de pantalla, diagrama, manuscrito, etc.), "
     "contexto relevante y cualquier detalle útil para indexarla y recuperarla después.\n\n"
     "No uses formato markdown ni encabezados adicionales."

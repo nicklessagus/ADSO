@@ -383,7 +383,6 @@ Capacidades exploratorias que dependen de tener un vault maduro con suficientes 
 
 ## Validación de código
 
-- Todo el código generado es validado con **OpenAI Codex** antes de incorporarse al repositorio.
 - Estrategia de testing completa en `docs/testing.md`: unit, integration y e2e con cobertura ≥ 70% (gate de CI sobre todo `adso/` menos el bootstrap `bot.py`/`__main__.py`; actual 91%).
 - **Los markers `integration`/`e2e` se asignan solos** por directorio, en un hook de `tests/conftest.py`. No escribirlos a mano en los tests. CI corre la suite completa (1586 tests) — ningún test toca la red, y desde 2026-09-18 eso lo **hace cumplir** una fixture autouse de `conftest.py` que bloquea todo socket saliente que no sea loopback (#67): antes era una convención, y 14 tests de reportes la violaban en silencio porque `_llm_synthesis` se traga cualquier excepción.
 - `adso/handlers/*` **está en la medición de cobertura**. No volver a ponerlo en el `omit` de `pyproject.toml`: los e2e sí lo ejercitan, y omitirlo hacía que un test nuevo sobre un handler no moviera el gate (I3 en `docs/audit-2026-07-31.md`).
@@ -458,9 +457,7 @@ parecer que se especificó algo cuando no se especificó nada.
 **qué requisitos quedaron sin test que los verifique**. No es opcional: un
 requisito que ningún test ejecuta es un deseo, no un contrato — el implementador
 puede dejar la suite en verde sin cumplirlo, que es justo la fuga que el método
-existe para tapar. En el lote 2 aparecieron tres así (uno de ellos, "la
-reconciliación corre sin cliente de embeddings", era el escenario donde el fix
-más falta hacía). En el lote 1 nadie lo auditó y el hueco pasó desapercibido.
+existe para tapar.
 
 **3. El árbitro contesta las preguntas abiertas** antes de lanzar la
 implementación, en un addendum a la spec. **Si una respuesta crea un requisito
@@ -489,12 +486,7 @@ líneas corrían, la suite verde, y el requisito sin asertar. Por eso el recorri
 se hace leyendo la spec y buscando qué test la ejecuta, nunca al revés —
 arrancando desde las funciones jamás se encuentra un requisito que nadie escribió.
 
-Ese recorrido no es redundante con el paso 2b: son dos redes distintas. En el
-lote 1 nadie auditó cobertura —ni el agente ni yo— y quedaron **dos requisitos
-del addendum sin verificar**: que `authors` fuera lista (el test decía
-explícitamente "la spec no fija la forma: se acepta cualquiera", escrito antes
-de que la fijara) y que el whitespace quedara colapsado. La implementación
-resultó correcta en los dos casos, pero eso fue suerte: nada lo exigía. Contar
+Ese recorrido no es redundante con el paso 2b: son dos redes distintas. Contar
 tests y ver la suite verde **no** detecta un requisito que ningún test ejecuta.
 
 **Quién decide sobre un test que parece mal.** El implementador nunca: tiene
@@ -507,22 +499,15 @@ El árbitro sí puede editar un test, con un límite: solo para **aumentar su
 fidelidad** (arreglar un mock que hacía pasar el test por accidente), nunca para
 debilitar una aserción.
 
-**Qué destapó en su primera corrida** (lote 1, 2026-08-26), que es la razón de
-mantenerlo: 10 contra-casos pasaban **sin ejecutar nada** (a sus updates les
-faltaba `effective_user` y `@authorized` los descartaba en silencio), y un test
-e2e preexistente pasaba por accidente porque nunca seteaba `doc.mime_type` y el
-`MagicMock` era truthy. Además, tener que *decidir* un contrato ambiguo en vez de
-copiar lo que hacía el código destapó un bug que nadie buscaba (#63).
-
 **Qué modelo va en cada rol.** El criterio no es la jerarquía del rol sino
 **dónde hay oráculo**: el modelo fuerte va donde nada verifica automáticamente
 el resultado.
 
 | Rol | Modelo | Por qué |
 |---|---|---|
-| Árbitro (spec, addendum, paso 5) | Opus | Un error suyo se propaga a los dos agentes y nadie lo revisa |
-| Agente de tests (A) | Opus | **Único rol sin oráculo** — un test débil se ve igual que uno bueno: verde |
-| Implementador (B) | Sonnet | Los tests son un oráculo ejecutable; si la caga, la suite se pone roja |
+| Árbitro (spec, addendum, paso 5) | El más capaz disponible | Un error suyo se propaga a los dos agentes y nadie lo revisa |
+| Agente de tests (A) | El más capaz disponible | **Único rol sin oráculo** — un test débil se ve igual que uno bueno: verde |
+| Implementador (B) | Uno de menor costo | Los tests son un oráculo ejecutable; si la caga, la suite se pone roja |
 
 El que sorprende es el agente de tests, porque su trabajo *parece* mecánico. No
 lo es: sus tres tareas críticas son de juicio — resistir la gravedad de mirar el
@@ -537,7 +522,7 @@ el más acorralado — no toca tests, el criterio de éxito es binario, y escala
 vez de decidir. Su única fuga real (aflojar un test para pasarlo) la agarra el
 paso 5 con un `git diff tests/`.
 
-Excepción: subir el implementador a Opus cuando el diff toca **semántica de
+Excepción: subir el implementador al modelo más capaz cuando el diff toca **semántica de
 control de flujo** — reintentos, concurrencia, orden de escritura. Se sube ese
 ítem, no el lote entero.
 
@@ -704,15 +689,15 @@ Políticas e invariantes que restringen cómo se escribe código nuevo. Los post
 
 - **Lock compartido de jobs pesados (`_vault_heavy_lock` en `jobs.py`):** `reclassify_inbox` y `reindex_job` comparten un `asyncio.Lock` — el reindex nocturno espera el lock, la reclasificación saltea la pasada si está tomado. Evita CPU/red concurrente de ambos crons en la RPi4. El reindex además usa `vault_cache.parse_cached` (no relee notas sin cambios desde la SD).
 
-- **Observabilidad de latencia de captura (`Stopwatch` en `bot_utils.py`):** `_classify_and_preview` cronometra `scan` (los dos scans del vault), `classify` y `links`, y emite **una** línea INFO al salir — por *todos* los caminos, incluido el modo degradado y el de excepción (va en un `finally`, porque el camino que más importa medir es justo el que falla), que es justamente el lento (quema el presupuesto de reintentos: 3 intentos para un error de red, 2 más un tiro a Groq para una respuesta inválida). Formato: `Captura (text): scan 0.13s | classify 6.11s | links 1.24s | total 7.48s`. `total` mide desde la construcción del cronómetro, así que `total` >> suma de etapas señala un tramo sin instrumentar. Antes no había ninguna marca de tiempo entre el inicio de la llamada al LLM y el preview: las únicas anclas del log eran la línea que emite el SDK de Gemini al abrir la request y el `Nota creada` de `vault_writer`, que llega *después* de que el usuario confirma y no mide nada del bot. El reloj es inyectable (`clock=`) para tests, misma convención que el `now` de `_parse_date_from_text`. El flujo de arXiv (`_classify_and_preview_arxiv`) todavía **no** está instrumentado.
+- **Observabilidad de latencia de captura (`Stopwatch` en `bot_utils.py`):** `_classify_and_preview` cronometra `scan` (los dos scans del vault), `classify` y `links`, y emite **una** línea INFO al salir — por *todos* los caminos, incluido el modo degradado y el de excepción (va en un `finally`, porque el camino que más importa medir es justo el que falla), que es justamente el lento (quema el presupuesto de reintentos: 3 intentos para un error de red, 2 más un tiro a Groq para una respuesta inválida). Formato: `Captura (text): scan 0.13s | classify 6.11s | links 1.24s | total 7.48s`. `total` mide desde la construcción del cronómetro, así que `total` >> suma de etapas señala un tramo sin instrumentar. Antes no había ninguna marca de tiempo entre el inicio de la llamada al LLM y el preview: las únicas anclas del log eran la línea que emite el SDK de Gemini al abrir la request y el `Nota creada` de `vault_writer`, que llega *después* de que el usuario confirma y no mide nada del bot. El reloj es inyectable (`clock=`) para tests, misma convención que el `now` de `_parse_date_from_text`. El flujo de arXiv (`_classify_and_preview_arxiv`) todavía **no** está instrumentado. `_call_gemini` loguea además los tokens de cada llamada (`Gemini tokens: in=… out=…`, de `usage_metadata`): es la línea base para medir cualquier cambio al prompt.
 
 - **Ruido de log (`logging_setup.py`):** la config de logging vive en su propio módulo, no en `__main__.py`, porque importar `__main__` arranca el bot y la config no se podía testear. Se silencia `apscheduler.executors.default` a WARNING, **no `apscheduler` entero**: el logger del scheduler avisa arranque y `Run time of job was missed`, que es la señal de que el event loop se está bloqueando. Motivo: 2880 de las 3001 líneas de un día (96%) eran las dos INFO por corrida del `heartbeat_job`, y encontrar las ~23 del bot exigía filtrar a mano.
 
-- **Latencia observada (RPi4, ago-2026, vault de 86 notas, 40 llamadas medidas):** `classify` tiene un piso de 1,5 s y p50 ~2,2 s, y **no depende del tamaño**: texto corto (228 tok de salida) p50 4,1 s vs texto largo (341 tok) p50 2,0 s, y el tope real de un PDF (3509 chars — `build_classify_content` en `document_extractor.py` recorta un documento genérico de más de 3500 chars a `[:2500] + [-1000:]`) p50 2,69 s. Ningún input legítimo pasa de ~3 s. Lo que sí pasa es que **~20% de las llamadas hacen un stall del lado del servidor**: mismo input, mismos token counts, **una sola** request HTTP con `200 OK` — medidos 5,7 / 6,7 / 10,1 / 19,6 / 34,4 / 35,0 s. No es reintento interno del SDK (verificado con `httpx` en DEBUG) ni rate limit (medido a ~7 RPM contra un límite de 15). Free tier, sin error: no hay nada que arreglar del lado del bot salvo **no esperarlo** — que es lo que hace `CLASSIFY_TIMEOUT_MS` (ver el bullet siguiente). Complementos: scans del vault 0,02-0,41 s, `compute_embedding` 1,2 s, y el setup de conexión es irrelevante (DNS 0,01 s + TCP/TLS 0,11 s + construcción del cliente 0,14 s = 0,26 s). Corolario para optimizar: recortar tokens de salida **no** compra latencia — en particular, que el LLM genere un `body` que para `text`/`audio` se descarta es desperdicio de quota, no de tiempo.
+- **Latencia de `classify`:** ~20% de las llamadas hacen un stall del servidor (200 OK tras 5-35 s, sin error ni rate limit). No se espera: lo corta `CLASSIFY_TIMEOUT_MS` (bullet siguiente). Recortar tokens de salida no compra latencia; que el LLM genere un `body` que para `text`/`audio` se descarta es desperdicio de quota, no de tiempo. Mediciones en `docs/decisions-log.md`.
 
 - **Timeout por llamada en `classify` (`CLASSIFY_TIMEOUT_MS = 12_000`):** va en el `GenerateContentConfig` de `_call_gemini`, **no en el cliente** — `_get_genai_client()` es compartido con Vision, y rasterizar un PDF escaneado tarda legítimamente mucho más. Tres detalles que rompen todo si se equivocan: `HttpOptions.timeout` está en **milisegundos** (poner `8` aborta cada llamada a los 8 ms y manda toda captura a modo degradado); **la API impone un piso de 10 s** y rechaza cualquier valor menor con `400 INVALID_ARGUMENT` (`Manually set deadline 8s is too short`) *sin llamar al modelo*; y el techo tiene que quedar por debajo de los stalls que el timeout existe para cortar. Un timeout entra por el camino genérico de reintentos (no es rate limit ni respuesta inválida), así que conserva los 3 intentos: como el stall es intermitente, el reintento suele resolver más rápido de lo que hubiera tardado esperarlo. Efecto esperado: un stall de 35 s pasa a ~13 s (aborta a los 12, espera 1, reintenta). Costo: ~10 requests extra por día contra un tope de 1000+ RPD. Tests en `tests/unit/test_classify_timeout.py`.
 
-- **Un cambio en la config de la request se valida contra la API real, no solo con mocks (post-mortem 2026-08-27/28):** `CLASSIFY_TIMEOUT_MS` se deployó en `8_000` y **toda** captura cayó a modo degradado durante un día — la API rechazaba el deadline con un 400 antes de llegar al modelo. Ningún test de unidad podía verlo: el piso vive en el servidor y los mocks aceptan cualquier número (el bound del test era `5_000..30_000`, y 8000 lo cumplía). `scripts/llm_regression.py` sí lo habría agarrado, porque llama a `_call_gemini` de verdad — pero el harness estaba documentado como el paso previo a tocar `GEMINI_MODEL` nada más. Regla ampliada: **correrlo también antes de tocar cualquier parámetro del `GenerateContentConfig`/`HttpOptions`** (timeouts, schema, mime type). El guard mockeable que queda es un piso duro sobre la constante, anclado al mensaje de error que lo reportó.
+- **Un cambio en la config de la request se valida contra la API real:** correr `scripts/llm_regression.py` antes de tocar cualquier parámetro de `GenerateContentConfig`/`HttpOptions` (timeouts, schema, mime type), no solo `GEMINI_MODEL`. Los mocks aceptan valores que la API rechaza, como un deadline menor al piso de 10 s. El guard mockeable es un piso duro sobre la constante. Post-mortem en `docs/decisions-log.md`.
 
 - **Un fallo de OCR/Vision conserva la imagen (lote 6):** el 2026-09-22 Gemini Vision devolvió `503 UNAVAILABLE` ("high demand") seis veces seguidas y cada vez el bot se rendía al primer intento, borraba el temporal y pedía reenviar la imagen. Ahora `describe_image_with_vision` reintenta lo transitorio (el mensaje de estado dice "Gemini Vision saturado, reintentando (N/3)...") y, si igual falla, `_cb_vision`/`_cb_ocr` dejan `pending_fallback_pdf` y su temporal intactos y reponen `build_fallback_pdf_keyboard()`: reintentar es un toque. Ningún mensaje de error del chat lleva `str(e)` —el detalle va al log con `logger.exception`— (ítem 4.6 de `docs/improvements-2026-07.md`). Tests en `tests/unit/test_lote6.py`.
 
@@ -732,3 +717,4 @@ El *porqué* detrás de código que parece innecesariamente defensivo. Leerlo an
 - **Frontmatter editado a mano:** Valores no-string; YAML corrupto.
 - **Medios (`callbacks.py` / `input.py`):** Render de PDFs escaneados fuera del event loop; Preview completo y copiable del texto extraído; Caption de imagen reutilizado como descripción; Límite de tamaño post-descarga.
 - **Estado y errores:** Limpieza del estado de gestión (`pop_manage_state`); Error handler global de PTB.
+- **Método y latencia:** Lo que destaparon los lotes 1 y 2 del método spec → tests; Latencia medida de `classify`; Timeout de `classify` por debajo del piso de la API.
